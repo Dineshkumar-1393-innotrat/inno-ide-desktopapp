@@ -1,0 +1,115 @@
+{
+  "sequenceDiagram": {
+    "title": "Device Manufacturing to Customer Activation Flow",
+    "actors": [
+      {
+        "id": "factory",
+        "name": "Factory System",
+        "type": "system"
+      },
+      {
+        "id": "device",
+        "name": "Dongle / Device",
+        "type": "iot-device"
+      },
+      {
+        "id": "cvip",
+        "name": "CVIP Cloud",
+        "type": "cloud"
+      },
+      {
+        "id": "ca",
+        "name": "Certificate Authority",
+        "type": "security"
+      }
+    ],
+    "messages": [
+      {
+        "step": 1,
+        "from": "factory",
+        "to": "device",
+        "action": "Manufacturing completed and dongle inserted",
+        "stateChange": "Factory"
+      },
+      {
+        "step": 2,
+        "from": "device",
+        "to": "cvip",
+        "action": "Connect using common certificate",
+        "data": [
+          "Common Certificate"
+        ]
+      },
+      {
+        "step": 3,
+        "from": "cvip",
+        "to": "device",
+        "action": "Provide access token",
+        "data": [
+          "Access Token"
+        ]
+      },
+      {
+        "step": 4,
+        "from": "device",
+        "to": "cvip",
+        "action": "Request device certificate creation",
+        "data": [
+          "Access Token",
+          "CVIP Bundle"
+        ]
+      },
+      {
+        "step": 5,
+        "from": "cvip",
+        "to": "ca",
+        "action": "Generate device certificate"
+      },
+      {
+        "step": 6,
+        "from": "ca",
+        "to": "device",
+        "action": "Return device certificate"
+      },
+      {
+        "step": 7,
+        "from": "device",
+        "to": "cvip",
+        "action": "Reconnect using device certificate"
+      },
+      {
+        "step": 8,
+        "from": "cvip",
+        "to": "device",
+        "action": "Device join accepted",
+        "stateChange": "Provisioned"
+      },
+      {
+        "step": 9,
+        "from": "cvip",
+        "to": "device",
+        "action": "Send command to change state to Authorized"
+      },
+      {
+        "step": 10,
+        "from": "device",
+        "to": "cvip",
+        "action": "Acknowledge authorization",
+        "stateChange": "Authorized"
+      },
+      {
+        "step": 11,
+        "from": "cvip",
+        "to": "device",
+        "action": "Initiate customer ownership transfer"
+      },
+      {
+        "step": 12,
+        "from": "device",
+        "to": "cvip",
+        "action": "Confirm customer activation",
+        "stateChange": "Customer"
+      }
+    ]
+  }
+}

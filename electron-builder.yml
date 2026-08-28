@@ -1,0 +1,25 @@
+appId: com.innotrat.innoviewide
+productName: InnoView IDE
+copyright: Copyright © 2026 Innotrat Labs
+electronDist: node_modules/electron/dist
+npmRebuild: false
+asar: true
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - node_modules/**/*
+  - package.json
+
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+
+portable:
+  artifactName: InnoViewIDE-Portable-${version}.exe

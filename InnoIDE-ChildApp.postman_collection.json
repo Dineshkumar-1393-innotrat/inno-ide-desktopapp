@@ -1,0 +1,138 @@
+{
+  "info": {
+    "name": "InnoIDE - Child App (Zip Upload & Run)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5004" },
+    { "key": "userId", "value": "" },
+    { "key": "projectName", "value": "MyTestApp" },
+    { "key": "rootFolderId", "value": "" },
+    { "key": "subAppName", "value": "_root" , "description": "Set to '_root' if your zip is a single project, or to a detected sub-app name (e.g. \"frontend\", \"backend\") if your zip bundles multiple projects." }
+  ],
+  "item": [
+    {
+      "name": "0. Signup (existing, get userId)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/auth/signup",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mobileNumber\": \"9998887771\",\n  \"name\": \"TestUser\",\n  \"countryCode\": \"91\",\n  \"password\": \"Test@1234\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 200 || pm.response.code === 201) {",
+              "  const data = pm.response.json();",
+              "  if (data.userData && data.userData.userId) {",
+              "    pm.collectionVariables.set('userId', data.userData.userId);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "0b. Create root folder (existing, one-time per user)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/fileSystem/createRoot",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"name\": \"root\",\n  \"type\": \"folder\"\n}"
+        }
+      }
+    },
+    {
+      "name": "1. Upload project zip",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/v1/childapp/upload",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "userId", "value": "{{userId}}", "type": "text" },
+            { "key": "projectName", "value": "{{projectName}}", "type": "text" },
+            { "key": "file", "type": "file", "src": [] }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const data = pm.response.json();",
+              "  if (data.data && data.data.rootFolderId) {",
+              "    pm.collectionVariables.set('rootFolderId', data.data.rootFolderId);",
+              "  }",
+              "  if (data.data && data.data.subApps && data.data.subApps.length > 0) {",
+              "    pm.collectionVariables.set('subAppName', data.data.subApps[0]);",
+              "    console.log('Detected sub-apps:', data.data.subApps, '- subAppName variable set to first one:', data.data.subApps[0]);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1b. List detected sub-apps",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/childapp/{{rootFolderId}}/apps"
+      },
+      "description": "If your zip bundled multiple projects (e.g. frontend/backend/firmware), this lists which ones were detected as runnable (have a package.json) and their current status. Copy the one you want into the subAppName variable before running steps 2-7."
+    },
+    {
+      "name": "2. Install dependencies",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/v1/childapp/{{rootFolderId}}/{{subAppName}}/install"
+      }
+    },
+    {
+      "name": "3. Get status",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/childapp/{{rootFolderId}}/{{subAppName}}/status"
+      }
+    },
+    {
+      "name": "4. Get logs",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/childapp/{{rootFolderId}}/{{subAppName}}/logs"
+      }
+    },
+    {
+      "name": "5. Start app",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/v1/childapp/{{rootFolderId}}/{{subAppName}}/start"
+      }
+    },
+    {
+      "name": "6. Preview (open in browser, not JSON)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/preview/{{rootFolderId}}/{{subAppName}}/"
+      }
+    },
+    {
+      "name": "7. Stop app",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/v1/childapp/{{rootFolderId}}/{{subAppName}}/stop"
+      }
+    }
+  ]
+}

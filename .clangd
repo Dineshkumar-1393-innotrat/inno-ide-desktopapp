@@ -1,0 +1,29 @@
+CompileFlags:
+  CompilationDatabase: "build"
+  Remove:
+    - "-mlongcalls"
+    - "-mlong-calls"
+    - "-fno-shrink-wrap"
+    - "-fstrict-volatile-bitfields"
+    - "-fno-tree-switch-conversion"
+    - "-fno-tree-polar"
+    - "-fno-jump-tables"
+    - "-fmacro-prefix-map=*"
+  Add:
+    - "-D__XTENSA__"
+    - "-D__XTENSA_EL__"
+    - "-DESP_PLATFORM"
+    - "-D__ets__"
+    - "-Wno-unknown-argument"
+    - "-Wno-attributes"
+    - "-idirafterD:/esp-idf-tools/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/include"
+    - "-idirafterD:/esp-idf-tools/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/14.2.0/include"
+
+Diagnostics:
+  UnusedIncludes: None
+  Suppress:
+    - "unknown_argument"
+    - "drv_unknown_argument"
+    - "unused-includes"
+    - "attributes"
+

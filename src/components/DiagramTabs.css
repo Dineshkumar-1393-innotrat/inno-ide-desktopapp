@@ -1,0 +1,247 @@
+/* Diagram Tabs Component - Horizontal tab strip with add/close buttons */
+
+.diagram-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f3f4f6;
+  padding: 8px 12px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.diagram-tabs__list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.diagram-tabs__list::-webkit-scrollbar {
+  height: 4px;
+}
+
+.diagram-tabs__list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.diagram-tabs__tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #e5e7eb;
+  color: #374151;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+  min-width: fit-content;
+}
+
+.diagram-tabs__tab:hover {
+  background: #d1d5db;
+}
+
+.diagram-tabs__tab.is-active {
+  background: #3b82f6;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.diagram-tabs__label {
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.diagram-tabs__dirty-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #ef4444; /* red-500 */
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.is-active .diagram-tabs__dirty-dot {
+  background-color: #fca5a5; /* red-300 for better visibility on blue */
+}
+
+.diagram-tabs__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  border-radius: 3px;
+  color: inherit;
+  opacity: 0.7;
+  transition: all 0.15s;
+}
+
+.diagram-tabs__close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.diagram-tabs__tab.is-active .diagram-tabs__close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.diagram-tabs__spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.diagram-tabs__loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.diagram-tabs__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+  padding-right: 8px;
+  border-right: 1px solid #d1d5db;
+}
+
+.diagram-tabs__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #374151;
+  transition: all 0.2s;
+}
+
+.diagram-tabs__action:hover:not(:disabled) {
+  background: #f9fafb;
+  border-color: #9ca3af;
+  color: #1f2937;
+}
+
+.diagram-tabs__action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ===== RESPONSIVE STYLES ===== */
+
+/* Tablet and below (< 1024px) */
+@media (max-width: 1023px) {
+  .diagram-tabs {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .diagram-tabs__tab {
+    padding: 6px 12px;
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .diagram-tabs__actions {
+    margin-right: 6px;
+    padding-right: 6px;
+  }
+
+  .diagram-tabs__action {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+/* Mobile (< 768px) */
+@media (max-width: 767px) {
+  .diagram-tabs {
+    padding: 5px 8px;
+    gap: 4px;
+  }
+
+  .diagram-tabs__list {
+    gap: 4px;
+  }
+
+  .diagram-tabs__tab {
+    padding: 5px 10px;
+    font-size: 11px;
+    gap: 4px;
+  }
+
+  .diagram-tabs__close {
+    padding: 1px;
+  }
+
+  .diagram-tabs__close svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .diagram-tabs__actions {
+    gap: 3px;
+    margin-right: 4px;
+    padding-right: 4px;
+  }
+
+  .diagram-tabs__action {
+    width: 28px;
+    height: 28px;
+  }
+
+  .diagram-tabs__action svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+/* Small mobile (< 480px) */
+@media (max-width: 479px) {
+  .diagram-tabs {
+    padding: 4px 6px;
+  }
+
+  .diagram-tabs__tab {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+
+  .diagram-tabs__action {
+    width: 26px;
+    height: 26px;
+  }
+
+  .diagram-tabs__action svg {
+    width: 12px;
+    height: 12px;
+  }
+}

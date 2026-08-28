@@ -1,0 +1,96 @@
+{
+  "projectId": "",
+  "productId": "",
+  "userId": "",
+
+    "blockDiagram": [
+      {
+        "id": 1,
+        "name": "Diagram 1",
+        "symbols": [
+          {
+            "symbol": {
+              "type": "svg",
+              "src": "/src/images/Ellipse%204.svg",
+              "name": "Circle"
+            },
+            "x": 264,
+            "y": 150,
+            "width": 120
+          },
+          {
+            "symbol": {
+              "type": "svg",
+              "src": "/src/images/Ellipse%205.svg",
+              "name": "Dotted Circle"
+            },
+            "x": 409,
+            "y": 165
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "name": "Diagram 2",
+        "symbols": []
+      }
+    ]
+  }
+
+  {
+    "projectId": "",
+  "productId": "",
+  "userId": "",
+    
+    "simulationDiagram":[
+    {
+      "symbol": {
+        "type": "svg",
+        "src": "/src/images/microcontroller%201.svg",
+        "name": "Microcontroller"
+      },
+      "x": 440,
+      "y": 154,
+      "width": 120,
+      "height": 120,
+      "rotation": 0
+    },
+    {
+      "symbol": {
+        "type": "svg",
+        "src": "/src/images/powersupply.svg",
+        "name": "Power Supply"
+      },
+      "x": 346,
+      "y": 153,
+      "width": 120,
+      "height": 120,
+      "rotation": 0
+    },
+    {
+      "symbol": {
+        "type": "svg",
+        "src": "/src/images/temperature%20sensor.svg",
+        "name": "Temperature Sensor"
+      },
+      "x": 387,
+      "y": 237,
+      "width": 120,
+      "height": 120,
+      "rotation": 0
+    },
+    {
+      "symbol": {
+        "type": "svg",
+        "src": "/src/images/vibrations%20motors.svg",
+        "name": "Vibrations Motors"
+      },
+      "x": 481,
+      "y": 237,
+      "width": 120,
+      "height": 120,
+      "rotation": 0
+    }
+  ]
+  
+  }

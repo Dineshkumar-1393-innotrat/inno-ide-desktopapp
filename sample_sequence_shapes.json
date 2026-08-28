@@ -1,0 +1,113 @@
+{
+    "nodes": [
+        {
+            "id": "actor1",
+            "type": "genericShape",
+            "position": {
+                "x": 100,
+                "y": 50
+            },
+            "data": {
+                "shapeId": "uml-seq-actor",
+                "label": "Factory"
+            },
+            "style": {
+                "width": 140,
+                "height": 60
+            }
+        },
+        {
+            "id": "lifeline1",
+            "type": "genericShape",
+            "position": {
+                "x": 170,
+                "y": 110
+            },
+            "data": {
+                "shapeId": "uml-seq-lifeline"
+            },
+            "style": {
+                "width": 100,
+                "height": 400
+            },
+            "zIndex": -1
+        },
+        {
+            "id": "actor2",
+            "type": "genericShape",
+            "position": {
+                "x": 400,
+                "y": 50
+            },
+            "data": {
+                "shapeId": "uml-seq-actor",
+                "label": "Dongle"
+            },
+            "style": {
+                "width": 140,
+                "height": 60
+            }
+        },
+        {
+            "id": "lifeline2",
+            "type": "genericShape",
+            "position": {
+                "x": 470,
+                "y": 110
+            },
+            "data": {
+                "shapeId": "uml-seq-lifeline"
+            },
+            "style": {
+                "width": 100,
+                "height": 400
+            },
+            "zIndex": -1
+        },
+        {
+            "id": "note1",
+            "type": "genericShape",
+            "position": {
+                "x": 550,
+                "y": 150
+            },
+            "data": {
+                "shapeId": "uml-seq-note",
+                "label": "State = Factory",
+                "fill": "#ffff88",
+                "stroke": "#000000"
+            },
+            "style": {
+                "width": 120,
+                "height": 60
+            }
+        }
+    ],
+    "edges": [
+        {
+            "id": "e1",
+            "source": "actor1",
+            "target": "actor2",
+            "type": "editable",
+            "label": "Manufacturing Completed",
+            "sourceHandle": "right",
+            "targetHandle": "left",
+            "data": {
+                "pathType": "straight",
+                "showLabel": true
+            },
+            "markerEnd": {
+                "type": "arrowclosed"
+            },
+            "style": {
+                "strokeWidth": 2,
+                "stroke": "#000"
+            }
+        }
+    ],
+    "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+    }
+}

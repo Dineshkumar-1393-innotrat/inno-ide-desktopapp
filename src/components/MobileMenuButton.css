@@ -1,0 +1,57 @@
+.mobile-menu-button {
+    display: none;
+    position: fixed;
+    top: 70px;
+    left: 16px;
+    z-index: 1050;
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: #526D82;
+    color: #DDE6ED;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.mobile-menu-button:hover {
+    background: #DDE6ED;
+    color: #27374D;
+    border-color: rgba(148, 163, 184, 0.5);
+}
+
+.mobile-menu-button:active {
+    transform: scale(0.95);
+}
+
+/* Show only on mobile */
+@media (max-width: 767px) {
+    .mobile-menu-button {
+        display: flex;
+    }
+}
+
+/* Backdrop overlay for mobile sidebar */
+.mobile-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.mobile-backdrop.is-visible {
+    display: block;
+    opacity: 1;
+}
+
+@media (max-width: 767px) {
+    .mobile-backdrop.is-visible {
+        display: block;
+    }
+}

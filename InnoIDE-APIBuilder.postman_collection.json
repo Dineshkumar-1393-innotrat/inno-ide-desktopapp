@@ -1,0 +1,159 @@
+{
+  "info": {
+    "name": "InnoIDE - API Builder (Auto-generated CRUD APIs)",
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "description": "Auto-generated CRUD APIs Collection for InnoIDE API Builder",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5004" },
+    { "key": "slug", "value": "" },
+    { "key": "recordId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Create API (define schema)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/apiBuilder/create",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "apiBuilder", "create"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"ticket\",\n  \"inputSchema\": [\n    { \"fieldName\": \"title\", \"type\": \"string\", \"required\": true },\n    { \"fieldName\": \"priority\", \"type\": \"number\" }\n  ],\n  \"outputSchema\": [\n    { \"fieldName\": \"status\", \"type\": \"string\", \"default\": \"open\" }\n  ]\n}"
+        },
+        "description": "type can be: string, number, boolean, date. outputSchema fields are extra fields added to every record (e.g. an auto status/default value) on top of whatever inputSchema fields are submitted."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const data = pm.response.json();",
+              "  if (data.data && data.data.slug) {",
+              "    pm.collectionVariables.set('slug', data.data.slug);",
+              "    console.log('Created API at slug:', data.data.slug, '- endpoints:', data.data.endpoints);",
+              "  }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. List all defined APIs",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/apiBuilder/list",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "apiBuilder", "list"]
+        }
+      }
+    },
+    {
+      "name": "3. Create a record",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/generated/{{slug}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generated", "{{slug}}"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"test ticket\",\n  \"priority\": 1\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const data = pm.response.json();",
+              "  if (data.data && data.data._id) {",
+              "    pm.collectionVariables.set('recordId', data.data._id);",
+              "  }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. List all records",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/generated/{{slug}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generated", "{{slug}}"]
+        }
+      }
+    },
+    {
+      "name": "5. Get one record",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/generated/{{slug}}/{{recordId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generated", "{{slug}}", "{{recordId}}"]
+        }
+      }
+    },
+    {
+      "name": "6. Update a record",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/generated/{{slug}}/{{recordId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generated", "{{slug}}", "{{recordId}}"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"closed\"\n}"
+        }
+      }
+    },
+    {
+      "name": "7. Delete a record",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/api/generated/{{slug}}/{{recordId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generated", "{{slug}}", "{{recordId}}"]
+        }
+      }
+    },
+    {
+      "name": "8. Delete the whole generated API",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/apiBuilder/{{slug}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "apiBuilder", "{{slug}}"]
+        },
+        "description": "Removes the API definition and stops the endpoint from responding. The underlying MongoDB collection/data is left alone."
+      }
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+.product-controller {
+ 
+    justify-content: space-around;
+    align-items: center;
+    background-color: rgb(39, 185, 137);
+    border-radius: 10px;
+
+}
+
+.create-product-defintion-container {
+    margin-top: 0.5rem;
+    border-radius: 10px;
+    padding: 0.5rem;
+    background-color: rgb(125, 218, 190);
+    display: flex;
+    justify-content: space-around;
+    flex-wrap: wrap;
+}
+
+.productID-container {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   gap: 1rem; 
+   /* width: fit-content; */
+   background-color: rgb(240, 248, 255, 0.5);
+   padding: 0.5rem;
+   border-radius: 10px;
+}
+
+.create-product-defintion-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    width: max-content;
+    gap: 1rem;
+    text-wrap: wrap;
+}
+
+
+.device-added-component-container {
+    display: flex;
+    
+    flex-wrap: wrap;
+}
+
+.create-product-defintion-container .form-floating {
+    width: 100%;
+}
+
+
+.component-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+  }
+  
+  .component-card {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 16px;
+    background-color: #f9f9f9;
+  }
+  
+  .component-card button {
+    margin-bottom: 12px;
+  }
+  

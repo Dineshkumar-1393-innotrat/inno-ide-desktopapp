@@ -1,0 +1,347 @@
+/* ShareDialog.css */
+
+.share-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.85);
+  /* Slightly darker for better focus */
+  backdrop-filter: blur(12px);
+  z-index: 2000;
+  padding: 20px;
+  animation: fadeIn 0.25s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.share-dialog {
+  width: min(520px, 100%);
+  background: #ffffff;
+  /* Cleaner background for high contrast */
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #1e293b;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(30px) scale(0.98);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.share-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.share-dialog__header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.share-dialog__icon-btn-close {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.share-dialog__icon-btn-close:hover {
+  background: #f1f5f9;
+  color: #4b7ef5;
+  transform: rotate(90deg);
+}
+
+.share-dialog__body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.share-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.share-dialog__label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+  /* Much clearer label color */
+  margin-left: 2px;
+}
+
+.share-dialog__copy-row,
+.share-dialog__invite-row {
+  display: flex;
+  gap: 12px;
+}
+
+.share-dialog__copy-input,
+.share-dialog__input,
+.share-dialog__select {
+  flex: 1;
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.share-dialog__input:focus,
+.share-dialog__select:focus {
+  border-color: #3b82f6;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+}
+
+.share-dialog__copy-input {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: default;
+  border-style: dashed;
+}
+
+.share-dialog__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.share-dialog__btn--copy {
+  background: #4b7ef5;
+  color: #ffffff;
+  min-width: 120px;
+}
+
+.share-dialog__btn--copy:hover {
+  background: #3a68d8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(75, 126, 245, 0.3);
+}
+
+.share-dialog__btn--success {
+  background: #10b981 !important;
+  color: #ffffff !important;
+}
+
+.share-dialog__btn--primary {
+  background: #4b7ef5;
+  color: #ffffff;
+}
+
+.share-dialog__btn--primary:hover:not(:disabled) {
+  background: #3a68d8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(75, 126, 245, 0.3);
+}
+
+.share-dialog__btn--primary:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.share-dialog__btn--secondary {
+  background: #ffffff;
+  color: #475569;
+  border: 2px solid #e2e8f0;
+}
+
+.share-dialog__btn--secondary:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.share-dialog__invite-row {
+  position: relative;
+  align-items: center;
+}
+
+.share-dialog__input-icon {
+  position: absolute;
+  left: 16px;
+  color: #4b7ef5;
+  /* Matching blue color */
+  pointer-events: none;
+}
+
+/* Fix invite input padding to avoid overlapping the icon */
+.share-dialog__invite-row .share-dialog__input {
+  padding-left: 44px;
+}
+
+.share-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.share-dialog__field-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+  margin-left: 2px;
+}
+
+.share-dialog__select-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.share-dialog__select {
+  width: 100%;
+  appearance: none;
+  padding-right: 44px;
+  cursor: pointer;
+}
+
+.share-dialog__select-icon {
+  position: absolute;
+  right: 16px;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.share-dialog__hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-left: 3px solid #e2e8f0;
+}
+
+.share-dialog__field--inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding: 8px 0;
+}
+
+.share-dialog__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1e293b;
+  cursor: pointer;
+  user-select: none;
+}
+
+.share-dialog__checkbox {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: grid;
+  place-content: center;
+  margin: 0;
+}
+
+.share-dialog__checkbox:checked {
+  background: #4b7ef5;
+  border-color: #4b7ef5;
+}
+
+.share-dialog__checkbox:checked::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+.share-dialog__checkbox:hover {
+  border-color: #4b7ef5;
+}
+
+.share-dialog__password-input {
+  width: 180px;
+  padding: 8px 12px;
+}
+
+.share-dialog__footer {
+  padding: 20px 24px;
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .share-dialog {
+    border-radius: 0;
+    height: 100%;
+    max-height: 100%;
+  }
+
+  .share-dialog__copy-row,
+  .share-dialog__invite-row {
+    flex-direction: column;
+  }
+
+  .share-dialog__btn {
+    width: 100%;
+  }
+}

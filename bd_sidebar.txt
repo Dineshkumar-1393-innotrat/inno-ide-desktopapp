@@ -1,0 +1,2997 @@
+<div className="diagram-loader-overlay">
+    <div className="diagram-spinner" />
+    <span className="diagram-loader-text">Switching Project...</span>
+  </div>
+);
+
+const DiagramEmptyState = () => (
+  <div
+    style={{
+      position: "absolute",
+      top: "50%",
+      left: "50%",
+      transform: "translate(-50%, -50%)",
+      zIndex: 10,
+      pointerEvents: "none",
+      textAlign: "center",
+      width: "100%",
+      animation: "blink-canvas 2s ease-in-out infinite",
+    }}
+  >
+    <style>{`
+      @keyframes blink-canvas {
+        0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        50% { opacity: 0.3; transform: translate(-50%, -50%) scale(0.98); }
+      }
+    `}</style>
+    <div
+      style={{
+        fontWeight: "bold",
+        fontSize: "clamp(1.5rem, 4vw, 2.5rem)",
+        color: "rgba(7, 52, 148, 0.15)",
+        letterSpacing: "0.1em",
+        textTransform: "uppercase",
+        userSelect: "none",
+      }}
+    >
+      Please Drag The Shapes
+    </div>
+  </div>
+);
+
+// Simple id helpers
+let nodeId = 1;
+const getId = () => `n_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+const createBlockDiagramState = () => ({
+  nodes: [],
+  edges: [],
+  viewport: null,
+});
+
+// Shared node base styles
+const baseNodeStyles = (data) => ({
+  width: '100%',
+  height: '100%',
+  color: data?.text || '#000000',
+  transform: `rotate(${data?.rotation || 0}deg)`,
+  transformOrigin: 'center center',
+});
+
+// Process (rectangle)
+function ProcessNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Text');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: data?.fill || '#ffffff',
+        border: `${data?.strokeWidth ?? 2}px solid ${data?.stroke || '#000000'}`,
+        borderRadius: 6,
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        boxSizing: 'border-box',
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={80} minHeight={40} color={data?.stroke || '#000'} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: 12,
+            position: 'relative',
+            zIndex: 5,
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12, textAlign: 'center' }}>{data?.label ?? 'Text'}</span>
+      )}
+    </div>
+  );
+}
+
+// Decision (diamond)
+function DecisionNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Text');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+  const fill = data?.fill || '#ffffff';
+  const stroke = data?.stroke || '#000000';
+  const sw = data?.strokeWidth ?? 2;
+
+  return (
+    <div
+      style={{ ...baseNodeStyles(data), position: 'relative' }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={80} minHeight={80} color={data?.stroke || '#000'} />
+      {/* Diamond shape filling the bounds so handles align to side midpoints */}
+      <svg viewBox="0 0 160 80" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0 }}>
+        <polygon points="80,0 160,40 80,80 0,40" fill={fill} stroke={stroke} strokeWidth={sw} />
+      </svg>
+      {/* Label overlay */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 6,
+          textAlign: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        {data?.editing ? (
+          <input
+            className="nodrag nopan nowheel"
+            autoFocus
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onBlur={() => commit(val)}
+            onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+            onMouseDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              border: '1px solid #ccc',
+              borderRadius: 4,
+              padding: '4px 6px',
+              fontSize: 12,
+              position: 'relative',
+              zIndex: 5,
+              background: '#fff',
+              color: '#000',
+              pointerEvents: 'all',
+            }}
+          />
+        ) : (
+          <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12 }}>{data?.label ?? 'Text'}</span>
+        )}
+      </div>
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+    </div>
+  );
+}
+
+// Terminator (rounded rectangle)
+function TerminatorNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Text');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: data?.fill || '#ffffff',
+        border: `${data?.strokeWidth ?? 2}px solid ${data?.stroke || '#000000'}`,
+        borderRadius: 24,
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        boxSizing: 'border-box',
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={80} minHeight={40} color={data?.stroke || '#000'} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: 12,
+            position: 'relative',
+            zIndex: 5,
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12, textAlign: 'center' }}>{data?.label ?? 'Text'}</span>
+      )}
+    </div>
+  );
+}
+
+// Text Node
+function TextNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Text');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        boxSizing: 'border-box',
+        background: 'transparent',
+        border: 'none',
+        minWidth: 50,
+        minHeight: 20,
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={50} minHeight={20} color="#999" />
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 14,
+            position: 'relative',
+            zIndex: 5,
+            background: '#fff',
+            pointerEvents: 'all',
+            color: data?.text || '#000',
+          }}
+        />
+      ) : (
+        <span style={{
+          color: data?.text || '#000',
+          fontSize: data?.fontSize || 14,
+          fontWeight: data?.fontWeight || 'normal',
+          textAlign: 'center',
+          lineHeight: 1.2
+        }}>
+          {data?.label ?? 'Text'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Ellipse Node
+function EllipseNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Text');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{ ...baseNodeStyles(data), position: 'relative' }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={80} minHeight={60} color={data?.stroke || '#000'} />
+      <svg viewBox="0 0 160 80" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0 }}>
+        <ellipse
+          cx="80"
+          cy="40"
+          rx="75"
+          ry="35"
+          fill={data?.fill || '#ffffff'}
+          stroke={data?.stroke || '#000000'}
+          strokeWidth={data?.strokeWidth ?? 2}
+        />
+      </svg>
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 6,
+          textAlign: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        {data?.editing ? (
+          <input
+            className="nodrag nopan nowheel"
+            autoFocus
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onBlur={() => commit(val)}
+            onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+            onMouseDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              border: '1px solid #ccc',
+              borderRadius: 4,
+              padding: '4px 6px',
+              fontSize: 12,
+              position: 'relative',
+              zIndex: 5,
+              background: '#fff',
+              color: '#000',
+              pointerEvents: 'all',
+            }}
+          />
+        ) : (
+          <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12 }}>{data?.label ?? 'Text'}</span>
+        )}
+      </div>
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+    </div>
+  );
+}
+
+// Database Node
+function DatabaseNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Database');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{ ...baseNodeStyles(data), position: 'relative' }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={80} minHeight={80} color={data?.stroke || '#000'} />
+      <svg viewBox="0 0 160 80" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0 }}>
+        <ellipse cx="80" cy="15" rx="70" ry="12" fill={data?.fill || '#ffffff'} stroke={data?.stroke || '#000000'} strokeWidth={data?.strokeWidth ?? 2} />
+        <rect x="10" y="15" width="140" height="50" fill={data?.fill || '#ffffff'} stroke="none" />
+        <line x1="10" y1="15" x2="10" y2="65" stroke={data?.stroke || '#000000'} strokeWidth={data?.strokeWidth ?? 2} />
+        <line x1="150" y1="15" x2="150" y2="65" stroke={data?.stroke || '#000000'} strokeWidth={data?.strokeWidth ?? 2} />
+        <ellipse cx="80" cy="65" rx="70" ry="12" fill="none" stroke={data?.stroke || '#000000'} strokeWidth={data?.strokeWidth ?? 2} />
+      </svg>
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 6,
+          textAlign: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        {data?.editing ? (
+          <input
+            className="nodrag nopan nowheel"
+            autoFocus
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onBlur={() => commit(val)}
+            onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+            onMouseDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              border: '1px solid #ccc',
+              borderRadius: 4,
+              padding: '4px 6px',
+              fontSize: 12,
+              position: 'relative',
+              zIndex: 5,
+              background: '#fff',
+              color: '#000',
+              pointerEvents: 'all',
+            }}
+          />
+        ) : (
+          <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12 }}>{data?.label ?? 'Database'}</span>
+        )}
+      </div>
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+    </div>
+  );
+}
+
+function DataNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Data');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  const fill = data?.fill || '#ffffff';
+  const stripe = data?.stripeColor || '#dbeafe';
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: `repeating-linear-gradient(180deg, ${fill}, ${fill} 16px, ${stripe} 16px, ${stripe} 20px)`,
+        border: `${data?.strokeWidth ?? 2}px solid ${data?.stroke || '#000000'}`,
+        borderRadius: 6,
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        boxSizing: 'border-box',
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={100} minHeight={60} color={data?.stroke || '#000'} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            position: 'relative',
+            zIndex: 5,
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12, textAlign: 'center' }}>{data?.label ?? 'Data'}</span>
+      )}
+    </div>
+  );
+}
+
+function DelayNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Delay');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: data?.fill || '#ffffff',
+        border: `${data?.strokeWidth ?? 2}px solid ${data?.stroke || '#000000'}`,
+        borderRadius: '12px 40px 40px 12px',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        boxSizing: 'border-box',
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={120} minHeight={60} color={data?.stroke || '#000'} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            position: 'relative',
+            zIndex: 5,
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12, textAlign: 'center' }}>{data?.label ?? 'Delay'}</span>
+      )}
+    </div>
+  );
+}
+
+function ConnectorNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Connector');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: data?.fill || '#ffffff',
+        border: `${data?.strokeWidth ?? 2}px solid ${data?.stroke || '#000000'}`,
+        borderRadius: '50%',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        boxSizing: 'border-box',
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={70} minHeight={70} color={data?.stroke || '#000'} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '80%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            position: 'relative',
+            zIndex: 5,
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+            textAlign: 'center',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12, textAlign: 'center' }}>{data?.label ?? 'Connector'}</span>
+      )}
+    </div>
+  );
+}
+
+function SummingNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Summing');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: data?.fill || '#ffffff',
+        border: `${data?.strokeWidth ?? 2}px solid ${data?.stroke || '#000000'}`,
+        borderRadius: '50%',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        boxSizing: 'border-box',
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={90} minHeight={90} color={data?.stroke || '#000'} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '80%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            position: 'relative',
+            zIndex: 5,
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+            textAlign: 'center',
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+            color: data?.text || '#000',
+            fontSize: data?.fontSize || 12,
+          }}
+        >
+          <span style={{ fontSize: (data?.fontSize || 12) + 6, lineHeight: 1 }}>+</span>
+          <span>{data?.label ?? 'Summing'}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MicNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Mic');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  const stroke = data?.stroke || '#0f172a';
+  const fill = data?.fill || '#ffffff';
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: fill,
+        border: `${data?.strokeWidth ?? 2}px solid ${stroke}`,
+        borderRadius: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        position: 'relative',
+        boxSizing: 'border-box',
+        gap: 8,
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={100} minHeight={120} color={stroke} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      <svg viewBox="0 0 80 120" style={{ width: '60%', height: '60%' }}>
+        <rect x="28" y="20" width="24" height="46" rx="12" fill="#fff" stroke={stroke} strokeWidth="3" />
+        <line x1="40" y1="66" x2="40" y2="92" stroke={stroke} strokeWidth="4" />
+        <path d="M26 70 C26 86 54 86 54 70" fill="none" stroke={stroke} strokeWidth="3" />
+        <line x1="26" y1="92" x2="54" y2="92" stroke={stroke} strokeWidth="4" />
+        <line x1="40" y1="92" x2="40" y2="104" stroke={stroke} strokeWidth="4" />
+        <line x1="30" y1="104" x2="50" y2="104" stroke={stroke} strokeWidth="4" />
+      </svg>
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '90%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            textAlign: 'center',
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12 }}>{data?.label ?? 'Mic'}</span>
+      )}
+    </div>
+  );
+}
+
+function BluetoothNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Bluetooth');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  const stroke = data?.stroke || '#0f172a';
+  const fill = data?.fill || '#ffffff';
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: fill,
+        border: `${data?.strokeWidth ?? 2}px solid ${stroke}`,
+        borderRadius: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        position: 'relative',
+        boxSizing: 'border-box',
+        gap: 8,
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={100} minHeight={120} color={stroke} />
+      <Handle id="bluetooth-top-in" type="target" position={Position.Top} />
+      <Handle id="bluetooth-right-in" type="target" position={Position.Right} />
+      <Handle id="bluetooth-bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="bluetooth-left-in" type="target" position={Position.Left} />
+      <Handle id="bluetooth-top-out" type="source" position={Position.Top} />
+      <Handle id="bluetooth-right-out" type="source" position={Position.Right} />
+      <Handle id="bluetooth-bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="bluetooth-left-out" type="source" position={Position.Left} />
+      <svg viewBox="0 0 80 120" style={{ width: '60%', height: '60%' }}>
+        <path d="M40 16 L58 32 L45 45 L58 60 L40 76 L40 16" fill="none" stroke={stroke} strokeWidth="4" />
+        <line x1="30" y1="34" x2="52" y2="56" stroke={stroke} strokeWidth="3" />
+        <line x1="52" y1="34" x2="30" y2="56" stroke={stroke} strokeWidth="3" />
+      </svg>
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '90%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            textAlign: 'center',
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12 }}>{data?.label ?? 'Bluetooth'}</span>
+      )}
+    </div>
+  );
+}
+
+function AntennaNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Antenna');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  const stroke = data?.stroke || '#0f172a';
+  const fill = data?.fill || '#ffffff';
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: fill,
+        border: `${data?.strokeWidth ?? 2}px solid ${stroke}`,
+        borderRadius: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        position: 'relative',
+        boxSizing: 'border-box',
+        gap: 8,
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={100} minHeight={120} color={stroke} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      <svg viewBox="0 0 100 100" style={{ width: '70%', height: '60%' }}>
+        <path d="M20 70 Q50 20 80 70" fill="none" stroke={stroke} strokeWidth="4" />
+        <path d="M28 70 Q50 32 72 70" fill="none" stroke={stroke} strokeWidth="3" />
+        <path d="M36 70 Q50 44 64 70" fill="none" stroke={stroke} strokeWidth="2.5" />
+        <line x1="50" y1="70" x2="50" y2="88" stroke={stroke} strokeWidth="4" />
+        <circle cx="50" cy="92" r="4" fill={stroke} />
+      </svg>
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '90%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            textAlign: 'center',
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12 }}>{data?.label ?? 'Antenna'}</span>
+      )}
+    </div>
+  );
+}
+
+function ActorNode({ id, data, selected }) {
+  const rf = useReactFlow();
+  const [val, setVal] = useState(data?.label ?? 'Actor');
+  const commit = (next) => {
+    rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: next, editing: false } } : n)));
+    window.dispatchEvent(new Event('rf-change'));
+  };
+
+  const stroke = data?.stroke || '#0f172a';
+  const fill = data?.fill || '#ffffff';
+
+  return (
+    <div
+      style={{
+        ...baseNodeStyles(data),
+        background: fill,
+        border: `${data?.strokeWidth ?? 2}px solid ${stroke}`,
+        borderRadius: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        position: 'relative',
+        boxSizing: 'border-box',
+        gap: 8,
+      }}
+      onDoubleClick={() => rf.setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, editing: true } } : n)))}
+    >
+      <NodeResizer isVisible={selected} minWidth={120} minHeight={140} color={stroke} />
+      <Handle id="top-in" type="target" position={Position.Top} />
+      <Handle id="right-in" type="target" position={Position.Right} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} />
+      <Handle id="left-in" type="target" position={Position.Left} />
+      <Handle id="top-out" type="source" position={Position.Top} />
+      <Handle id="right-out" type="source" position={Position.Right} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} />
+      <Handle id="left-out" type="source" position={Position.Left} />
+      <svg viewBox="0 0 80 120" style={{ width: '60%', height: '60%' }}>
+        <circle cx="40" cy="26" r="14" fill="#fff" stroke={stroke} strokeWidth="3" />
+        <line x1="40" y1="40" x2="40" y2="78" stroke={stroke} strokeWidth="4" />
+        <line x1="18" y1="56" x2="62" y2="56" stroke={stroke} strokeWidth="4" />
+        <line x1="40" y1="78" x2="20" y2="104" stroke={stroke} strokeWidth="4" />
+        <line x1="40" y1="78" x2="60" y2="104" stroke={stroke} strokeWidth="4" />
+      </svg>
+      {data?.editing ? (
+        <input
+          className="nodrag nopan nowheel"
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={() => commit(val)}
+          onKeyDown={(e) => e.key === 'Enter' && commit(val)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '90%',
+            border: '1px solid #ccc',
+            borderRadius: 4,
+            padding: '4px 6px',
+            fontSize: data?.fontSize || 12,
+            textAlign: 'center',
+            background: '#fff',
+            color: '#000',
+            pointerEvents: 'all',
+          }}
+        />
+      ) : (
+        <span style={{ color: data?.text || '#000', fontSize: data?.fontSize || 12 }}>{data?.label ?? 'Actor'}</span>
+      )}
+    </div>
+  );
+}
+
+// Junction Node - small connector for branching connections
+function JunctionNode({ id, data, selected }) {
+  const fill = data?.fill || '#000000';
+  const stroke = data?.stroke || '#000000';
+  const size = data?.size || 20;
+
+  // Handles hidden by default, visible on hover or selection
+  const handleStyle = {
+    width: 8,
+    height: 8,
+    background: '#555',
+    border: '2px solid #fff',
+    borderRadius: '50%',
+    opacity: selected ? 1 : 0,
+    transition: 'opacity 0.2s',
+  };
+
+  return (
+    <div
+      className="junction-node"
+      style={{
+        width: size,
+        height: size,
+        position: 'relative',
+      }}
+      onMouseEnter={(e) => {
+        // Show handles on hover
+        const handles = e.currentTarget.querySelectorAll('.react-flow__handle');
+        handles.forEach(h => h.style.opacity = 1);
+      }}
+      onMouseLeave={(e) => {
+        // Hide handles on leave if not selected
+        if (!selected) {
+          const handles = e.currentTarget.querySelectorAll('.react-flow__handle');
+          handles.forEach(h => h.style.opacity = 0);
+        }
+      }}
+    >
+      <Handle id="top-in" type="target" position={Position.Top} style={handleStyle} />
+      <Handle id="right-in" type="target" position={Position.Right} style={handleStyle} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} style={handleStyle} />
+      <Handle id="left-in" type="target" position={Position.Left} style={handleStyle} />
+      <Handle id="top-out" type="source" position={Position.Top} style={handleStyle} />
+      <Handle id="right-out" type="source" position={Position.Right} style={handleStyle} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} style={handleStyle} />
+      <Handle id="left-out" type="source" position={Position.Left} style={handleStyle} />
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          borderRadius: '50%',
+          background: fill,
+          border: `2px solid ${stroke}`,
+          boxShadow: selected ? '0 0 0 2px #3b82f6' : 'none',
+        }}
+      />
+    </div>
+  );
+}
+
+// Custom editable edge with inline label + options menu
+function EditableEdge(edgeProps) {
+  const {
+    id,
+    source, target,
+    sourceHandle, targetHandle,
+    sourceX, sourceY, targetX, targetY,
+    sourcePosition, targetPosition,
+    style,
+    markerStart, markerEnd,
+    label,
+    labelStyle,
+    selected,
+    data,
+  } = edgeProps;
+  const rf = useReactFlow();
+  const [edgePath, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const [editing, setEditing] = useState(false);
+  const initialLabel = label ?? data?.label ?? '';
+  const [text, setText] = useState(initialLabel);
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    setText(label ?? data?.label ?? '');
+  }, [label, data?.label]);
+
+  // close options popover on outside click or Escape
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e) => {
+      // clicks anywhere inside the label+button+menu container should NOT close
+      if (containerRef.current && containerRef.current.contains(e.target)) return;
+      setOpen(false);
+      setEditing(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        setEditing(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const updateEdge = (mapper) => {
+    rf.setEdges((eds) =>
+      eds.map((e) => (e.id === id ? mapper(e) : e))
+    );
+  };
+
+  const commit = () => {
+    const next = text.trim();
+    updateEdge((e) => ({
+      ...e,
+      label: next,
+      data: { ...(e.data || {}), label: next, showLabel: next !== '' },
+    }));
+    setText(next);
+    setEditing(false);
+  };
+
+  const setArrowMode = (mode) => {
+    if (mode === 'none') {
+      updateEdge((e) => ({ ...e, markerStart: undefined, markerEnd: undefined }));
+    } else if (mode === 'single') {
+      updateEdge((e) => ({ ...e, markerStart: undefined, markerEnd: { type: MarkerType.ArrowClosed } }));
+    } else if (mode === 'double') {
+      updateEdge((e) => ({ ...e, markerStart: { type: MarkerType.ArrowClosed }, markerEnd: { type: MarkerType.ArrowClosed } }));
+    }
+  };
+
+  const flip = () => {
+    try {
+      rf.updateEdge(
+        { id, source, target, sourceHandle, targetHandle },
+        { id, source: target, target: source, sourceHandle: targetHandle, targetHandle: sourceHandle }
+      );
+    } catch (_) {
+      updateEdge((e) => ({
+        ...e,
+        source: e.target,
+        target: e.source,
+        sourceHandle: e.targetHandle,
+        targetHandle: e.sourceHandle,
+      }));
+    }
+    // swap arrowheads
+    updateEdge((e) => ({ ...e, markerStart: e.markerEnd, markerEnd: e.markerStart }));
+  };
+
+  const stroke = (style && style.stroke) || '#000000';
+  const textColor = (labelStyle && labelStyle.fill) || '#000000';
+  const currentArrow = (markerStart && markerEnd) ? 'double' : (markerEnd ? 'single' : 'none');
+  const hasStoredLabel = initialLabel.trim().length > 0;
+  const showLabelFlag = data?.showLabel;
+  const showLabel = (typeof showLabelFlag === 'boolean' ? showLabelFlag : hasStoredLabel) && hasStoredLabel;
+  const shouldRenderLabel = editing || showLabel;
+
+  // draw style with round caps to remove tiny visual gaps
+  const drawStyle = { ...(style || {}), strokeLinecap: 'round', strokeLinejoin: 'round' };
+
+  // shift label/gear to the side of the edge so they don't sit on top of the stroke
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len; // perpendicular (normalized)
+  const ny = dx / len;
+  const SIDE_OFFSET = 14; // px
+  const labelOffsetX = nx * SIDE_OFFSET;
+  const labelOffsetY = ny * SIDE_OFFSET;
+
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} style={drawStyle} markerStart={markerStart} markerEnd={markerEnd} />
+      <path
+        d={edgePath}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={16}
+        style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          rf.setEdges((eds) =>
+            eds.map((ed) =>
+              ed.id === id ? { ...ed, selected: true } : { ...ed, selected: false }
+            )
+          );
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          setEditing(true);
+          // double-click: reveal label and select (atomic update)
+          rf.setEdges((eds) =>
+            eds.map((ed) =>
+              ed.id === id
+                ? { ...ed, selected: true, data: { ...(ed.data || {}), showLabel: true } }
+                : { ...ed, selected: false }
+            )
+          );
+        }}
+      />
+      <EdgeLabelRenderer>
+        {open && <div className="edge-backdrop" />}
+        <div
+          ref={containerRef}
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX + labelOffsetX}px, ${labelY + labelOffsetY}px)`,
+            pointerEvents: 'all',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            zIndex: open ? 30 : 10,
+          }}
+        >
+          {shouldRenderLabel && (
+            editing ? (
+              <input
+                autoFocus
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commit();
+                  if (e.key === 'Escape') setEditing(false);
+                }}
+                style={{
+                  border: '1px solid #ccc',
+                  borderRadius: 4,
+                  padding: '2px 4px',
+                  fontSize: 12,
+                  position: 'relative',
+                  zIndex: 5,
+                  background: '#fff',
+                  color: '#000',
+                  pointerEvents: 'all',
+                }}
+              />
+            ) : (
+              <div
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditing(true);
+                }}
+                style={{
+                  background: '#fff',
+                  border: '1px solid #e5e5e5',
+                  borderRadius: 8,
+                  padding: '2px 6px',
+                  fontSize: 12,
+                  color: textColor,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                }}
+                title="Double-click to edit label"
+              >
+                {initialLabel || 'Label'}
+              </div>
+            )
+          )}
+          {(selected || open) && (
+            <button
+              ref={btnRef}
+              title={open ? 'Close options' : 'Edge options'}
+              aria-haspopup="dialog"
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+              className="edge-icon-btn"
+            >
+              <Settings size={12} />
+            </button>
+          )}
+          {open && (
+            <div
+              ref={menuRef}
+              className="edge-popover"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="segmented">
+                <button className={currentArrow === 'none' ? 'active' : ''} onClick={() => setArrowMode('none')}>None</button>
+                <button className={currentArrow === 'single' ? 'active' : ''} onClick={() => setArrowMode('single')}>Single</button>
+                <button className={currentArrow === 'double' ? 'active' : ''} onClick={() => setArrowMode('double')}>Double</button>
+                <button className="icon" onClick={flip} title="Flip direction">
+                  <ArrowLeftRight size={14} />
+                </button>
+              </div>
+              <div className="row">
+                <span>Border</span>
+                <input type="color" value={stroke}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    updateEdge((edge) => ({ ...edge, style: { ...(edge.style || {}), stroke: v } }));
+                  }} />
+              </div>
+              <div className="row">
+                <span>Text</span>
+                <input type="color" value={textColor}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    updateEdge((edge) => ({ ...edge, labelStyle: { ...(edge.labelStyle || {}), fill: v } }));
+                  }} />
+              </div>
+            </div>
+          )}
+        </div>
+        {/* Connection Handle for Edge Splitting */}
+        <div
+          className="edge-connection-handle"
+          data-edge-id={id}
+          data-x={labelX}
+          data-y={labelY}
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: 'all',
+            width: 12,
+            height: 12,
+            background: '#000',
+            borderRadius: '50%',
+            cursor: 'crosshair',
+            zIndex: 20,
+            opacity: 0, // Hidden by default, shown on hover via CSS
+            transition: 'opacity 0.2s',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = 0}
+        />
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const nodeTypes = {
+  process: ProcessNode,
+  decision: DecisionNode,
+  terminator: TerminatorNode,
+  text: TextNode,
+  ellipse: EllipseNode,
+  database: DatabaseNode,
+  data: DataNode,
+  delay: DelayNode,
+  connector: ConnectorNode,
+  summing: SummingNode,
+  mic: MicNode,
+  bluetooth: BluetoothNode,
+  antenna: AntennaNode,
+  actor: ActorNode,
+  junction: JunctionNode,
+};
+
+const edgeTypes = {
+  editable: EditableEdge
+};
+
+// Enhanced palette with more shapes
+const PALETTE_GROUPS = [
+  {
+    id: 'blocks',
+    title: 'Block Diagram',
+    items: [
+      {
+        type: 'text',
+        label: 'Text',
+        icon: <div style={{ fontSize: 24, fontWeight: 'bold' }}>T</div>
+      },
+      {
+        type: 'process',
+        label: 'Process',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <rect x="6" y="8" width="68" height="34" rx="8" ry="8" fill="#fff" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'decision',
+        label: 'Decision',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <polygon points="40,5 75,25 40,45 5,25" fill="#fff" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'terminator',
+        label: 'Terminator',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <rect x="6" y="8" width="68" height="34" rx="18" ry="18" fill="#fff" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'ellipse',
+        label: 'Ellipse',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <ellipse cx="40" cy="25" rx="30" ry="16" fill="#fff" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'database',
+        label: 'Database',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <ellipse cx="40" cy="12" rx="28" ry="6" fill="#fff" stroke="#111" strokeWidth="2" />
+            <rect x="12" y="12" width="56" height="26" fill="#fff" stroke="#111" strokeWidth="2" />
+            <ellipse cx="40" cy="38" rx="28" ry="6" fill="none" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'data',
+        label: 'Data',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <rect x="5" y="8" width="70" height="34" rx="8" ry="8" fill="#fff" stroke="#111" strokeWidth="2" />
+            <line x1="10" y1="16" x2="70" y2="16" stroke="#111" strokeWidth="1.5" />
+            <line x1="10" y1="24" x2="70" y2="24" stroke="#111" strokeWidth="1.5" />
+            <line x1="10" y1="32" x2="70" y2="32" stroke="#111" strokeWidth="1.5" />
+          </svg>
+        ),
+      },
+      {
+        type: 'delay',
+        label: 'Delay',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <path d="M8,10 H52 Q68,25 52,40 H8 Z" fill="#fff" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'connector',
+        label: 'Connector',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <circle cx="40" cy="25" r="18" fill="#fff" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'summing',
+        label: 'Summing',
+        icon: (
+          <svg viewBox="0 0 80 50" preserveAspectRatio="xMidYMid meet">
+            <circle cx="40" cy="25" r="18" fill="#fff" stroke="#111" strokeWidth="2" />
+            <line x1="40" y1="15" x2="40" y2="35" stroke="#111" strokeWidth="2" />
+            <line x1="30" y1="25" x2="50" y2="25" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'mic',
+        label: 'Mic',
+        icon: (
+          <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
+            <rect x="30" y="18" width="20" height="28" rx="10" ry="10" fill="#fff" stroke="#111" strokeWidth="2" />
+            <path d="M28 40 C28 50 52 50 52 40" fill="none" stroke="#111" strokeWidth="2" />
+            <line x1="28" y1="54" x2="52" y2="54" stroke="#111" strokeWidth="2" />
+            <line x1="40" y1="54" x2="40" y2="64" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'bluetooth',
+        label: 'Bluetooth',
+        icon: (
+          <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
+            <path d="M36 14 L54 28 L42 38 L54 48 L36 62 L36 14" fill="none" stroke="#111" strokeWidth="2.5" />
+            <line x1="30" y1="24" x2="50" y2="44" stroke="#111" strokeWidth="2" />
+            <line x1="50" y1="24" x2="30" y2="44" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+      {
+        type: 'antenna',
+        label: 'Antenna',
+        icon: (
+          <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
+            <path d="M16 54 Q40 18 64 54" fill="none" stroke="#111" strokeWidth="2.5" />
+            <path d="M24 54 Q40 28 56 54" fill="none" stroke="#111" strokeWidth="2" />
+            <line x1="40" y1="54" x2="40" y2="68" stroke="#111" strokeWidth="2" />
+            <circle cx="40" cy="72" r="3" fill="#111" />
+          </svg>
+        ),
+      },
+      {
+        type: 'actor',
+        label: 'Actor',
+        icon: (
+          <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
+            <circle cx="40" cy="20" r="10" fill="#fff" stroke="#111" strokeWidth="2" />
+            <line x1="40" y1="30" x2="40" y2="52" stroke="#111" strokeWidth="2.5" />
+            <line x1="24" y1="40" x2="56" y2="40" stroke="#111" strokeWidth="2.5" />
+            <line x1="40" y1="52" x2="26" y2="70" stroke="#111" strokeWidth="2.5" />
+            <line x1="40" y1="52" x2="54" y2="70" stroke="#111" strokeWidth="2.5" />
+          </svg>
+        ),
+      },
+      {
+        type: 'junction',
+        label: 'Junction',
+        icon: (
+          <svg viewBox="0 0 80 80" preserveAspectRatio="xMidYMid meet">
+            <circle cx="40" cy="40" r="8" fill="#000" stroke="#111" strokeWidth="2" />
+          </svg>
+        ),
+      },
+    ],
+  },
+];
+
+function DiagramEditor() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const dispatch = useDispatch();
+  const { tabs, activeTabId } = useSelector((state) => state.blockDiagram);
+  const activeTab = useMemo(
+    () => tabs.find((t) => t?.id === activeTabId),
+    [tabs, activeTabId],
+  );
+
+  const [isExplorerVisible, setIsExplorerVisible] = useState('explorer');
+  const reactFlowWrapper = useRef(null);
+
+  // Derive nodes and edges from active tab
+  const nodes = activeTab?.state?.nodes || [];
+  const edges = activeTab?.state?.edges || [];
+
+  const setNodes = useCallback(
+    (nds) => {
+      const nextNodes = typeof nds === "function" ? nds(nodes) : nds;
+      dispatch(updateTabState({ tabId: activeTabId, nodes: nextNodes }));
+    },
+    [dispatch, activeTabId, nodes],
+  );
+
+  const setEdges = useCallback(
+    (eds) => {
+      const nextEdges = typeof eds === "function" ? eds(edges) : eds;
+      dispatch(updateTabState({ tabId: activeTabId, edges: nextEdges }));
+    },
+    [dispatch, activeTabId, edges],
+  );
+
+  const onNodesChange = useCallback(
+    (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    [setNodes],
+  );
+  const onEdgesChange = useCallback(
+    (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    [setEdges],
+  );
+
+  const [selected, setSelected] = useState(null);
+  const [hasProjects, setHasProjects] = useState(false);
+  const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
+  const [reactFlowInstance, setReactFlowInstance] = useState(null);
+  const {
+    user,
+    activeProjectId,
+    activeProjectName,
+    activeProductId,
+    setActiveProjectId,
+    diagramData,
+    saveDiagramData,
+    isSwitchingProject,
+    isHydrated,
+    isRestoring,
+    hasFetchedOnce,
+    transitionError
+  } = useProject?.() ?? {};
+
+  const rf = useReactFlow();
+  const canvasIntegration = useCanvasFileIntegration('Block Diagram');
+
+  // Canvas auto-save REMOVED from backend sync - kept only for local persistence if needed
+  // We will now rely on explicit Save button
+
+  const historyRef = useRef({ entries: [], index: -1 });
+  const { isSidebarOpen, isMobile, toggleSidebar, closeSidebar } = useResponsiveSidebar();
+  const { sidebarWidth, startResizing } = useResizableSidebar(240, 160, 480);
+  const nodesRef = useRef([]);
+  const edgesRef = useRef([]);
+  const debounceRef = useRef(null);
+
+  const hydratingRef = useRef(false);
+  const lastSnapshotRef = useRef('');
+  const lastActiveTabIdRef = useRef(null);
+
+  // Unify tabs functionality into Redux
+  const createTab = useCallback(() => {
+    const newId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    dispatch(
+      addTab({
+        id: newId,
+        name: `Tab ${tabs.length + 1}`,
+        state: createBlockDiagramState(),
+        dirty: true,
+      }),
+    );
+  }, [dispatch, tabs.length]);
+
+  const updateActiveTabState = useCallback(
+    (updater) => {
+      if (!activeTabId || !activeTab) return;
+      const nextState =
+        typeof updater === "function" ? updater(activeTab.state) : updater;
+      dispatch(updateTabState({ tabId: activeTabId, ...nextState }));
+    },
+    [dispatch, activeTabId, activeTab],
+  );
+
+  // --- Smooth Loading Logic ---
+  // If navigating from FileExplorer with fileContent in state, perform an immediate "Smooth Load"
+  // Initialize first tab if none exists
+  useEffect(() => {
+    if (tabs.length === 0) {
+      createTab();
+    }
+  }, [tabs.length, createTab]);
+
+  // Auto-sync REMOVED - Using manual Save button instead
+
+  // Enhanced file click handler for project management
+  const handleFileClick = useCallback(async (filePath, fileName, parsedContent, fileData) => {
+    try {
+      // Basic validation
+      if (!parsedContent || typeof parsedContent !== 'object') {
+        console.error("[BlockDiagram] Invalid parsed content for file:", fileName);
+        return;
+      }
+
+      // Extract diagram state (handle both flat and nested formats)
+      const diagramState = parsedContent.nodes ? parsedContent : (parsedContent.state || parsedContent);
+      const hasNodes = diagramState.nodes && Array.isArray(diagramState.nodes);
+      const hasEdges = diagramState.edges && Array.isArray(diagramState.edges);
+
+      console.log("------------------------------------------");
+      console.log("[BlockDiagram] File Clicked:", fileName);
+      console.log("[BlockDiagram] File Path:", filePath);
+      console.log("[BlockDiagram] Nodes Count:", diagramState?.nodes?.length || 0);
+      console.log("[BlockDiagram] Edges Count:", diagramState?.edges?.length || 0);
+      console.log("------------------------------------------");
+
+      // Check if tab already exists for this file
+      const strippedFileName = fileName.replace(/\.json$/, "");
+      const normalize = (s) => (s || "").replace(/blockdiagram_|flowchart_/gi, "").replace(/[\s\-_]/g, "").toLowerCase();
+      const normalizedStripped = normalize(strippedFileName);
+
+      const existingTab = tabs.find(
+        (tab) => tab.fileId === filePath || normalize(tab.name) === normalizedStripped
+      );
+
+      if (existingTab) {
+        // Only update if needed
+        const hasNodes = parsedContent.nodes && Array.isArray(parsedContent.nodes);
+        const hasEdges = parsedContent.edges && Array.isArray(parsedContent.edges);
+
+        if (activeTabId !== existingTab.id) {
+          console.log("[BlockDiagram] Found existing tab. Switching to ID:", existingTab.id);
+          dispatch(setActiveTab(existingTab.id));
+        }
+
+        console.log("[BlockDiagram] Updating existing tab state with file content");
+        dispatch(updateTabState({
+          tabId: existingTab.id,
+          nodes: diagramState.nodes || [],
+          edges: diagramState.edges || [],
+          viewport: diagramState.viewport || null
+        }));
+      } else {
+        console.log("[BlockDiagram] Creating new tab for:", fileName);
+        // Load file into a NEW tab
+        const newId = `tab-${Date.now()}`;
+        dispatch(
+          addTab({
+            id: newId,
+            name: strippedFileName,
+            fileId: filePath,
+            state: {
+              nodes: diagramState?.nodes || [],
+              edges: diagramState?.edges || [],
+              viewport: diagramState?.viewport || null,
+            },
+            dirty: false,
+          })
+        );
+      }
+
+      // Load file using canvas integration (for backend sync if needed)
+      await canvasIntegration.loadFileToCanvas(filePath, fileName, parsedContent, fileData);
+
+    } catch (error) {
+      console.error("[BlockDiagram] Failed to handle file click:", error);
+    }
+  }, [canvasIntegration, dispatch, tabs, activeTabId]);
+
+  // Use a ref to track the last loaded file path to avoid redundant loading
+  const lastLoadedFilePathRef = useRef(null);
+
+  // Handle incoming file from navigation state (sidebar click)
+  useEffect(() => {
+    const state = location.state;
+    if (state?.filePath && activeProjectId) {
+      const { filePath, fileContent } = state;
+
+      // Skip if this file was just loaded
+      if (filePath === lastLoadedFilePathRef.current) {
+        return;
+      }
+
+      const fileName = filePath.split('/').pop();
+      console.log("[BlockDiagram] Loading file from navigation state:", filePath);
+
+      // Use fileContent if passed from Explorer, otherwise load from projectFileManager
+      const content = fileContent || projectFileManager.loadFile(activeProjectId, filePath);
+
+      if (content) {
+        try {
+          // Only parse if it's a string
+          const parsed = typeof content === "string" ? JSON.parse(content) : content;
+          console.log("[BlockDiagram] Parsed JSON Content:", parsed);
+
+          lastLoadedFilePathRef.current = filePath;
+          handleFileClick(filePath, fileName, parsed, { projectId: activeProjectId });
+
+          // Reset the ref after a delay to allow background syncs to resume later
+          setTimeout(() => {
+            lastLoadedFilePathRef.current = null;
+            if (rf && rf.fitView) {
+              rf.fitView({ padding: 0.2, duration: 400, maxZoom: 1 });
+            }
+          }, 2000);
+
+          // Clear state after loading to prevent re-loads on other state changes
+          navigate(location.pathname, { replace: true, state: {} });
+        } catch (e) {
+          console.error("[BlockDiagram] Failed to parse diagram file:", e);
+        }
+      }
+    }
+  }, [location.state, activeProjectId, handleFileClick, navigate, location.pathname]);
+
+  // Get currently open file IDs for highlighting in explorer
+  const currentScreenFiles = tabs
+    .filter(tab => tab.fileId)
+    .map(tab => tab.fileId);
+
+  const [openGroups, setOpenGroups] = useState({ blocks: true });
+  const [paletteSearch, setPaletteSearch] = useState('');
+
+  // --- Sync Redux Tabs with Central Project Data ---
+  useEffect(() => {
+    // GUARD: If a file was just loaded from the explorer, SKIP this sync to prevent overwrite
+    if (lastLoadedFilePathRef.current !== null) {
+      console.log("[BlockDiagram] Sync skipped: Manual file load in progress");
+      return;
+    }
+
+    const data = diagramData?.blockDiagram?.data;
+    if (data && Array.isArray(data) && data.length > 0) {
+      // ONLY hydrate from context if Redux is currently empty
+      // This prevents switching screens from overwriting local unsaved changes with stale backend data
+      if (tabs.length === 0) {
+        console.log("[BlockDiagram] Hydrating Redux tabs from central data:", data.length, "tabs");
+        hydratingRef.current = true;
+        dispatch(setTabs(data));
+
+        // Set active tab if it's not set
+        const firstTabId = data[0].id;
+        if (!activeTabId || !data.find(t => t.id === activeTabId)) {
+          dispatch(setActiveTab(firstTabId));
+        }
+
+        setTimeout(() => hydratingRef.current = false, 100);
+      }
+    }
+  }, [diagramData?.blockDiagram?.data, dispatch, tabs.length]);
+
+  const userId = user?.userId || user?._id || user?.id;
+
+  // Sync canvas state with workspace tabs on tab switch
+  // PART 1: Save state before switching (via event)
+  useEffect(() => {
+    const handleBeforeTabSwitch = () => {
+      // Save current canvas state to active tab before switching
+      if (updateActiveTabState) {
+        console.log('[BlockDiagram] Saving canvas state before tab switch');
+        updateActiveTabState(
+          (prev) => ({
+            ...prev,
+            nodes: nodesRef.current,
+            edges: edgesRef.current,
+            viewport: rf.getViewport(),
+          }),
+          { markDirty: true, scheduleSave: true }
+        );
+      }
+    };
+
+    window.addEventListener('workspace:before-tab-switch', handleBeforeTabSwitch);
+
+    return () => {
+      window.removeEventListener('workspace:before-tab-switch', handleBeforeTabSwitch);
+    };
+  }, [updateActiveTabState, rf]);
+
+  // PART 2: Restore state when active tab changes
+  useEffect(() => {
+    if (!activeTab) return;
+
+    const isInitialMount = lastActiveTabIdRef.current === null;
+    const isTabSwitch = lastActiveTabIdRef.current !== activeTab?.id;
+
+    lastActiveTabIdRef.current = activeTab?.id;
+
+    if ((isTabSwitch || isInitialMount) && activeTab.state) {
+      console.log('[BlockDiagram] Active tab changed, restoring viewport:', activeTab.name);
+
+      const newState = activeTab.state;
+      // We no longer call setNodes/setEdges here because they are derived from Redux.
+      // We just update the refs for snapshots.
+      if (newState.nodes) {
+        nodesRef.current = newState.nodes;
+      }
+      if (newState.edges) {
+        edgesRef.current = newState.edges;
+      }
+
+      if (newState.viewport && rf) {
+        setTimeout(() => {
+          rf.setViewport(newState.viewport);
+        }, 100);
+      }
+    }
+  }, [activeTab?.id, rf]); // Use ID for stability
+
+  // Canvas file integration
+  // Check for existing projects and manage project state
+  useEffect(() => {
+    const checkProjects = async () => {
+      const allProjects = projectFileManager.getAllProjects();
+      const projects = Object.values(allProjects);
+      setHasProjects(projects.length > 0);
+
+      // Set active project if available
+      if (projects.length > 0 && !activeProjectId && setActiveProjectId) {
+        const activeProject = projectFileManager.getActiveProject();
+        if (activeProject) {
+          setActiveProjectId(activeProject.id);
+        } else {
+          setActiveProjectId(projects[0].id);
+          projectFileManager.setActiveProject(projects[0].id);
+        }
+      }
+    };
+
+    checkProjects();
+
+    // Listen for project changes
+    const handleProjectChange = () => {
+      const allProjects = projectFileManager.getAllProjects();
+      const projects = Object.values(allProjects);
+      setHasProjects(projects.length > 0);
+    };
+
+    const handleProjectCreated = () => {
+      checkProjects();
+    };
+
+    window.addEventListener('project:change', handleProjectChange);
+    window.addEventListener('project-created', handleProjectCreated);
+    window.addEventListener('file-system-refresh', checkProjects);
+
+    return () => {
+      window.removeEventListener('project:change', handleProjectChange);
+      window.removeEventListener('project-created', handleProjectCreated);
+      window.removeEventListener('file-system-refresh', checkProjects);
+    };
+  }, [activeProjectId, setActiveProjectId, userId]);
+
+  // (useEffect removed from here and moved below handleFileClick)
+
+
+
+  const handleTabChange = useCallback((tab) => {
+    const routes = {
+      Simulation: '/simulation',
+      Flowchart: '/FlowchartTest',
+      'Block Diagram': '/BlockDiagram',
+      'Block Programming': '/blockprogramming',
+      'Code Editor': '/editor',
+    };
+    const next = routes[tab];
+    if (next) {
+      // Manual save should be triggered by the user, not automatically on nav
+      navigate(next);
+    }
+  }, [navigate]);
+
+  const onConnect = useCallback(
+    (params) => {
+      setEdges((eds) => {
+        const next = addEdge(
+          {
+            ...params,
+            type: 'smoothstep',
+            animated: true,
+            markerEnd: { type: MarkerType.ArrowClosed },
+          },
+          eds,
+        );
+        return next;
+      });
+    },
+    [setEdges],
+  );
+
+  const connectionStartParams = useRef(null);
+
+  const onConnectStart = useCallback((_, params) => {
+    connectionStartParams.current = params;
+  }, []);
+
+  const onConnectEnd = useCallback(
+    (event) => {
+      const target = event.target;
+      const edgeHandle = target.closest('.edge-connection-handle');
+
+      if (edgeHandle && connectionStartParams.current) {
+        const edgeId = edgeHandle.getAttribute('data-edge-id');
+        const x = parseFloat(edgeHandle.getAttribute('data-x'));
+        const y = parseFloat(edgeHandle.getAttribute('data-y'));
+        const { nodeId: sourceNodeId, handleId: sourceHandleId } = connectionStartParams.current;
+
+        // Find the target edge
+        const targetEdge = edges.find((e) => e.id === edgeId);
+        if (!targetEdge) return;
+
+        // Create Junction Node
+        const junctionId = `junction-${Date.now()}`;
+        const junctionNode = {
+          id: junctionId,
+          type: 'junction',
+          position: { x, y }, // Position at the edge midpoint
+          data: { label: 'Junction', size: 2 }, // Very small size to look like a point/hidden
+          // Adjust position to center the node (size is 2)
+          //   position: { x: x - 1, y: y - 1 },
+        };
+
+        // Create new edges
+        const edge1 = {
+          id: `e-${targetEdge.source}-${junctionId}`,
+          source: targetEdge.source,
+          target: junctionId,
+          sourceHandle: targetEdge.sourceHandle,
+          targetHandle: 'left-in',
+          type: 'editable',
+          style: targetEdge.style,
+          markerEnd: undefined, // No arrow
+        };
+
+        const edge2 = {
+          id: `e-${junctionId}-${targetEdge.target}`,
+          source: junctionId,
+          target: targetEdge.target,
+          sourceHandle: 'right-out',
+          targetHandle: targetEdge.targetHandle,
+          type: 'editable',
+          style: targetEdge.style,
+          markerEnd: targetEdge.markerEnd, // Keep original end marker if any (usually arrow)
+        };
+
+        const edge3 = {
+          id: `e-${sourceNodeId}-${junctionId}-new`,
+          source: sourceNodeId,
+          target: junctionId,
+          sourceHandle: sourceHandleId,
+          targetHandle: 'bottom-in',
+          type: 'editable',
+          style: { strokeWidth: 2, stroke: '#000000' },
+          markerEnd: undefined, // No arrow for the joining line
+        };
+
+        // Update state
+        setNodes((nds) => nds.concat(junctionNode));
+        setEdges((eds) =>
+          eds
+            .filter((e) => e.id !== edgeId) // Remove old edge
+            .concat([edge1, edge2, edge3]) // Add new edges
+        );
+      }
+      connectionStartParams.current = null;
+    },
+    [edges, nodes, setEdges, setNodes]
+  );
+
+  const onSelectionChange = useCallback(({ nodes: nds, edges: eds }) => {
+    if (nds && nds.length) {
+      setSelected({ kind: 'node', id: nds[0].id });
+    } else if (eds && eds.length) {
+      setSelected({ kind: 'edge', id: eds[0].id });
+    } else {
+      setSelected(null);
+    }
+  }, []);
+
+  const exitEditing = useCallback(() => {
+    setNodes((nds) => nds.map((n) => (n.data?.editing ? { ...n, data: { ...n.data, editing: false } } : n)));
+  }, [setNodes]);
+
+  // Property panel handlers
+  const updateSelectedNode = (mapper) => {
+    if (!selected || selected.kind !== 'node') return;
+    setNodes((nds) => nds.map((n) => (n.id === selected.id ? mapper(n) : n)));
+    scheduleSnapshot();
+  };
+
+  const updateSelectedEdge = (mapper) => {
+    if (!selected || selected.kind !== 'edge') return;
+    setEdges((eds) => eds.map((e) => (e.id === selected.id ? mapper(e) : e)));
+  };
+
+  const getSelectedEntity = () => {
+    if (!selected) return null;
+    if (selected.kind === 'node') return nodes.find((n) => n.id === selected.id) || null;
+    return edges.find((e) => e.id === selected.id) || null;
+  };
+
+  const selectedEntity = getSelectedEntity();
+  const isEdge = selected?.kind === 'edge';
+
+  const handlePaletteDragStart = useCallback((event, item) => {
+    const payload = JSON.stringify({
+      type: item.type || 'genericShape',
+      data: { shapeId: item.id || item.type, label: item.label }
+    });
+    event.dataTransfer.setData('application/reactflow', payload);
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const onDragOver = useCallback((event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    (event) => {
+      event.preventDefault();
+      const payload = event.dataTransfer.getData('application/reactflow');
+      if (!payload) return;
+
+      let type = payload;
+      let extraData = {};
+      try {
+        const parsed = JSON.parse(payload);
+        if (parsed && parsed.type) {
+          type = parsed.type;
+          extraData = parsed.data || {};
+        }
+      } catch (_) {
+        // not JSON, fall back to string type
+      }
+
+      const position = rf.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const id = getId();
+      const defaultLabels = {
+        text: 'Text',
+        process: 'Process',
+        decision: 'Decision',
+        terminator: 'Terminator',
+        ellipse: 'Ellipse',
+        database: 'Database',
+        data: 'Data',
+        delay: 'Delay',
+        connector: 'Connector',
+        summing: 'Summing',
+        mic: 'Mic',
+        bluetooth: 'Bluetooth',
+        antenna: 'Antenna',
+        actor: 'Actor',
+        junction: 'Junction',
+      };
+      const baseData = {
+        label: extraData.label || defaultLabels[type] || 'Block',
+        fill: '#ffffff',
+        stroke: '#000000',
+        text: '#000000',
+        strokeWidth: 2,
+        rotation: 0,
+        fontSize: 12
+      };
+
+      // Compute appropriate initial size based on shape type
+      let initialWidth = 160;
+      let initialHeight = 80;
+
+      if (extraData.shapeId?.includes('diamond') || extraData.shapeId?.includes('circle') || extraData.shapeId?.includes('ellipse')) {
+        initialWidth = 100;
+        initialHeight = 100;
+      } else if (type === 'text') {
+        initialWidth = 100;
+        initialHeight = 40;
+      } else if (type === 'database') {
+        initialWidth = 120;
+        initialHeight = 80;
+      } else if (type === 'connector') {
+        initialWidth = 100;
+        initialHeight = 100;
+      } else if (type === 'summing') {
+        initialWidth = 120;
+        initialHeight = 120;
+      } else if (type === 'mic' || type === 'bluetooth') {
+        initialWidth = 140;
+        initialHeight = 160;
+      } else if (type === 'antenna') {
+        initialWidth = 150;
+        initialHeight = 150;
+      } else if (type === 'actor') {
+        initialWidth = 160;
+        initialHeight = 180;
+      }
+
+      const nodeStyle = { width: initialWidth, height: initialHeight };
+
+      setNodes((nds) => nds.concat({ id, type, position, data: baseData, style: nodeStyle }));
+      window.dispatchEvent(new Event('rf-change'));
+    },
+    [rf, setNodes]
+  );
+
+  const pushSnapshot = useCallback(() => {
+    if (hydratingRef.current) return;
+    const snapshot = {
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      viewport: rf.getViewport(),
+    };
+    const serialized = JSON.stringify(snapshot);
+    if (serialized === lastSnapshotRef.current) return;
+    lastSnapshotRef.current = serialized;
+    const entry = JSON.parse(serialized);
+    const history = historyRef.current;
+    const capped = 100;
+    const base = history.entries.slice(0, history.index + 1);
+    base.push(entry);
+    const trimmed = base.length > capped ? base.slice(base.length - capped) : base;
+    historyRef.current = { entries: trimmed, index: trimmed.length - 1 };
+  }, [rf]);
+
+  const scheduleSnapshot = useCallback(() => {
+    if (hydratingRef.current) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      pushSnapshot();
+    }, 400);
+  }, [pushSnapshot]);
+
+  useEffect(() => {
+    pushSnapshot();
+  }, [pushSnapshot]);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+    scheduleSnapshot();
+  }, [nodes, edges, scheduleSnapshot]);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
+
+  // Get selected nodes and edges
+  const getSelectedItems = useCallback(() => {
+    const selectedNodes = nodes.filter(node => node.selected);
+    const selectedEdges = edges.filter(edge => edge.selected);
+    return { selectedNodes, selectedEdges };
+  }, [nodes, edges]);
+
+  // Copy functionality
+  const copySelected = useCallback(() => {
+    const { selectedNodes, selectedEdges } = getSelectedItems();
+    if (selectedNodes.length > 0 || selectedEdges.length > 0) {
+      setClipboard({ nodes: selectedNodes, edges: selectedEdges });
+      console.log(`Copied ${selectedNodes.length} nodes and ${selectedEdges.length} edges`);
+    }
+  }, [getSelectedItems]);
+
+  // Paste functionality
+  const pasteFromClipboard = useCallback(() => {
+    if (clipboard.nodes.length === 0 && clipboard.edges.length === 0) return;
+
+    const nodeIdMap = new Map();
+    const newNodes = clipboard.nodes.map(node => {
+      const newId = getId();
+      nodeIdMap.set(node.id, newId);
+      return {
+        ...node,
+        id: newId,
+        position: {
+          x: node.position.x + 50, // Offset pasted items
+          y: node.position.y + 50
+        },
+        selected: true // Select pasted items
+      };
+    });
+
+    const newEdges = clipboard.edges.map(edge => {
+      const sourceId = nodeIdMap.get(edge.source);
+      const targetId = nodeIdMap.get(edge.target);
+
+      // Only paste edges if both source and target nodes are being pasted
+      if (sourceId && targetId) {
+        return {
+          ...edge,
+          id: getId(),
+          source: sourceId,
+          target: targetId,
+          selected: true
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    // Deselect all existing items and add new ones
+    setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newNodes));
+    setEdges(eds => eds.map(e => ({ ...e, selected: false })).concat(newEdges));
+
+    console.log(`Pasted ${newNodes.length} nodes and ${newEdges.length} edges`);
+  }, [clipboard, setNodes, setEdges]);
+
+  // Select all functionality
+  const selectAll = useCallback(() => {
+    setNodes(nds => nds.map(n => ({ ...n, selected: true })));
+    setEdges(eds => eds.map(e => ({ ...e, selected: true })));
+  }, [setNodes, setEdges]);
+
+  // Delete selected items
+  const deleteSelected = useCallback(() => {
+    const { selectedNodes, selectedEdges } = getSelectedItems();
+    if (selectedNodes.length > 0 || selectedEdges.length > 0) {
+      setNodes(nds => nds.filter(n => !n.selected));
+      setEdges(eds => eds.filter(e => !e.selected));
+      console.log(`Deleted ${selectedNodes.length} nodes and ${selectedEdges.length} edges`);
+    }
+  }, [getSelectedItems, setNodes, setEdges]);
+
+  const undo = useCallback(() => {
+    const history = historyRef.current;
+    if (history.index <= 0) return;
+    const nextIndex = history.index - 1;
+    const snapshot = history.entries[nextIndex];
+    hydratingRef.current = true;
+    historyRef.current.index = nextIndex;
+    setNodes(snapshot.nodes || []);
+    setEdges(snapshot.edges || []);
+    const serialized = JSON.stringify(snapshot);
+    requestAnimationFrame(() => {
+      if (snapshot.viewport) rf.setViewport(snapshot.viewport);
+      lastSnapshotRef.current = serialized;
+      hydratingRef.current = false;
+    });
+  }, [setNodes, setEdges, rf]);
+
+  const redo = useCallback(() => {
+    const history = historyRef.current;
+    if (history.index >= history.entries.length - 1) return;
+    const nextIndex = history.index + 1;
+    const snapshot = history.entries[nextIndex];
+    hydratingRef.current = true;
+    historyRef.current.index = nextIndex;
+    setNodes(snapshot.nodes || []);
+    setEdges(snapshot.edges || []);
+    const serialized = JSON.stringify(snapshot);
+    requestAnimationFrame(() => {
+      if (snapshot.viewport) rf.setViewport(snapshot.viewport);
+      lastSnapshotRef.current = serialized;
+      hydratingRef.current = false;
+    });
+  }, [setNodes, setEdges, rf]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      // Check if we're in an input field
+      const isInputActive = document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA' ||
+        document.activeElement?.contentEditable === 'true';
+
+      // Skip keyboard shortcuts if user is typing in an input
+      if (isInputActive) return;
+
+      // Keyboard shortcuts
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 'z':
+            if (e.shiftKey) {
+              // Ctrl+Shift+Z for redo
+              e.preventDefault();
+              redo();
+            } else {
+              // Ctrl+Z for undo
+              e.preventDefault();
+              undo();
+            }
+            break;
+          case 'y':
+            // Ctrl+Y for redo
+            e.preventDefault();
+            redo();
+            break;
+          case 'c':
+            // Ctrl+C for copy
+            e.preventDefault();
+            copySelected();
+            break;
+          case 'v':
+            // Ctrl+V for paste
+            e.preventDefault();
+            pasteFromClipboard();
+            break;
+          case 'a':
+            // Ctrl+A for select all
+            e.preventDefault();
+            selectAll();
+            break;
+          default:
+            break;
+        }
+      } else {
+        // Non-Ctrl shortcuts
+        switch (e.key) {
+          case 'Delete':
+          case 'Backspace':
+            e.preventDefault();
+            deleteSelected();
+            break;
+          case 'Escape':
+            // Deselect all
+            setNodes(nds => nds.map(n => ({ ...n, selected: false })));
+            setEdges(eds => eds.map(e => ({ ...e, selected: false })));
+            setSelected(null);
+            break;
+          default:
+            break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo, copySelected, pasteFromClipboard, selectAll, deleteSelected, setNodes, setEdges, setSelected]);
+
+  const filteredGroups = useMemo(() => {
+    const query = paletteSearch.trim().toLowerCase();
+    if (!query) {
+      return PALETTE_GROUPS;
+    }
+    return PALETTE_GROUPS
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.label.toLowerCase().includes(query)),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [paletteSearch]);
+
+  const hasSearch = Boolean(paletteSearch.trim());
+
+  const toast = useToast();
+  const [isSaving, setIsSaving] = useState(false);
+
+  const saveDiagram = async () => {
+    if (!activeTabId || !activeTab) return;
+
+    setIsSaving(true);
+    const payload = {
+      nodes,
+      edges,
+      viewport: rf.getViewport(),
+    };
+
+    console.log("------------------------------------------");
+    console.log("[BlockDiagram] EXPLICIT SAVE TRIGGERED");
+    console.log("[BlockDiagram] Nodes Count:", nodes.length);
+    console.log("[BlockDiagram] Edges Count:", edges.length);
+    console.log("------------------------------------------");
+
+    try {
+      // 1. Save to the specialized Block Diagram backend API (Redux tabs state)
+      // We pass the latest content for the active tab only, or all tabs?
+      // Usually diagramData in ProjectContext expects all tabs for blockDiagram.
+      const latestTabs = tabs.map(t =>
+        t.id === activeTabId
+          ? { ...t, state: payload }
+          : t
+      );
+
+      await saveDiagramData(latestTabs, 'blockDiagram');
+
+      // 2. Save to the individual project file if active project exists
+      if (activeProjectId) {
+        const tabName = activeTab.name || "block_diagram";
+        const sanitizedName = sanitizeSegment(tabName);
+        const fileName = `${sanitizedName}.json`;
+
+        await canvasIntegration.saveCanvasToFile(
+          payload,
+          `BlockDiagram/${fileName}`,
+          activeProjectId
+        );
+        console.log(`[BlockDiagram] Saved to project file: BlockDiagram/${fileName}`);
+      }
+
+      // 3. Mark tab as clean in Redux
+      dispatch(markTabClean(activeTabId));
+
+      toast({
+        title: "Block Diagram Saved",
+        description: `"${activeTab.name}" has been saved successfully.`,
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+        position: "top-right",
+      });
+    } catch (error) {
+      console.error("[BlockDiagram] Save failed:", error);
+      toast({
+        title: "Save Failed",
+        description: error.message || "An error occurred while saving.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+        position: "top-right",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const loadDiagram = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          setNodes(parsed.nodes || []);
+          setEdges(parsed.edges || []);
+          if (parsed.viewport) rf.setViewport(parsed.viewport);
+        } catch (err) {
+          console.error('Invalid diagram JSON', err);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  const showExportPreview = useCallback((dataUrl, fileName) => {
+    const host = reactFlowWrapper.current;
+    if (!host) return;
+    if (getComputedStyle(host).position === 'static') {
+      host.style.position = 'relative';
+    }
+
+    const existing = host.querySelector('.diagram-export-preview');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'diagram-export-preview';
+    Object.assign(overlay.style, {
+      position: 'absolute',
+      top: '16px',
+      right: '16px',
+      width: '260px',
+      maxHeight: '80%',
+      background: 'rgba(15,23,42,0.94)',
+      border: '1px solid rgba(148,163,184,0.25)',
+      borderRadius: '12px',
+      boxShadow: '0 18px 48px rgba(15,23,42,0.45)',
+      padding: '14px 14px 12px',
+      zIndex: '1300',
+      color: '#e2e8f0',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '10px',
+      backdropFilter: 'blur(8px)',
+    });
+
+    const title = document.createElement('div');
+    title.textContent = 'PNG exported';
+    title.style.fontSize = '14px';
+    title.style.fontWeight = '600';
+    overlay.appendChild(title);
+
+    const img = new Image();
+    img.src = dataUrl;
+    img.alt = fileName;
+    Object.assign(img.style, {
+      width: '100%',
+      maxHeight: '160px',
+      objectFit: 'contain',
+      borderRadius: '8px',
+      border: '1px solid rgba(148,163,184,0.3)',
+      background: '#0f172a',
+    });
+    overlay.appendChild(img);
+
+    const meta = document.createElement('div');
+    meta.textContent = fileName;
+    meta.style.fontSize = '11px';
+    meta.style.opacity = '0.75';
+    overlay.appendChild(meta);
+
+    const actions = document.createElement('div');
+    Object.assign(actions.style, {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: '8px',
+    });
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.textContent = 'Download';
+    Object.assign(openBtn.style, {
+      padding: '6px 10px',
+      borderRadius: '6px',
+      border: '1px solid rgba(59,130,246,0.4)',
+      background: '#1d4ed8',
+      color: '#f8fafc',
+      fontSize: '12px',
+      cursor: 'pointer',
+    });
+    openBtn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = fileName;
+      a.click();
+    };
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = 'Close';
+    Object.assign(closeBtn.style, {
+      padding: '6px 10px',
+      borderRadius: '6px',
+      border: '1px solid rgba(148,163,184,0.35)',
+      background: 'transparent',
+      color: '#cbd5f5',
+      fontSize: '12px',
+      cursor: 'pointer',
+    });
+    closeBtn.onclick = () => overlay.remove();
+
+    actions.appendChild(closeBtn);
+    actions.appendChild(openBtn);
+    overlay.appendChild(actions);
+
+    host.appendChild(overlay);
+  }, []);
+
+  const handleExportPNG = useCallback(async () => {
+    // We target the Viewport to ensure we capture exactly the nodes and edges, 
+    // without interference from the container's current pan/zoom state.
+    const viewportElem = reactFlowWrapper.current?.querySelector('.react-flow__viewport');
+    if (!viewportElem) return;
+
+    // Force strict sync of nodes/edges references
+    const currentNodes = nodesRef.current || nodes;
+
+    if (currentNodes.length === 0) {
+      console.warn("No nodes to export");
+      return;
+    }
+
+    let watermark;
+
+    try {
+      // Calculate the bounding box of ALL nodes
+      const nodesBounds = getRectOfNodes(currentNodes);
+
+      // Define margins
+      const padding = 50;
+      const watermarkHeight = 120;
+
+      // Calculate dimensions of the export image
+      const imageWidth = nodesBounds.width + (padding * 2);
+      const imageHeight = nodesBounds.height + (padding * 2) + watermarkHeight;
+
+      // Transform logic:
+      // We want the top-left of the bounding box (nodesBounds.x, nodesBounds.y) 
+      // to be positioned at (padding, padding) in the exported image.
+      // So we need to translate by (-nodesBounds.x + padding, -nodesBounds.y + padding).
+      const viewportTransform = `translate(${-nodesBounds.x + padding}px, ${-nodesBounds.y + padding}px) scale(1)`;
+
+      // Create watermark and append it to the VIEWPORT so it moves with the coordinate system
+      // We position it absolute relative to the viewport's coordinate space.
+      // We place it at the bottom-right of the *content*.
+      watermark = document.createElement('div');
+      watermark.className = 'export-watermark';
+      Object.assign(watermark.style, {
+        position: 'absolute',
+        // Coordinate space is the same as nodes. 
+        // We want it at (nodesBounds.x + nodesBounds.width, nodesBounds.y + nodesBounds.height)
+        // But adjusted for padding in the final image?
+        // No, `toPng` will capture the viewport children as they are configured.
+        // If we append to viewport, we use absolute positioning in the graph coordinates.
+        left: `${nodesBounds.x + nodesBounds.width - 200}px`, // 200px approx width of watermark
+        top: `${nodesBounds.y + nodesBounds.height + 80}px`,  // 80px below content
+        width: 'fit-content',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        background: 'rgba(255,255,255,0.95)',
+        border: '1px solid #e5e5e5',
+        borderRadius: '8px',
+        padding: '8px 12px',
+        fontSize: '13px',
+        fontWeight: '500',
+        color: '#111',
+        pointerEvents: 'none', // dont block mouse while it exists briefly
+        zIndex: '9999',
+      });
+
+      const img = new Image();
+      img.src = hexBg;
+      img.alt = 'InnoIDE';
+      img.style.width = '24px';
+      img.style.height = '24px';
+      img.style.display = 'block';
+
+      // Wait for image to load
+      await new Promise((resolve) => {
+        if (img.complete) {
+          resolve();
+        } else {
+          img.onload = resolve;
+          img.onerror = resolve;
+          setTimeout(resolve, 500);
+        }
+      });
+
+      watermark.appendChild(img);
+      const span = document.createElement('span');
+      span.textContent = 'made with innotrat labs';
+      span.style.whiteSpace = 'nowrap';
+      watermark.appendChild(span);
+
+      // Append strictly to viewport
+      viewportElem.appendChild(watermark);
+
+      // Small delay to ensure render
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const dataUrl = await toPng(viewportElem, {
+        cacheBust: true,
+        backgroundColor: '#ffffff', // Set background since viewport is transparent
+        width: imageWidth,
+        height: imageHeight,
+        style: {
+          width: `${imageWidth}px`,
+          height: `${imageHeight}px`,
+          transform: viewportTransform,
+        },
+      });
+
+      const activeProject = projectFileManager.getActiveProject();
+      const projectSegment = sanitizeSegment(activeProject?.name || activeProjectName || 'project');
+      const timeSegment = sanitizeSegment(new Date().toISOString());
+      const fileName = `${projectSegment}_blockdiagram_${timeSegment}.png`;
+
+      // Save to project using new project file manager
+      if (activeProject) {
+        try {
+          const pngPath = await canvasIntegration.exportCanvasAsPNG(dataUrl, fileName, activeProject.id);
+          if (pngPath) {
+            console.log('PNG exported to project:', pngPath);
+          }
+        } catch (error) {
+          console.error('Failed to save PNG to project:', error);
+        }
+      }
+
+      window.dispatchEvent(
+        new CustomEvent('diagram:export-preview', {
+          detail: {
+            kind: 'BlockDiagram',
+            fileName,
+            dataUrl,
+            timestamp: Date.now(),
+          },
+        })
+      );
+
+      showExportPreview(dataUrl, fileName);
+    } catch (error) {
+      console.error('Failed to export PNG', error);
+    } finally {
+      // Clean up watermark
+      if (watermark && watermark.parentNode) {
+        watermark.parentNode.removeChild(watermark);
+      }
+    }
+  }, [canvasIntegration, activeProjectName, reactFlowWrapper, showExportPreview, nodes, edges]);
+
+  // UI
+  const [showProperties, setShowProperties] = useState(false);
+
+
+  return (
+    <div className="diagram-builder">
+      <CreateProjectIntegration />
+      <MobileMenuButton isOpen={isSidebarOpen} onClick={toggleSidebar} />
+      {isMobile && isSidebarOpen && (
+        <div className="mobile-backdrop is-visible" onClick={closeSidebar} />
+      )}
+      <EditorNavbar
+        activeTab="Block Diagram"
+        onTabChange={handleTabChange}
+        onSaveJSON={saveDiagram}
+        onLoadJSON={loadDiagram}
+        onExportPNG={handleExportPNG}
+      />
+      <div className="content">
+        {/* Left palette */}
+        <div className={`sidebarr bd-sidebar-scope ${isMobile && isSidebarOpen ? 'is-open' : ''}`} style={{ width: sidebarWidth, minWidth: sidebarWidth }}>
+          <div className="sidebar-toggle-bar">
+            <button
+              type="button"
+              className={`sidebar-tab ${isExplorerVisible === 'explorer' ? 'active' : ''}`}
+              onClick={() => setIsExplorerVisible('explorer')}
+            >
+              Explorer
+            </button>
+            <button
+              type="button"
+              className={`sidebar-tab ${isExplorerVisible === 'shapes' ? 'active' : ''}`}
+              onClick={() => setIsExplorerVisible('shapes')}
+            >
+              Shapes
+            </button>
+          </div>
+
+          <div className="sidebar-body">
+            {isExplorerVisible === 'explorer' ? (
+              <FileExplorer variant="diagram" />
+            ) : (
+              <div className="palette-frame">
+                <div className="palette-header">
+                  <div className="palette-title">Shapes</div>
+                </div>
+                <div className="palette-search">
+                  <input
+                    type="text"
+                    placeholder="Search shapes..."
+                    value={paletteSearch}
+                    onChange={(e) => setPaletteSearch(e.target.value)}
+                  />
+                </div>
+                <div className="palette-wrapper">
+                  {filteredGroups.length ? (
+                    filteredGroups.map((g) => {
+                      const isExpanded = hasSearch ? true : openGroups[g.id] ?? true;
+                      const toggleGroup = () => {
+                        if (hasSearch) return;
+                        setOpenGroups((st) => ({ ...st, [g.id]: !st[g.id] }));
+                      };
+                      return (
+                        <div key={g.id} className="palette-group">
+                          <div
+                            className="palette-header"
+                            onClick={toggleGroup}
+                            style={{
+                              cursor: hasSearch ? 'default' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                            }}
+                          >
+                            <div className="palette-title">{g.title}</div>
+                            <span className="palette-chevron">{isExpanded ? '▾' : '▸'}</span>
+                          </div>
+                          {isExpanded && (
+                            <div className="palette-grid">
+                              {g.items.map((s) => (
+                                <div
+                                  key={`${s.type}-${s.label}`}
+                                  className="shape-card"
+                                  draggable
+                                  onDragStart={(e) => handlePaletteDragStart(e, s)}
+                                  title={s.label}
+                                >
+                                  <div className="shape-svg">{s.icon}</div>
+                                  <div className="shape-label">{s.label}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="palette-empty">No shapes match your search.</div>
+                  )}
+                </div>
+                <div className="palette-hint">Drag shapes to canvas.</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sidebar Drag Handle */}
+        <div
+          className="sidebar-resizer"
+          style={{
+            width: '6px',
+            cursor: 'col-resize',
+            background: 'transparent',
+            zIndex: 10,
+          }}
+          onMouseDown={startResizing}
+        />
+
+        {/* Canvas */}
+        <div className="diagram-container">
+          <div style={{
+            padding: '8px 12px',
+            background: '#ffffff',
+            borderBottom: '1px solid #e5e7eb',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <DiagramTabs title="Block Diagram Workspace" kind="blockDiagram" onSaveJSON={saveDiagram} />
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <CreateProductButton />
+            </div>
+          </div>
+          <div className="canvas-frame" onDrop={onDrop} onDragOver={onDragOver}>
+            {isSwitchingProject && <DiagramLoader />}
+
+            {hasFetchedOnce && !isSwitchingProject && nodes.length === 0 && (
+              <DiagramEmptyState />
+            )}
+
+            <div
+              className="rf-wrapper"
+              ref={reactFlowWrapper}
+              style={{
+                width: '100%',
+                height: '100%',
+                opacity: (isSwitchingProject || !isHydrated) ? 0.6 : 1,
+                pointerEvents: (isSwitchingProject) ? 'none' : 'all',
+                transition: 'opacity 0.2s ease',
+              }}
+            >
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onConnectStart={onConnectStart}
+                onConnectEnd={onConnectEnd}
+                onSelectionChange={onSelectionChange}
+                onPaneClick={(e) => { exitEditing(e); setShowProperties(false); }}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                connectionLineType={ConnectionLineType.SmoothStep}
+                defaultEdgeOptions={{
+                  type: 'editable',
+                  markerEnd: { type: MarkerType.ArrowClosed },
+                  style: { strokeWidth: 2, stroke: '#000000' },
+                  label: '',
+                  labelStyle: { fill: '#000000', fontSize: 12 },
+                  data: { showLabel: false }
+                }}
+                connectOnClick={false}
+                connectionMode={ConnectionMode.Strict}
+                minZoom={0.1}
+                maxZoom={4}
+                fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+              >
+                <MiniMap className="export-ignore" />
+                <Controls className="export-ignore">
+                  <ControlButton onClick={undo} title="Undo (Ctrl+Z)">
+                    <RotateCcw size={16} />
+                  </ControlButton>
+                  <ControlButton onClick={redo} title="Redo (Ctrl+Y)">
+                    <RotateCw size={16} />
+                  </ControlButton>
+                </Controls>
+                <Background className="export-ignore" gap={16} size={1} />
+              </ReactFlow>
+            </div>
+
+            {/* Floating Properties Toggle Button */}
+            {!showProperties && (
+              <button
+                className="floating-props-toggle"
+                onClick={() => setShowProperties(true)}
+                title="Show Properties"
+                aria-label="Show Properties Panel"
+              >
+                <Settings size={16} />
+              </button>
+            )}
+
+            {/* Floating Properties Panel */}
+            <div className={`floating-properties-panel${showProperties ? ' is-visible' : ''}`}>
+              <div className="floating-props-header">
+                <span>Properties</span>
+                <button
+                  className="floating-props-close"
+                  onClick={() => setShowProperties(false)}
+                  title="Close"
+                  aria-label="Close Properties Panel"
+                >
+                  ✕
+                </button>
+              </div>
+              <PropertiesPanel
+                selectedNode={selected?.kind === 'node' ? selectedEntity : null}
+                onNodeUpdate={(nodeId, property, value) => {
+                  updateSelectedNode((n) => ({
+                    ...n,
+                    data: { ...n.data, [property]: value }
+                  }));
+                }}
+              />
+            </div>
+          </div>
+        </div>

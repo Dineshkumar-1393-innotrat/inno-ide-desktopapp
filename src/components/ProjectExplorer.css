@@ -1,0 +1,103 @@
+.project-explorer {
+  background-color: #1e293b;
+  color: #e2e8f0;
+  padding: 12px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.create-project-btn {
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px;
+  width: 100%;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.project-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+}
+
+.project-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.project-item.selected {
+  background-color: #334155;
+}
+
+.project-item:hover {
+  background-color: #475569;
+}
+
+.project-item .chevron {
+  margin-right: 8px;
+  transition: transform 0.2s;
+}
+
+.project-item .folder-icon {
+  margin-right: 8px;
+  color: #facc15;
+}
+
+.project-item .project-name {
+  flex-grow: 1;
+}
+
+.project-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  visibility: hidden;
+}
+
+.project-item:hover .project-actions,
+.project-item.selected .project-actions {
+  visibility: visible;
+}
+
+.project-actions button {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.project-actions button:hover {
+  color: #e2e8f0;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  right: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: #1e293b;
+  color: #e2e8f0;
+  border: none;
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  padding: 10px 4px;
+  cursor: pointer;
+  z-index: 10;
+}

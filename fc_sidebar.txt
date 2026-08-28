@@ -1,0 +1,258 @@
+<div
+          className="sidebarr fc-sidebar-scope"
+          style={{ width: sidebarWidth, minWidth: sidebarWidth, maxWidth: sidebarWidth, flex: `0 0 ${sidebarWidth}px` }}
+        >
+          <div className="sidebar-toggle-bar">
+            <button
+              type="button"
+              className={`sidebar-tab ${isExplorerVisible === "explorer" ? "active" : ""}`}
+              onClick={() => setIsExplorerVisible("explorer")}
+            >
+              Explorer
+            </button>
+            <button
+              type="button"
+              className={`sidebar-tab ${isExplorerVisible === "shapes" ? "active" : ""}`}
+              onClick={() => setIsExplorerVisible("shapes")}
+            >
+              Shapes
+            </button>
+          </div>
+
+          <div className="sidebar-body">
+            {isExplorerVisible === "explorer" ? (
+              <FileExplorer variant="diagram" />
+            ) : (
+              <div className="palette-frame">
+                <div className="palette-header">
+                  <div className="palette-title">Shapes</div>
+                </div>
+                <div className="palette-search">
+                  <input
+                    type="text"
+                    placeholder="Search shapes..."
+                    value={paletteSearch}
+                    onChange={(e) => setPaletteSearch(e.target.value)}
+                  />
+                </div>
+                <div className="palette-wrapper">
+                  {filteredGroups.length ? (
+                    filteredGroups.map((g) => {
+                      const isExpanded = hasSearch
+                        ? true
+                        : (openGroups[g.id] ?? true);
+                      const toggleGroup = () => {
+                        if (hasSearch) return;
+                        setOpenGroups((st) => ({ ...st, [g.id]: !st[g.id] }));
+                      };
+                      return (
+                        <div key={g.id} className="palette-group">
+                          <div
+                            className="palette-header"
+                            onClick={toggleGroup}
+                            style={{
+                              cursor: hasSearch ? "default" : "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <div className="palette-title">{g.title}</div>
+                            <span className="palette-chevron">
+                              {isExpanded ? "▾" : "▸"}
+                            </span>
+                          </div>
+                          {isExpanded && (
+                            <div className="palette-grid">
+                              {g.items.map((s) => (
+                                <div
+                                  key={s.id || `${s.type}-${s.label}`}
+                                  className="shape-card"
+                                  draggable
+                                  onDragStart={(e) => handlePaletteDragStart(e, s)}
+                                  title={s.label}
+                                >
+                                  <div className="shape-svg">{s.icon}</div>
+                                  <div className="shape-label">{s.label}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="palette-empty">
+                      No shapes match your search.
+                    </div>
+                  )}
+                </div>
+                <div className="palette-hint">
+                  Drag from node handles to connect.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sidebar Drag Handle */}
+        <div
+          style={{
+            width: '6px',
+            background: 'transparent',
+            cursor: 'col-resize',
+            zIndex: 10,
+          }}
+          className="sidebar-resizer"
+          onMouseDown={startResizing}
+        />
+
+        {/* Canvas */}
+        <div className="diagram-container">
+          <div
+            style={{
+              padding: "8px 12px",
+              background: "#ffffff",
+              borderBottom: "1px solid #e5e7eb",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <DiagramTabs title="Flowchart Workspace" kind="flowchart" onSaveJSON={saveDiagram} />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {/* <button
+                onClick={async () => {
+                  const result = await loadSequenceDiagram('/deepseek_json_20260102_a52fe1.json');
+                  if (result) {
+                    const newId = `sequence-${Date.now()}`;
+                    dispatch(addTab({
+                      id: newId,
+                      name: "Deepseek Sequence",
+                      state: {
+                        nodes: result.nodes,
+                        edges: result.edges,
+                        viewport: result.viewport
+                      },
+                      dirty: true
+                    }));
+                  }
+                }}
+                title="Load Device Sequence Diagram"
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #e2e8f0',
+                  background: '#f8fafc',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <ArrowLeftRight size={14} />
+                Load Sequence
+              </button> */}
+              <CreateProductButton />
+            </div>
+          </div>
+          <div className="canvas-frame" onDrop={onDrop} onDragOver={onDragOver}>
+            {isSwitchingProject && <DiagramLoader />}
+
+            {hasFetchedOnce && !isSwitchingProject && nodes.length === 0 && (
+              <DiagramEmptyState />
+            )}
+
+            <div
+              className="rf-wrapper"
+              ref={reactFlowWrapper}
+              style={{
+                width: '100%',
+                height: '100%',
+                opacity: (isSwitchingProject || !isHydrated) ? 0.6 : 1,
+                pointerEvents: isSwitchingProject ? 'none' : 'all',
+                transition: 'opacity 0.2s ease'
+              }}
+            >
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onConnectStart={onConnectStart}
+                onConnectEnd={onConnectEnd}
+                onInit={setReactFlowInstance}
+                onNodeDragStop={onNodeDragStop}
+                onSelectionChange={onSelectionChange}
+                onPaneClick={(e) => { exitEditing(e); setShowProperties(false); }}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                connectionLineType={ConnectionLineType.SmoothStep}
+                defaultEdgeOptions={{
+                  type: "editable",
+                  markerEnd: { type: MarkerType.ArrowClosed },
+                }}
+                connectOnClick={false}
+                connectionMode={ConnectionMode.Strict}
+                isValidConnection={(c) =>
+                  Boolean(c.sourceHandle && c.targetHandle)
+                }
+                snapToGrid
+                snapGrid={[16, 16]}
+                minZoom={0.1}
+                maxZoom={4}
+                fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+              >
+                <MiniMap className="export-ignore" />
+                <Controls className="export-ignore">
+                  <ControlButton onClick={undo} title="Undo (Ctrl+Z)">
+                    <RotateCcw size={16} />
+                  </ControlButton>
+                  <ControlButton onClick={redo} title="Redo (Ctrl+Y)">
+                    <RotateCw size={16} />
+                  </ControlButton>
+                </Controls>
+                <Background className="export-ignore" gap={16} size={1} />
+              </ReactFlow>
+            </div>
+
+            {/* Floating Properties Toggle Button */}
+            {!showProperties && (
+              <button
+                className="floating-props-toggle"
+                onClick={() => setShowProperties(true)}
+                title="Show Properties"
+                aria-label="Show Properties Panel"
+              >
+                <Settings size={16} />
+              </button>
+            )}
+
+            {/* Floating Properties Panel */}
+            <div className={`floating-properties-panel${showProperties ? ' is-visible' : ''}`}>
+              <div className="floating-props-header">
+                <span>Properties</span>
+                <button
+                  className="floating-props-close"
+                  onClick={() => setShowProperties(false)}
+                  title="Close"
+                  aria-label="Close Properties Panel"
+                >
+                  ✕
+                </button>
+              </div>
+              <PropertiesPanel
+                selectedNode={selected?.kind === "node" ? selectedEntity : null}
+                onNodeUpdate={(nodeId, property, value) => {
+                  updateSelectedNode((n) => ({
+                    ...n,
+                    data: { ...n.data, [property]: value },
+                  }));
+                }}
+              />
+            </div>
+          </div>
+        </div>

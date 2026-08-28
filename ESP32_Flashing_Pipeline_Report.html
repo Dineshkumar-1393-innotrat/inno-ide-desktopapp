@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 Firmware Flashing Pipeline Technical Report</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    @page {
+      size: A4 portrait;
+      margin: 14mm 14mm 14mm 14mm;
+      @bottom-right {
+        content: counter(page);
+        font-family: 'Inter', sans-serif;
+        font-size: 9pt;
+        color: #64748b;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+      color: #1e293b;
+      background-color: #ffffff;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Cover / Header Section */
+    .header-banner {
+      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 60%, #3b82f6 100%);
+      color: #ffffff;
+      padding: 24px 28px;
+      border-radius: 12px;
+      margin-bottom: 22px;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.15);
+    }
+
+    .header-title {
+      font-size: 20pt;
+      font-weight: 800;
+      margin: 0 0 6px 0;
+      letter-spacing: -0.5px;
+    }
+
+    .header-subtitle {
+      font-size: 11pt;
+      font-weight: 400;
+      opacity: 0.9;
+      margin: 0 0 14px 0;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 8.5pt;
+      opacity: 0.85;
+      border-top: 1px solid rgba(255, 255, 255, 0.25);
+      padding-top: 10px;
+    }
+
+    .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .meta-item strong {
+      font-weight: 600;
+    }
+
+    h2 {
+      font-size: 13.5pt;
+      font-weight: 700;
+      color: #0f172a;
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 5px;
+      margin-top: 24px;
+      margin-bottom: 12px;
+      letter-spacing: -0.2px;
+    }
+
+    h3 {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #1e40af;
+      margin-top: 16px;
+      margin-bottom: 6px;
+    }
+
+    p {
+      margin: 0 0 10px 0;
+      color: #334155;
+    }
+
+    /* Cards and Callouts */
+    .card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 8pt;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-blue { background: #dbeafe; color: #1d4ed8; }
+    .badge-green { background: #dcfce7; color: #15803d; }
+    .badge-amber { background: #fef3c7; color: #b45309; }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px 0;
+      font-size: 9.5pt;
+    }
+
+    th {
+      background-color: #f1f5f9;
+      color: #0f172a;
+      text-align: left;
+      font-weight: 600;
+      padding: 8px 10px;
+      border-top: 1px solid #cbd5e1;
+      border-bottom: 2px solid #cbd5e1;
+    }
+
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #334155;
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td {
+      background-color: #f8fafc;
+    }
+
+    /* Code Blocks */
+    pre, code {
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+    }
+
+    code {
+      background-color: #f1f5f9;
+      color: #0f172a;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 8.5pt;
+      border: 1px solid #e2e8f0;
+    }
+
+    pre {
+      background-color: #0f172a;
+      color: #f8fafc;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 8.5pt;
+      line-height: 1.45;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 10px 0 14px 0;
+    }
+
+    /* Step Pipeline Flow */
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 14px 0;
+    }
+
+    .pipeline-box {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 10px 14px;
+      border-left: 4px solid #2563eb;
+    }
+
+    .pipeline-step-title {
+      font-weight: 700;
+      font-size: 10pt;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+
+    .pipeline-step-desc {
+      font-size: 8.5pt;
+      color: #64748b;
+      line-height: 1.4;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+
+    .flowchart-container {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 14px;
+      margin: 12px 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 8.5pt;
+      line-height: 1.4;
+      color: #1e293b;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header-banner">
+    <div class="header-title">ESP32 Firmware Flashing Pipeline</div>
+    <div class="header-subtitle">Architecture, Execution Engine, and Dual-Stage Recovery Technical Report</div>
+    <div class="meta-row">
+      <div class="meta-item"><strong>Platform:</strong> InnoIDE Desktop (Electron + React + ESP-IDF)</div>
+      <div class="meta-item"><strong>Target Hardware:</strong> ESP32 / ESP32-S3 / ESP32-C6 / ESP8266</div>
+      <div class="meta-item"><strong>Flashing Engine:</strong> Python esptool direct invocation</div>
+      <div class="meta-item"><strong>Baud Rates:</strong> 460800 (High Speed) / 115200 (Recovery)</div>
+    </div>
+  </div>
+
+  <!-- Section 1 -->
+  <h2>1. Executive Summary &amp; Architecture Overview</h2>
+  <p>
+    The InnoIDE ESP32 Flashing Subsystem provides a zero-configuration, resilient firmware build and flashing pipeline. It eliminates the need for developers to manually configure command-line toolchains or enter ESP-IDF terminal sessions.
+  </p>
+
+  <div class="pipeline-grid">
+    <div class="pipeline-box">
+      <div class="pipeline-step-title">1. UI &amp; Wizard Layer</div>
+      <div class="pipeline-step-desc">React (<code>ESP32Flasher.jsx</code>) provides interactive wizard steps, real-time log streaming, progress percentages, and companion app design.</div>
+    </div>
+    <div class="pipeline-box">
+      <div class="pipeline-step-title">2. Electron IPC Bridge</div>
+      <div class="pipeline-step-desc"><code>flash.service.js</code> manages background subprocesses, auto-detects ESP-IDF environments, and guards against COM port collisions.</div>
+    </div>
+    <div class="pipeline-box">
+      <div class="pipeline-step-title">3. Toolchain &amp; Build Engine</div>
+      <div class="pipeline-step-desc"><code>flash_agent.py</code> writes C sources, injects required hardware component manifests (e.g. <code>led_strip</code>), and coordinates Ninja compilation.</div>
+    </div>
+    <div class="pipeline-box">
+      <div class="pipeline-step-title">4. Hardware Direct Flasher</div>
+      <div class="pipeline-step-desc">Direct invocation of <code>esptool.py</code> with <code>flasher_args.json</code> parameters, bypassing CMake bugs for reliable writes to flash memory.</div>
+    </div>
+  </div>
+
+  <div class="flowchart-container">
+[React UI (ESP32Flasher)] ──(IPC: flash:run-pipeline)──► [Electron Main Process]
+                                                              │
+                                            ┌─────────────────┴─────────────────┐
+                                            ▼                                   ▼
+                               [Capture ESP-IDF Env]               [Disconnect Active Monitor]
+                               (via export.bat)                    (prevents COM port busy)
+                                            │                                   │
+                                            └─────────────────┬─────────────────┘
+                                                              ▼
+                                               [Spawn python/flash_agent.py]
+                                                              │
+                    ┌─────────────────┬───────────────────────┼───────────────────────┐
+                    ▼                 ▼                       ▼                       ▼
+             [1. Write C Code]  [2. Set Target]         [3. idf.py build]     [4. esptool write_flash]
+             (main.c, CMake)    (clean if changed)      (creates binaries)    (460800 baud UART/USB)
+                    │                 │                       │                       │
+                    └─────────────────┴───────────────────────┼───────────────────────┘
+                                                              ▼
+                                                   [Physical ESP32 Board]
+  </div>
+
+  <!-- Section 2 -->
+  <h2>2. Detailed Stage-by-Stage Workflow</h2>
+
+  <h3>Stage 1: Hardware Discovery &amp; Port Reservation</h3>
+  <p>
+    The system scans available serial ports and filters for physical USB communication ports (CP2102, CH340, FTDI, or native ESP32-S3 USB CDC). Before launching the build, any active serial monitors connected to the target port are gracefully terminated to prevent <code>Access Denied (COM Busy)</code> exceptions on Windows.
+  </p>
+
+  <h3>Stage 2: Dynamic ESP-IDF Environment Capture</h3>
+  <p>
+    Rather than requiring system PATH modifications, <code>flash.service.js</code> dynamically scans standard Espressif framework directories (<code>C:\Espressif\frameworks\esp-idf-v5.x</code>). It invokes <code>export.bat</code> in a subshell, captures the environment variables (<code>IDF_PATH</code>, <code>IDF_PYTHON_ENV_PATH</code>, compiler toolchains), and injects them directly into the Python process.
+  </p>
+
+  <h3>Stage 3: Source Code &amp; Component Manifest Generation</h3>
+  <p>
+    <code>flash_agent.py</code> writes the code directly into the workspace:
+  </p>
+  <ul>
+    <li><strong><code>main/main.c</code></strong>: The user's embedded C firmware logic.</li>
+    <li><strong><code>main/idf_component.yml</code></strong>: Automatically created if libraries like <code>led_strip.h</code> are referenced.</li>
+    <li><strong><code>main/CMakeLists.txt</code></strong>: Injects component requirements (<code>REQUIRES esp_driver_rmt esp_driver_gpio driver led_strip</code>).</li>
+    <li><strong><code>CMakeLists.txt</code></strong>: Standard ESP-IDF root project configuration.</li>
+  </ul>
+
+  <div class="page-break"></div>
+
+  <!-- Section 3 -->
+  <h2>3. Compilation &amp; esptool Binary Write</h2>
+
+  <h3>Stage 4: Target Configuration &amp; Firmware Build</h3>
+  <p>
+    The target architecture is validated (e.g., <code>esp32s3</code>). If switching chip targets, previous build artifacts and <code>sdkconfig</code> files are cleaned automatically. <code>idf.py build</code> is executed via Ninja to compile three critical binaries:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Binary Component</th>
+        <th>Target Offset</th>
+        <th>File Path</th>
+        <th>Function</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Bootloader</strong></td>
+        <td><code>0x0</code> / <code>0x1000</code></td>
+        <td><code>build/bootloader/bootloader.bin</code></td>
+        <td>Initializes basic hardware, clock, and memory maps</td>
+      </tr>
+      <tr>
+        <td><strong>Partition Table</strong></td>
+        <td><code>0x8000</code></td>
+        <td><code>build/partition_table/partition-table.bin</code></td>
+        <td>Defines NVS, OTA data, and application partition boundaries</td>
+      </tr>
+      <tr>
+        <td><strong>App Firmware</strong></td>
+        <td><code>0x10000</code></td>
+        <td><code>build/ESP32_Firmware_Project.bin</code></td>
+        <td>Compiled user application and FreeRTOS tasks</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Stage 5: Direct High-Speed Flash Execution</h3>
+  <p>
+    Flashing executes directly via <code>esptool.py</code> using parameters parsed from <code>build/flasher_args.json</code>:
+  </p>
+
+  <pre>python.exe esptool.py \
+  --chip esp32s3 \
+  --port COM3 \
+  --baud 460800 \
+  --before default_reset \
+  --after hard_reset \
+  write_flash \
+  --flash_mode dio \
+  --flash_freq 80m \
+  --flash_size 2MB \
+  0x0 build/bootloader/bootloader.bin \
+  0x8000 build/partition_table/partition-table.bin \
+  0x10000 build/ESP32_Firmware_Project.bin</pre>
+
+  <!-- Section 4 -->
+  <h2>4. Dual-Stage Auto-Recovery Mechanism</h2>
+  <p>
+    Certain microcontrollers (especially native USB CDC on ESP32-S3) may fail auto-reset due to USB-UART timing. The system employs an intelligent 2-attempt recovery routine:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Attempt</th>
+        <th>Baud Rate</th>
+        <th>Reset Mode</th>
+        <th>Behavior &amp; User Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-green">Attempt 1</span></td>
+        <td><strong>460,800 baud</strong></td>
+        <td><code>default_reset</code></td>
+        <td>High-speed flash with automated RTS/DTR pin toggle. Used for standard flashing.</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-amber">Attempt 2</span></td>
+        <td><strong>115,200 baud</strong></td>
+        <td><code>no_reset</code></td>
+        <td>
+          Triggered if auto-reset times out. UI instructs user: <em>"Hold BOOT &rarr; Tap EN/RST &rarr; Release BOOT"</em> with a 5-second countdown to flash directly into ROM bootloader.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Section 5 -->
+  <h2>5. Event Stream &amp; Real-Time UI Synchronization</h2>
+  <p>
+    During execution, <code>flash_agent.py</code> streams JSON events across standard output. <code>flash.service.js</code> forwards these to the renderer process via <code>webContents.send('flash:event', data)</code>:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Stream Event</th>
+        <th>UI Progress</th>
+        <th>Status Text in Flasher Modal</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>setting_target</code></td>
+        <td><strong>20%</strong></td>
+        <td>Setting chip target esp32s3...</td>
+      </tr>
+      <tr>
+        <td><code>building</code> / <code>build_stdout</code></td>
+        <td><strong>45% &ndash; 75%</strong></td>
+        <td>Compiling firmware modules with ESP-IDF...</td>
+      </tr>
+      <tr>
+        <td><code>flashing</code> / <code>flash_stdout</code></td>
+        <td><strong>80% &ndash; 95%</strong></td>
+        <td>Writing sectors to Flash memory at 460800 baud...</td>
+      </tr>
+      <tr>
+        <td><code>flash_success</code></td>
+        <td><strong>100%</strong></td>
+        <td>Firmware successfully written &amp; verified! (Transitions to Success/App Builder)</td>
+      </tr>
+    </tbody>
+  </table>
+
+</body>
+</html>

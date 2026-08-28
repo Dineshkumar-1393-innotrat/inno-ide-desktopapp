@@ -1,0 +1,54 @@
+/* .textbox-container {
+    background-color: #f9f9f9;
+  } */
+  
+  .textbox {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 8px;
+    /* background-color: white; */
+    /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); */
+  }
+  
+  .textbox-header {
+    display: flex;
+    justify-content: flex-end;
+  }
+  
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  
+  .textbox-content {
+    width: 100%;
+    height: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+  }
+  
+  .resize-handle {
+    position: absolute;
+    /* background: rgba(0, 0, 0, 0.2); */
+    z-index: 1;
+  }
+  
+  .resize-handle-right {
+    width: 10px;
+    height: 100%;
+    top: 0;
+    right: 0;
+    cursor: ew-resize;
+  }
+  
+  .resize-handle-bottom {
+    width: 100%;
+    height: 10px;
+    bottom: 0;
+    left: 0;
+    cursor: ns-resize;
+  }
+  
