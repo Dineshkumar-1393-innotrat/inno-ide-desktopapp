@@ -54,22 +54,30 @@ const router = (isElectron || isFileProtocol)
   ? createHashRouter(routes, routerOptions)
   : createBrowserRouter(routes, routerOptions);
 
+const appContent = (
+  <ChakraProvider theme={theme}>
+    <StyledEngineProvider injectFirst>
+      <MUIThemeProvider theme={muiTheme}>
+        <RouterProvider router={router} />
+      </MUIThemeProvider>
+    </StyledEngineProvider>
+  </ChakraProvider>
+);
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <Provider store={store}>
       <PersistGate loading={null} persistor={persistor}>
-        <GoogleOAuthProvider
-          clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}
-          onScriptLoadError={(err) => console.error('Google OAuth script failed to load:', err)}
-        >
-          <ChakraProvider theme={theme}>
-            <StyledEngineProvider injectFirst>
-              <MUIThemeProvider theme={muiTheme}>
-                <RouterProvider router={router} />
-              </MUIThemeProvider>
-            </StyledEngineProvider>
-          </ChakraProvider>
-        </GoogleOAuthProvider>
+        {import.meta.env.VITE_GOOGLE_CLIENT_ID ? (
+          <GoogleOAuthProvider
+            clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID}
+            onScriptLoadError={(err) => console.warn('Google OAuth script failed to load:', err)}
+          >
+            {appContent}
+          </GoogleOAuthProvider>
+        ) : (
+          appContent
+        )}
       </PersistGate>
     </Provider>
   </React.StrictMode>

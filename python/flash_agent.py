@@ -8,6 +8,8 @@ import shutil
 
 # Allowed target chips for ESP-IDF
 ALLOWED_TARGETS = {"esp32", "esp32c2", "esp32c3", "esp32c6", "esp32s2", "esp32s3"}
+# Extended set that also accepts 'auto' for auto-detection
+ALLOWED_TARGETS_WITH_AUTO = ALLOWED_TARGETS | {"auto"}
 DEFAULT_URL = "http://localhost:5010/check-code"
 last_idf_lookup_error = ""
 
@@ -42,20 +44,35 @@ def find_idf_python():
         if os.path.exists(candidate):
             return candidate
 
-    idf_tools_path = get_env("IDF_TOOLS_PATH") or os.path.join(os.path.expanduser("~"), ".espressif")
-    python_env_dir = os.path.join(idf_tools_path, "python_env")
-    if os.path.isdir(python_env_dir):
-        for name in sorted(os.listdir(python_env_dir), reverse=True):
-            candidate = os.path.join(
-                python_env_dir,
-                name,
-                "Scripts" if os.name == "nt" else "bin",
-                "python.exe" if os.name == "nt" else "python"
-            )
-            if os.path.exists(candidate):
-                return candidate
+    # Search standard tools directories
+    search_dirs = []
+    env_tools = get_env("IDF_TOOLS_PATH")
+    if env_tools:
+        search_dirs.append(env_tools)
+    search_dirs.extend([
+        r"D:\esp-idf-tools",
+        r"C:\esp-idf-tools",
+        r"C:\Espressif\tools",
+        r"D:\Espressif\tools",
+        os.path.join(os.path.expanduser("~"), ".espressif")
+    ])
 
-    return None
+    for idf_tools_path in search_dirs:
+        python_env_dir = os.path.join(idf_tools_path, "python_env")
+        if os.path.isdir(python_env_dir):
+            for name in sorted(os.listdir(python_env_dir), reverse=True):
+                candidate = os.path.join(
+                    python_env_dir,
+                    name,
+                    "Scripts" if os.name == "nt" else "bin",
+                    "python.exe" if os.name == "nt" else "python"
+                )
+                if os.path.exists(candidate):
+                    return candidate
+
+    # Check python in PATH as fallback
+    py_in_path = shutil.which("python") or shutil.which("python3")
+    return py_in_path
 
 def describe_idf_lookup_error():
     """Provide a useful error for the UI when ESP-IDF is installed but not configured."""
@@ -72,13 +89,32 @@ def describe_idf_lookup_error():
 
     return "'idf.py' executable not found. Ensure ESP-IDF is installed and export.bat has been run."
 
+def get_idf_path():
+    """Locate ESP-IDF installation directory."""
+    p = get_env("IDF_PATH")
+    if p and os.path.exists(p):
+        return p
+    candidates = [
+        r"D:\ESP-IDF",
+        r"D:\esp-idf",
+        r"C:\Espressif\frameworks\esp-idf-v5.3",
+        r"C:\Espressif\frameworks\esp-idf-v5.2.2",
+        r"C:\Espressif\esp-idf",
+        r"C:\esp-idf",
+        os.path.join(os.path.expanduser("~"), "esp", "esp-idf")
+    ]
+    for cand in candidates:
+        if os.path.isdir(cand) and (os.path.isfile(os.path.join(cand, "tools", "idf.py")) or os.path.isfile(os.path.join(cand, "export.bat"))):
+            return cand
+    return ""
+
 def find_idf_py_executable():
     """Locate idf.py executable or Python script."""
     global last_idf_lookup_error
     last_idf_lookup_error = ""
 
     # Prefer the selected ESP-IDF installation and its own Python virtualenv.
-    idf_path = get_env("IDF_PATH")
+    idf_path = get_idf_path()
     if idf_path:
         script_path = os.path.join(idf_path, "tools", "idf.py")
         if os.path.exists(script_path):
@@ -99,6 +135,74 @@ def find_idf_py_executable():
         return [idf_in_path]
 
     return None
+
+def detect_chip(port):
+    """Auto-detect the ESP32 chip variant connected on the given serial port.
+
+    Uses `esptool.py chip_id` with --chip auto to identify the chip.
+    Returns a lowercase target string like 'esp32', 'esp32s3', 'esp32c3', etc.
+    Returns None if detection fails.
+    """
+    if not port:
+        return None
+
+    idf_python = find_idf_python()
+    if not idf_python:
+        return None
+
+    idf_path = get_idf_path()
+    esptool_script = ""
+    if idf_path:
+        cand_script = os.path.join(idf_path, "components", "esptool_py", "esptool", "esptool.py")
+        if os.path.isfile(cand_script):
+            esptool_script = cand_script
+
+    try:
+        # Prefer python -m esptool
+        cmd = [
+            idf_python, "-m", "esptool",
+            "--chip", "auto",
+            "--port", port,
+            "chip_id"
+        ]
+        send_event("log", stream="system", log=f"[AutoDetect] Detecting chip on {port}...")
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        output = (proc.stdout or "") + (proc.stderr or "")
+
+        # Fallback to direct script if -m esptool failed
+        if proc.returncode != 0 and esptool_script:
+            cmd2 = [idf_python, esptool_script, "--chip", "auto", "--port", port, "chip_id"]
+            proc2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=15)
+            if proc2.returncode == 0:
+                output = (proc2.stdout or "") + (proc2.stderr or "")
+
+        # Parse the chip type from esptool output
+        chip_map = {
+            "esp32-s3": "esp32s3",
+            "esp32-s2": "esp32s2",
+            "esp32-c3": "esp32c3",
+            "esp32-c2": "esp32c2",
+            "esp32-c6": "esp32c6",
+            "esp32-h2": "esp32h2",
+            "esp32": "esp32",
+        }
+
+        output_lower = output.lower()
+        # Check most specific first (e.g. esp32-s3 before esp32)
+        for pattern, target in sorted(chip_map.items(), key=lambda x: -len(x[0])):
+            if pattern in output_lower:
+                send_event("log", stream="system", log=f"[AutoDetect] Detected chip: {target}")
+                return target
+
+        send_event("log", stream="system", log=f"[AutoDetect] Could not parse chip type from output: {output[:200]}")
+        return None
+    except subprocess.TimeoutExpired:
+        send_event("log", stream="system", log=f"[AutoDetect] Chip detection timed out on {port}")
+        return None
+    except Exception as e:
+        send_event("log", stream="system", log=f"[AutoDetect] Chip detection error: {e}")
+        return None
+
 
 def check_env(target="esp32c6"):
     """Check Python environment, ESP-IDF installation, idf.py, CMake, Ninja, esptool."""
@@ -171,7 +275,7 @@ def write_project_files(code, project_dir):
         send_event("log", stream="system", log=f"Updated {main_c_path}")
 
         # Check if code requires led_strip or other components
-        requires_components = ["esp_driver_rmt", "esp_driver_gpio", "driver"]
+        requires_components = ["esp_driver_rmt", "esp_driver_gpio", "driver", "esp_driver_usb_serial_jtag", "esp_driver_uart", "vfs"]
         idf_component_path = os.path.join(main_dir, "idf_component.yml")
         if "led_strip.h" in normalized_code or "led_strip" in normalized_code:
             if "led_strip" not in requires_components:
@@ -219,6 +323,22 @@ _SERIAL_FAIL_KEYWORDS = (
     "Failed to connect",
     "Timed out waiting",
 )
+
+# Keywords that indicate a chip type mismatch (wrong --chip argument)
+_CHIP_MISMATCH_KEYWORDS = (
+    "Wrong --chip argument",
+    "not ESP32-S3",
+    "not ESP32-S2",
+    "not ESP32-C3",
+    "not ESP32-C2",
+    "not ESP32-C6",
+    "not ESP32",
+)
+
+def _is_chip_mismatch(output_lines):
+    """Return True if collected output lines indicate a chip type mismatch."""
+    combined = "\n".join(output_lines)
+    return any(kw in combined for kw in _CHIP_MISMATCH_KEYWORDS)
 
 def run_idf_command(idf_args, stage_name, stream_name, cwd, collect_output=False):
     """Run an idf.py command and stream lines to stdout via JSON lines.
@@ -273,7 +393,7 @@ def _is_serial_reset_failure(output_lines):
     return any(kw in combined for kw in _SERIAL_FAIL_KEYWORDS)
 
 
-def flash_firmware(port, project_dir, target="esp32s3"):
+def flash_firmware(port, project_dir, target="auto"):
     """Flash firmware to ESP32 using direct esptool.py (bypassing CMake/ninja).
 
     Attempt 1: Direct esptool flash at 460800 baud with default_reset (auto-reset).
@@ -293,13 +413,30 @@ def flash_firmware(port, project_dir, target="esp32s3"):
     if success:
         return True
 
+    # -- Handle chip mismatch: re-detect and retry --------------------------
+    if _is_chip_mismatch(output):
+        send_event("log", stream="system", log=(
+            f"[Flash] Chip type mismatch detected on {port}. Auto-detecting correct chip..."
+        ))
+        detected = detect_chip(port)
+        if detected and detected != target:
+            send_event("log", stream="system", log=(
+                f"[Flash] Retrying flash with detected chip type: {detected}"
+            ))
+            success_retry, output_retry = _flash_with_esptool_direct(
+                port, project_dir, target=detected, baud="460800", before_reset="default_reset", collect_output=True
+            )
+            if success_retry:
+                return True
+            output = output_retry  # Use retry output for further error handling
+
     # -- Attempt 2: Direct esptool with manual bootloader mode ---------------
     if _is_serial_reset_failure(output):
         send_event("log", stream="system", log=(
             f"[Flash] Auto-reset failed on {port} (Write timeout / PID error)."
         ))
         send_event("log", stream="system", log="=" * 60)
-        send_event("log", stream="system", log="ACTION REQUIRED - Put ESP32-S3 into bootloader mode:")
+        send_event("log", stream="system", log="ACTION REQUIRED - Put ESP32 into bootloader mode:")
         send_event("log", stream="system", log="  1. Press and hold the BOOT (IO0) button on your board")
         send_event("log", stream="system", log="  2. While holding BOOT, press and release the EN/RST button")
         send_event("log", stream="system", log="  3. Release the BOOT button")
@@ -335,7 +472,7 @@ def flash_firmware(port, project_dir, target="esp32s3"):
     return False
 
 
-def _flash_with_esptool_direct(port, project_dir, target="esp32s3", baud="460800", before_reset="default_reset", collect_output=False):
+def _flash_with_esptool_direct(port, project_dir, target="auto", baud="460800", before_reset="default_reset", collect_output=False):
     """Invoke esptool.py directly, bypassing idf.py/cmake entirely.
 
     This avoids the ESP-IDF 5.5 double-semicolon CMake bug and lets us
@@ -367,7 +504,8 @@ def _flash_with_esptool_direct(port, project_dir, target="esp32s3", baud="460800
 
     # -- Build the esptool argument list from flasher_args.json ------------
     flasher_json_path = os.path.join(build_dir, "flasher_args.json")
-    chip = target  # default; overridden by JSON if available
+    # Use flasher_args.json chip if available; fall back to target param; use 'auto' as last resort
+    chip = target if target != "auto" else "auto"  # default; overridden by JSON if available
     write_flash_args = []
     file_args = []
 
@@ -570,6 +708,18 @@ def start_monitor(port, project_dir):
 
 def run_pipeline(url, target, port, project_dir, code_file=""):
     """Run full pipeline: fetch/read -> write -> set_target -> build -> flash (and STOP)."""
+    # Auto-detect chip from hardware if target is 'auto'
+    if target.lower() == "auto":
+        send_event("log", stream="system", log="[Pipeline] Target set to 'auto'. Detecting connected chip...")
+        detected = detect_chip(port)
+        if detected and detected in ALLOWED_TARGETS:
+            send_event("log", stream="system", log=f"[Pipeline] Auto-detected chip: {detected}")
+            target = detected
+        else:
+            current = get_current_idf_target(project_dir)
+            target = current if (current and current in ALLOWED_TARGETS) else "esp32s3"
+            send_event("log", stream="system", log=f"[Pipeline] Could not auto-detect chip. Using '{target}'.")
+
     if target.lower() not in ALLOWED_TARGETS:
         send_event("error", stage="validation", message=f"Invalid target '{target}'. Allowed targets: {sorted(list(ALLOWED_TARGETS))}")
         return False
@@ -629,7 +779,7 @@ def run_pipeline(url, target, port, project_dir, code_file=""):
 def main():
     parser = argparse.ArgumentParser(description="ESP32 Firmware Flasher Worker")
     parser.add_argument("--action", required=True, choices=["pipeline", "fetch", "write", "set_target", "build", "flash", "monitor", "check_env"], help="Action to execute")
-    parser.add_argument("--target", default="esp32s3", help="ESP32 chip target")
+    parser.add_argument("--target", default="auto", help="ESP32 chip target (auto, esp32, esp32s2, esp32s3, esp32c3, esp32c6, etc.)")
     parser.add_argument("--port", default="", help="Serial COM port")
     parser.add_argument("--url", default=DEFAULT_URL, help="Backend API URL for firmware code")
     parser.add_argument("--project-dir", default=os.getcwd(), help="Root directory of ESP-IDF project")
@@ -638,8 +788,8 @@ def main():
     args = parser.parse_args()
 
     target = args.target.lower()
-    if target not in ALLOWED_TARGETS:
-        send_event("error", stage="validation", message=f"Unsupported target '{target}'. Must be one of: {sorted(list(ALLOWED_TARGETS))}")
+    if target not in ALLOWED_TARGETS_WITH_AUTO:
+        send_event("error", stage="validation", message=f"Unsupported target '{target}'. Must be one of: {sorted(list(ALLOWED_TARGETS_WITH_AUTO))}")
         sys.exit(1)
 
     success = True
@@ -660,7 +810,7 @@ def main():
     elif args.action == "build":
         success = build_firmware(args.project_dir)
     elif args.action == "flash":
-        success = flash_firmware(args.port, args.project_dir)
+        success = flash_firmware(args.port, args.project_dir, target)
     elif args.action == "monitor":
         start_monitor(args.port, args.project_dir)
     elif args.action == "pipeline":

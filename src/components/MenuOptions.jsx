@@ -85,7 +85,7 @@ const MenuOptions = ({ onOpen }) => {
           <MenuItem icon={<Cog size={14} />} onClick={() => window.dispatchEvent(new CustomEvent('innoide:compile-start'))}>Compile</MenuItem>
           <MenuItem icon={<Hammer size={14} />} onClick={() => { window.dispatchEvent(new CustomEvent('innoide:build-start')); setTimeout(() => window.dispatchEvent(new CustomEvent('innoide:build-complete')), 800) }}>Build</MenuItem>
           <MenuItem icon={<BugPlay size={14} />} onClick={() => window.dispatchEvent(new CustomEvent('innoide:debugger-start'))}>Debugger</MenuItem>
-          <MenuItem icon={<Zap size={14} />} onClick={() => { window.dispatchEvent(new CustomEvent('innoide:flash-start')); setTimeout(() => window.dispatchEvent(new CustomEvent('innoide:flash-complete')), 1000) }}>Flash</MenuItem>
+          <MenuItem icon={<Zap size={14} />} onClick={() => window.dispatchEvent(new CustomEvent('innoide:flash-start'))}>Flash</MenuItem>
           <MenuItem icon={<Trash size={14} />} onClick={() => { window.dispatchEvent(new CustomEvent('innoide:erase-start')); setTimeout(() => window.dispatchEvent(new CustomEvent('innoide:erase-complete')), 600) }}>Erase Chip</MenuItem>
           <MenuItem icon={<Radio size={14} />} onClick={() => window.dispatchEvent(new CustomEvent('innoide:serial-open'))}>Serial Monitor</MenuItem>
           <MenuItem icon={<Terminal size={14} />} onClick={() => window.dispatchEvent(new CustomEvent('innoide:terminal-open'))}>Terminal</MenuItem>

@@ -40,7 +40,10 @@ const simulationSlice = createSlice({
         },
         addSymbolToTab: (state, action) => {
             const { tabId, symbol } = action.payload;
-            const tab = state.tabs.find(t => t.id === tabId);
+            let tab = state.tabs.find(t => String(t.id) === String(tabId));
+            if (!tab) {
+                tab = state.tabs.find(t => String(t.id) === String(state.activeTab)) || state.tabs[0];
+            }
             if (tab) {
                 tab.symbols.push(symbol);
                 tab.dirty = true;
@@ -48,9 +51,12 @@ const simulationSlice = createSlice({
         },
         updateSymbolInTab: (state, action) => {
             const { tabId, symbolId, updates } = action.payload;
-            const tab = state.tabs.find(t => t.id === tabId);
+            let tab = state.tabs.find(t => String(t.id) === String(tabId));
+            if (!tab) {
+                tab = state.tabs.find(t => String(t.id) === String(state.activeTab)) || state.tabs[0];
+            }
             if (tab) {
-                const index = tab.symbols.findIndex(s => s.id === symbolId);
+                const index = tab.symbols.findIndex(s => String(s.id) === String(symbolId));
                 if (index !== -1) {
                     tab.symbols[index] = { ...tab.symbols[index], ...updates };
                     tab.dirty = true;
@@ -59,15 +65,21 @@ const simulationSlice = createSlice({
         },
         removeSymbolFromTab: (state, action) => {
             const { tabId, symbolId } = action.payload;
-            const tab = state.tabs.find(t => t.id === tabId);
+            let tab = state.tabs.find(t => String(t.id) === String(tabId));
+            if (!tab) {
+                tab = state.tabs.find(t => String(t.id) === String(state.activeTab)) || state.tabs[0];
+            }
             if (tab) {
-                tab.symbols = tab.symbols.filter(s => s.id !== symbolId);
+                tab.symbols = tab.symbols.filter(s => String(s.id) !== String(symbolId));
                 tab.dirty = true;
             }
         },
         addConnectionToTab: (state, action) => {
             const { tabId, connection } = action.payload;
-            const tab = state.tabs.find(t => t.id === tabId);
+            let tab = state.tabs.find(t => String(t.id) === String(tabId));
+            if (!tab) {
+                tab = state.tabs.find(t => String(t.id) === String(state.activeTab)) || state.tabs[0];
+            }
             if (tab && !tab.connections.includes(connection)) {
                 tab.connections.push(connection);
                 tab.dirty = true;
@@ -75,7 +87,10 @@ const simulationSlice = createSlice({
         },
         setTabSymbolsAndConnections: (state, action) => {
             const { tabId, symbols, connections } = action.payload;
-            const tab = state.tabs.find(t => t.id === tabId);
+            let tab = state.tabs.find(t => String(t.id) === String(tabId));
+            if (!tab) {
+                tab = state.tabs.find(t => String(t.id) === String(state.activeTab)) || state.tabs[0];
+            }
             if (tab) {
                 tab.symbols = symbols || [];
                 tab.connections = connections || [];

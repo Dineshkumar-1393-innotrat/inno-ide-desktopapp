@@ -305,7 +305,7 @@ const ForgotPassword = () => {
                   <InputGroup size="lg" width="100%">
                     <Input type={showPassword ? "text" : "password"} placeholder="New Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement h="full" width="3rem" right="0">
-                      <IconButton aria-label={showPassword ? "Hide password" : "Show password"} icon={showPassword ? <FaEyeSlash /> : <FaEye />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'whiteAlpha.200', color: 'black' }} size="sm" />
+                      <IconButton aria-label={showPassword ? "Hide password" : "Show password"} icon={showPassword ? <FaEyeSlash /> : <FaEye />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'gray.100', color: 'gray.800' }} size="sm" />
                     </InputRightElement>
                   </InputGroup>
                 </FormControl>
@@ -315,7 +315,7 @@ const ForgotPassword = () => {
                   <InputGroup size="lg" width="100%">
                     <Input type={showPassword ? "text" : "password"} placeholder="Confirm Password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} size="lg" borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement h="full" width="3rem" right="0">
-                      <IconButton aria-label={showPassword ? "Hide password" : "Show password"} icon={showPassword ? <FaEyeSlash /> : <FaEye />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'whiteAlpha.200', color: 'black' }} size="sm" />
+                      <IconButton aria-label={showPassword ? "Hide password" : "Show password"} icon={showPassword ? <FaEyeSlash /> : <FaEye />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'gray.100', color: 'gray.800' }} size="sm" />
                     </InputRightElement>
                   </InputGroup>
                 </FormControl>
@@ -325,7 +325,7 @@ const ForgotPassword = () => {
                     Reset Password
                   </Button>
 
-                  <Button variant="ghost" onClick={() => setStep(1)} color="gray.500" size="md" _hover={{ color: "white", bg: "whiteAlpha.200" }} width="full">
+                  <Button variant="ghost" onClick={() => setStep(1)} color="gray.500" size="md" _hover={{ color: "gray.800", bg: "gray.100" }} width="full">
                     Back to Mobile Number
                   </Button>
                 </VStack>

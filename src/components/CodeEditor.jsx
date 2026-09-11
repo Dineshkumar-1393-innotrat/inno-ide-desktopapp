@@ -54,6 +54,7 @@ import FileExplorer from "./FileExplorer";
 import Debug from "./Debug";
 import Flash from "./Flash";
 import ESP32Flasher from "./ESP32Flasher";
+import EspIdfSetupModal from "./EspIdfSetupModal";
 import CreateProductButton from "./shared/CreateProductButton";
 import WorkspaceHeader from "../features/workspace/runtime/components/WorkspaceHeader";
 import ProcessingTimeline from "../features/workspace/runtime/components/ProcessingTimeline";
@@ -337,6 +338,12 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
   } = useDisclosure();
 
   const {
+    isOpen: isEspIdfSetupOpen,
+    onOpen: onOpenEspIdfSetup,
+    onClose: onCloseEspIdfSetup
+  } = useDisclosure();
+
+  const {
     isOpen: isFlashModalOpen,
     onOpen: onOpenFlashModal,
     onClose: onCloseFlashModal
@@ -548,8 +555,23 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
   }, []);
 
   const handleFlashClick = useCallback(() => {
+    onOpenEspIdfSetup();
+  }, [onOpenEspIdfSetup]);
+
+  const handleContinueToFlasher = useCallback(() => {
+    try {
+      localStorage.removeItem("inno_flasher_active_step");
+    } catch (e) { }
+    onCloseEspIdfSetup();
     onOpenFlashModal();
-  }, [onOpenFlashModal]);
+  }, [onCloseEspIdfSetup, onOpenFlashModal]);
+
+  const handleCloseFlashModal = useCallback(() => {
+    try {
+      localStorage.removeItem("inno_flasher_active_step");
+    } catch (e) { }
+    onCloseFlashModal();
+  }, [onCloseFlashModal]);
 
   // Listen for navbar flash event
   useEffect(() => {
@@ -1446,23 +1468,35 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
         </ModalContent>
       </Modal>
 
+      {/* ESP-IDF Toolchain Setup First-Step Prompt Modal */}
+      <EspIdfSetupModal
+        isOpen={isEspIdfSetupOpen}
+        onClose={onCloseEspIdfSetup}
+        onContinue={handleContinueToFlasher}
+      />
+
       {/* ESP32 Firmware Flasher Wizard & App Companion */}
       <Modal
         isOpen={isFlashModalOpen}
-        onClose={onCloseFlashModal}
-        size="6xl"
-        isCentered
+        onClose={handleCloseFlashModal}
+        size="full"
         scrollBehavior="inside"
       >
         <ModalOverlay bg="blackAlpha.700" backdropFilter="blur(8px)" />
         <ModalContent
           bg={colorMode === "dark" ? "gray.900" : "white"}
-          borderRadius="2xl"
+          borderRadius="none"
+          m={0}
+          w="100vw"
+          h="100vh"
+          maxW="100vw"
+          maxH="100vh"
+          display="flex"
+          flexDirection="column"
           overflow="hidden"
-          maxW="1400px"
         >
           <ModalHeader
-            py={3}
+            py={2.5}
             px={5}
             borderBottom="1px solid"
             borderColor={colorMode === "dark" ? "gray.800" : "gray.200"}
@@ -1473,10 +1507,12 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
             <Text fontSize="md" fontWeight="bold">Device Firmware Flasher & App Companion</Text>
             <ModalCloseButton position="relative" top="0" right="0" />
           </ModalHeader>
-          <ModalBody p={4} maxH="85vh" overflowY="auto">
+          <ModalBody p={0} flex="1" overflow="hidden" display="flex" flexDirection="column">
             <ESP32Flasher
               code={activeTab?.content}
-              onClose={onCloseFlashModal}
+              projectName={localStorage.getItem("activeProjectName") || (activeTab?.name ? activeTab.name.replace(/\.[^/.]+$/, "") : undefined)}
+              onClose={handleCloseFlashModal}
+              initialStep="connection"
             />
           </ModalBody>
         </ModalContent>

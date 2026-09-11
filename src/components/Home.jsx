@@ -33,6 +33,7 @@ import {
   FormErrorMessage,
 } from "@chakra-ui/react";
 import { FaClock, FaCalendar, FaPlayCircle, FaLock } from "react-icons/fa";
+import { FcGoogle } from "react-icons/fc";
 import { ViewIcon, ViewOffIcon } from "@chakra-ui/icons";
 import loginImage from "../images/image.jpg";
 import Ellipse521 from "../images/Ellipse 521.svg";
@@ -258,7 +259,7 @@ const Home = () => {
                     </InputLeftElement>
                     <Input id="password" type={show ? "text" : "password"} placeholder="Enter your password" height="42px" fontSize="md" w="100%" borderRadius="lg" value={formData.password} onChange={handleInputChange} pl="10" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: "gray.400" }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement height="42px" width="3rem" right="0">
-                      <IconButton size="sm" onClick={() => setShow(!show)} icon={show ? <ViewOffIcon /> : <ViewIcon />} variant="ghost" color="gray.500" _hover={{ color: "white", bg: "whiteAlpha.200" }} aria-label={show ? "Hide password" : "Show password"} />
+                      <IconButton size="sm" onClick={() => setShow(!show)} icon={show ? <ViewOffIcon /> : <ViewIcon />} variant="ghost" color="gray.500" _hover={{ color: "gray.800", bg: "gray.100" }} aria-label={show ? "Hide password" : "Show password"} />
                     </InputRightElement>
                   </InputGroup>
                   {errors.password && <FormErrorMessage>{errors.password}</FormErrorMessage>}
@@ -271,11 +272,11 @@ const Home = () => {
                 <VStack spacing={2} width="full" mt={2}>
                   <Flex justify="center" align="center">
                     <Text fontSize="sm" color="gray.600">Don't have an account?</Text>
-                    <ChakraLink color="purple.300" ml={2} fontSize="sm" fontWeight="bold" onClick={createAccount}>
+                    <ChakraLink color="purple.500" ml={2} fontSize="sm" fontWeight="bold" onClick={createAccount} _hover={{ color: "purple.600", textDecoration: "underline" }}>
                       Create an account
                     </ChakraLink>
                   </Flex>
-                  <ChakraLink color="gray.500" fontSize="xs" fontWeight="semibold" onClick={handleForgotPassword} _hover={{ color: "white", textDecoration: "underline" }}>
+                  <ChakraLink color="gray.500" fontSize="xs" fontWeight="semibold" onClick={handleForgotPassword} _hover={{ color: "purple.500", textDecoration: "underline" }}>
                     Forgot your password?
                   </ChakraLink>
                 </VStack>
@@ -287,59 +288,84 @@ const Home = () => {
                 </HStack>
 
                 <Box width="full" display="flex" justifyContent="center" sx={{ '.nsm7Bb-HzV7m-LgbsSe': { backgroundColor: 'white !important', color: '#3c4043 !important', border: '1px solid #E2E8F0 !important', borderRadius: '8px !important' }, '.nsm7Bb-HzV7m-LgbsSe:hover': { backgroundColor: '#F7FAFC !important' } }}>
-                  <GoogleLogin
-                    onSuccess={async (credentialResponse) => {
-                      try {
-                        const token = credentialResponse.credential;
-                        let userInfo;
+                  {import.meta.env.VITE_GOOGLE_CLIENT_ID ? (
+                    <GoogleLogin
+                      onSuccess={async (credentialResponse) => {
                         try {
-                          const base64Url = token.split('.')[1];
-                          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                          const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
-                            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                          }).join(''));
-                          userInfo = JSON.parse(jsonPayload);
-                        } catch (e) {
-                          throw new Error("Invalid token received from Google");
-                        }
+                          const token = credentialResponse.credential;
+                          let userInfo;
+                          try {
+                            const base64Url = token.split('.')[1];
+                            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                            const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
+                              return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                            }).join(''));
+                            userInfo = JSON.parse(jsonPayload);
+                          } catch (e) {
+                            throw new Error("Invalid token received from Google");
+                          }
 
-                        const data = await handleGoogleAuth(userInfo, token);
+                          const data = await handleGoogleAuth(userInfo, token);
 
-                        if (data.status === "success") {
-                          sessionStorage.setItem("token", data.token);
-                          sessionStorage.setItem("userId", data.userData.userId);
-                          localStorage.setItem("token", data.token);
-                          localStorage.setItem("userData", JSON.stringify(data.userData));
+                          if (data.status === "success") {
+                            sessionStorage.setItem("token", data.token);
+                            sessionStorage.setItem("userId", data.userData.userId);
+                            localStorage.setItem("token", data.token);
+                            localStorage.setItem("userData", JSON.stringify(data.userData));
 
+                            toast({
+                              title: "Success",
+                              description: "Google Signin successful",
+                              status: "success",
+                              duration: 3000,
+                            });
+
+                            navigate("/editor", { state: { userId: data.userData.userId } });
+                          } else {
+                            throw new Error(data.message || "Google Sign in failed");
+                          }
+                        } catch (error) {
                           toast({
-                            title: "Success",
-                            description: "Google Signin successful",
-                            status: "success",
+                            title: "Error",
+                            description: error.message || "Google Sign in failed",
+                            status: "error",
                             duration: 3000,
                           });
-
-                          navigate("/editor", { state: { userId: data.userData.userId } });
-                        } else {
-                          throw new Error(data.message || "Google Sign in failed");
                         }
-                      } catch (error) {
+                      }}
+                      onError={() => {
                         toast({
                           title: "Error",
-                          description: error.message || "Google Sign in failed",
+                          description: "Google Login Failed",
                           status: "error",
                           duration: 3000,
                         });
-                      }
-                    }}
-                    onError={() => {
-                      toast({
-                        title: "Error",
-                        description: "Google Login Failed",
-                        status: "error",
-                        duration: 3000,
-                      });
-                    }}
-                  />
+                      }}
+                    />
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="md"
+                      width="full"
+                      leftIcon={<FcGoogle size={20} />}
+                      color="gray.700"
+                      borderColor="gray.200"
+                      borderRadius="lg"
+                      fontWeight="medium"
+                      _hover={{ bg: "gray.50" }}
+                      onClick={() => {
+                        toast({
+                          title: "Google Sign-In Unconfigured",
+                          description: "Please configure VITE_GOOGLE_CLIENT_ID in your .env file to enable Google authentication.",
+                          status: "info",
+                          duration: 4000,
+                          isClosable: true
+                        });
+                      }}
+                    >
+                      Sign in with Google
+                    </Button>
+                  )}
                 </Box>
                 <Text textAlign="center" fontSize="xs" color="gray.400" mt={4}>
                   InnoIDE_V1Rev1.4_05-06-2026 (C) Innotrat Labs 2026

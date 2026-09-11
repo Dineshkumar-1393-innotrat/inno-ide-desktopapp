@@ -266,17 +266,9 @@ const EditorNavbar = ({
     window.dispatchEvent(new CustomEvent(next ? 'innoide:debugger-start' : 'innoide:debugger-stop'));
   }, [isDebugging]);
 
-  const handleFlash = useCallback(async () => {
-    if (isFlashing) return;
-    setIsFlashing(true);
-    try {
-      window.dispatchEvent(new CustomEvent('innoide:flash-start'));
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      window.dispatchEvent(new CustomEvent('innoide:flash-complete'));
-    } finally {
-      setIsFlashing(false);
-    }
-  }, [isFlashing]);
+  const handleFlash = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('innoide:flash-start'));
+  }, []);
 
   const handleErase = useCallback(async () => {
     if (isErasing) return;

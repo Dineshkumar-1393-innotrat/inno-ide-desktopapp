@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from './utils/logger.js';
@@ -30,6 +30,46 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false
     }
+  });
+
+  const standardChromeUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+  mainWindow.webContents.setUserAgent(standardChromeUserAgent);
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // If the window is a Google OAuth popup or Auth0/OAuth flow, allow it inside Electron so window.opener & postMessage work
+    if (
+      url.includes('accounts.google.com') ||
+      url.includes('google.com/gsi') ||
+      url.includes('oauth2') ||
+      url.includes('auth0.com')
+    ) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 650,
+          autoHideMenuBar: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: false,
+            userAgent: standardChromeUserAgent
+          }
+        }
+      };
+    }
+
+    // For all other external URLs (documentation, downloads, etc.), open in system browser
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('did-create-window', (childWindow) => {
+    childWindow.webContents.setUserAgent(standardChromeUserAgent);
+    childWindow.setMenu(null);
   });
 
   mainWindow.setMenu(null);

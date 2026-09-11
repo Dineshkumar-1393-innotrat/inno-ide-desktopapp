@@ -168,7 +168,7 @@ const CreateAccount = () => {
                   <InputGroup size="md" width="100%">
                     <Input type={showPassword ? 'text' : 'password'} name="password" placeholder="Create a strong password" value={formData.password} onChange={handleChange} autoComplete="new-password" size="md" height="42px" borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement h="42px" width="3rem" right="0">
-                      <IconButton aria-label={showPassword ? 'Hide password' : 'Show password'} icon={showPassword ? <ViewOffIcon /> : <ViewIcon />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'whiteAlpha.200', color: 'black' }} size="sm" />
+                      <IconButton aria-label={showPassword ? 'Hide password' : 'Show password'} icon={showPassword ? <ViewOffIcon /> : <ViewIcon />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'gray.100', color: 'gray.800' }} size="sm" />
                     </InputRightElement>
                   </InputGroup>
                   <FormErrorMessage>{errors.password}</FormErrorMessage>
@@ -179,7 +179,7 @@ const CreateAccount = () => {
                   <InputGroup size="md" width="100%">
                     <Input type={showPassword ? 'text' : 'password'} name="confirmPassword" placeholder="Re-enter your password" value={formData.confirmPassword} onChange={handleChange} autoComplete="new-password" size="md" height="42px" borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement h="42px" width="3rem" right="0">
-                      <IconButton aria-label={showPassword ? 'Hide password' : 'Show password'} icon={showPassword ? <ViewOffIcon /> : <ViewIcon />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'whiteAlpha.200', color: 'black' }} size="sm" />
+                      <IconButton aria-label={showPassword ? 'Hide password' : 'Show password'} icon={showPassword ? <ViewOffIcon /> : <ViewIcon />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'gray.100', color: 'gray.800' }} size="sm" />
                     </InputRightElement>
                   </InputGroup>
                   <FormErrorMessage>{errors.confirmPassword}</FormErrorMessage>
@@ -190,13 +190,13 @@ const CreateAccount = () => {
                     Create Account
                   </Button>
 
-                  <Button type="button" variant="ghost" size="md" onClick={resetForm} width="full" color="gray.500" fontWeight="medium" _hover={{ color: "white", bg: "whiteAlpha.200" }}>
+                  <Button type="button" variant="ghost" size="md" onClick={resetForm} width="full" color="gray.500" fontWeight="medium" _hover={{ color: "gray.800", bg: "gray.100" }}>
                     Reset Form
                   </Button>
 
                   <HStack pt={2}>
                     <Text fontSize="sm" color="gray.600">Already have an account?</Text>
-                    <ChakraLink color="purple.300" fontWeight="bold" fontSize="sm" onClick={() => navigate('/')} _hover={{ textDecoration: 'none', color: 'purple.200' }}>
+                    <ChakraLink color="purple.500" fontWeight="bold" fontSize="sm" onClick={() => navigate('/')} _hover={{ textDecoration: 'underline', color: 'purple.600' }}>
                       Sign In
                     </ChakraLink>
                   </HStack>

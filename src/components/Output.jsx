@@ -1222,6 +1222,8 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
 
   // Serial Monitor Logic (Web Serial API)
   useEffect(() => {
+    // If running in Electron environment, delegate serial handling to Electron main process
+    if (window.electronAPI) return;
     if (!isConnectedToDevice) return;
     let reader;
     let keepReading = true;
@@ -1261,7 +1263,15 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
       }
     };
     readSerialData();
-    return () => { keepReading = false; if (reader) reader.cancel(); };
+    return () => {
+      keepReading = false;
+      if (reader) {
+        reader.cancel().catch(() => {});
+      }
+      if (currentPort && typeof currentPort.close === 'function') {
+        currentPort.close().catch(() => {});
+      }
+    };
   }, [isConnectedToDevice]);
 
   // Enhanced Terminal Logic

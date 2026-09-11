@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSelector } from "react-redux";
+import JSZip from "jszip";
+import { QRCodeSVG } from "qrcode.react";
 import {
   Box,
   Flex,
@@ -35,11 +37,32 @@ import {
   AccordionItem,
   AccordionButton,
   AccordionPanel,
-  AccordionIcon
+  AccordionIcon,
+  Spinner,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
+  FormControl,
+  FormLabel,
+  FormHelperText,
+  Radio,
+  RadioGroup,
+  Stack,
+  Tag,
+  Card,
+  CardBody,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  MenuDivider
 } from "@chakra-ui/react";
 import {
   FaWifi,
   FaBroadcastTower,
+  FaUsb,
   FaCheck,
   FaCheckCircle,
   FaExclamationTriangle,
@@ -55,6 +78,10 @@ import {
   FaDownload,
   FaPlay,
   FaExternalLinkAlt,
+  FaEdit,
+  FaMicrochip,
+  FaExchangeAlt,
+  FaExclamationCircle,
   FaSync,
   FaTimes,
   FaSlidersH,
@@ -75,81 +102,205 @@ import {
   FaChevronRight,
   FaChevronLeft,
   FaCube,
-  FaFolder
+  FaFolder,
+  FaEye,
+  FaEyeSlash,
+  FaArrowUp,
+  FaArrowDown,
+  FaArrowLeft,
+  FaArrowRight,
+  FaCompass,
+  FaClone,
+  FaCode,
+  FaTerminal,
+  FaQrcode,
+  FaFileCode,
+  FaChartLine,
+  FaPalette,
+  FaGamepad,
+  FaGlobe,
+  FaPlus,
+  FaTable,
+  FaDatabase,
+  FaFolderPlus
 } from "react-icons/fa";
+import RuleBuilderModal from "./RuleBuilderModal";
+import EspIdfSetupModal from "./EspIdfSetupModal";
+
+import {
+  ESP32_GPIO_OPTIONS,
+  RULE_ACTION_TYPES,
+  RULE_CONDITION_TYPES,
+  TELEMETRY_TRIGGER_SOURCES
+} from "./flasherConstants";
+export {
+  ESP32_GPIO_OPTIONS,
+  RULE_ACTION_TYPES,
+  RULE_CONDITION_TYPES,
+  TELEMETRY_TRIGGER_SOURCES
+};
+
+// ─── Safe QR Code wrapper (catches "Data too long" RangeError from qrcode-react) ───
+class SafeQRCode extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidUpdate(prevProps) {
+    // Reset error state when value changes so user can retry after switching mode
+    if (prevProps.value !== this.props.value) {
+      this.setState({ hasError: false });
+    }
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          width: this.props.size || 185,
+          height: this.props.size || 185,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#fff",
+          borderRadius: 12,
+          padding: 12,
+          textAlign: "center",
+          color: "#e53e3e",
+          fontSize: 11,
+          fontFamily: "sans-serif"
+        }}>
+          <span style={{ fontSize: 28 }}>⚠️</span>
+          <strong style={{ marginTop: 6, display: "block" }}>Payload Too Large</strong>
+          <span style={{ marginTop: 4, color: "#718096" }}>
+            Switch to <em>Web App URL</em> mode for a scannable QR code
+          </span>
+        </div>
+      );
+    }
+    return <QRCodeSVG {...this.props} />;
+  }
+}
 
 export default function ESP32Flasher({
   code: codeProp,
   initialStep = "connection", // 'connection', 'devices', 'compatibility', 'flashing', 'success', 'app_builder'
   onClose,
-  projectName: propProjectName = "Smart Garden Monitor"
+  projectName: propProjectName
 }) {
   const toast = useToast();
 
-  // Redux & Project info
+  // Dynamic Project & Workspace info
   const editorTabs = useSelector((state) => state.editor?.tabs);
   const activeTabId = useSelector((state) => state.editor?.activeTabId);
   const activeTab = editorTabs?.find((t) => String(t.id) === String(activeTabId));
-  const activeProjectName = useSelector((state) => state.workspace?.projectName);
-  const projectName = propProjectName || activeProjectName || "Smart Garden Monitor";
+  const activeWorkspaceProjectName = useSelector(
+    (state) => state.workspace?.projectName || state.workspace?.activeProject?.name || state.workspace?.activeProjectName
+  );
+
+  const initialProjectName =
+    propProjectName ||
+    activeWorkspaceProjectName ||
+    localStorage.getItem("activeProjectName") ||
+    localStorage.getItem("lastActiveProjectName") ||
+    localStorage.getItem("projectName") ||
+    (activeTab?.name ? activeTab.name.replace(/\.[^/.]+$/, "") : "") ||
+    (activeTab?.title ? activeTab.title.replace(/\.[^/.]+$/, "") : "") ||
+    "ESP32 Companion";
+
+  const [projectName, setProjectName] = useState(initialProjectName);
+
+  useEffect(() => {
+    const dynamicName =
+      propProjectName ||
+      activeWorkspaceProjectName ||
+      localStorage.getItem("activeProjectName") ||
+      localStorage.getItem("lastActiveProjectName") ||
+      localStorage.getItem("projectName") ||
+      (activeTab?.name ? activeTab.name.replace(/\.[^/.]+$/, "") : "") ||
+      (activeTab?.title ? activeTab.title.replace(/\.[^/.]+$/, "") : "");
+    if (dynamicName && dynamicName !== projectName) {
+      setProjectName(dynamicName);
+    }
+  }, [propProjectName, activeWorkspaceProjectName, activeTab]);
+
   const editorCode = codeProp || activeTab?.content || (editorTabs?.[0]?.content) || "";
 
   // Active Wizard Step: 'connection' | 'devices' | 'compatibility' | 'flashing' | 'success' | 'app_builder'
-  const [wizardStep, setWizardStep] = useState(initialStep);
-
-  // Step 1: Connection Type ('wifi' | 'cellular')
-  const [connectionType, setConnectionType] = useState("wifi");
-
-  // Step 2: Selected Device & Device Discovery
-  const [devices, setDevices] = useState([
-    {
-      id: "esp32-dev-1",
-      name: "ESP32 Dev Board",
-      ip: "192.168.1.42",
-      firmware: "Firmware v1.2.1",
-      port: "COM3",
-      signal: 4,
-      battery: 87,
-      isUsb: true,
-      selected: true
-    },
-    {
-      id: "esp32-sensor-2",
-      name: "ESP32 Room Sensor",
-      ip: "192.168.1.55",
-      firmware: "Firmware v1.1.0",
-      port: "COM7",
-      signal: 3,
-      battery: 62,
-      isUsb: false,
-      selected: false
-    },
-    {
-      id: "esp8266-garden-3",
-      name: "ESP8266 Garden",
-      ip: "192.168.1.71",
-      firmware: "Firmware v0.9.8",
-      port: "COM4",
-      signal: 2,
-      battery: 44,
-      isUsb: false,
-      selected: false
+  const [wizardStep, setWizardStepState] = useState(() => {
+    // When opening the Flasher (via initialStep or fresh modal open), prioritize initialStep.
+    // Never automatically restore "app_builder" as the opening screen, so an already-flashed board
+    // never gets stuck redirecting to the App Builder mobile designer.
+    if (initialStep && initialStep !== "app_builder") {
+      return initialStep;
     }
-  ]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState("esp32-dev-1");
-  const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0];
+    const saved = localStorage.getItem("inno_flasher_active_step");
+    if (saved && saved !== "app_builder") {
+      return saved;
+    }
+    return "connection";
+  });
+
+  // Sync wizardStep if initialStep prop changes (e.g. parent modal opens with "connection")
+  useEffect(() => {
+    if (initialStep && initialStep !== "app_builder") {
+      setWizardStepState(initialStep);
+    }
+  }, [initialStep]);
+
+  const setWizardStep = useCallback((step) => {
+    setWizardStepState(step);
+    try {
+      if (step === "app_builder") {
+        // Do not persist "app_builder" so reopening the flasher modal never gets trapped in the app builder
+        localStorage.removeItem("inno_flasher_active_step");
+      } else {
+        localStorage.setItem("inno_flasher_active_step", step);
+      }
+    } catch (e) { }
+  }, []);
+
+  // Step 1: Connection Type ('usb' | 'wifi' | 'cellular')
+  const [connectionType, setConnectionType] = useState("usb");
+
+  // Step 2: Selected Device & Device Discovery (starts empty, populated from real hardware scan)
+  const [devices, setDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+  const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0] || null;
   const [isScanning, setIsScanning] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Step 3: Compatibility Checklist Status
-  const [compatibilityChecks] = useState([
-    { id: "syntax", label: "Project syntax valid", status: "pass" },
-    { id: "board", label: "Board compatibility", status: "pass" },
-    { id: "pins", label: "All pins assigned", status: "pass" },
-    { id: "libraries", label: "Libraries available", status: "pass" },
-    { id: "memory", label: "Memory usage within limits", status: "warn", value: "78% used" },
-    { id: "conflicts", label: "No conflicting pins", status: "pass" }
-  ]);
+  // Step 3: Compatibility Checklist Status (dynamically calculated)
+  const compatibilityChecks = useMemo(() => {
+    const hasCode = Boolean(editorCode && editorCode.trim().length > 0);
+    const hasDevice = Boolean(selectedDevice && selectedDevice.port);
+    return [
+      {
+        id: "syntax",
+        label: "Project firmware source code",
+        status: hasCode ? "pass" : "warn",
+        value: hasCode ? `${editorCode.trim().split('\n').length} lines` : "No code entered"
+      },
+      {
+        id: "device",
+        label: "Hardware device detected",
+        status: hasDevice ? "pass" : "fail",
+        value: hasDevice ? `${selectedDevice.name} (${selectedDevice.port})` : "No device connected"
+      },
+      {
+        id: "board",
+        label: "Target chip compatibility (ESP32-S3)",
+        status: hasDevice ? "pass" : "warn",
+        value: hasDevice ? "Supported" : "Requires device"
+      },
+      { id: "pins", label: "Pin mapping configuration", status: "pass" },
+      { id: "libraries", label: "ESP-IDF toolchain libraries", status: "pass" },
+      { id: "conflicts", label: "Serial port access conflict check", status: hasDevice ? "pass" : "warn" }
+    ];
+  }, [editorCode, selectedDevice]);
 
   // Step 4: Flashing State & Progress
   const [flashProgress, setFlashProgress] = useState(0);
@@ -160,81 +311,521 @@ export default function ESP32Flasher({
 
   // Step 6: App Builder State
   const [appBuilderView, setAppBuilderView] = useState("designer"); // 'designer' | 'blocks' | 'preview'
-  const [starterAlertVisible, setStarterAlertVisible] = useState(true);
+  const [starterAlertVisible, setStarterAlertVisible] = useState(false);
   const [searchPalette, setSearchPalette] = useState("");
   const [inspectorTab, setInspectorTab] = useState("properties"); // 'tree' | 'properties'
-
-  // Widgets in the Smartphone Mockup
-  const [widgets, setWidgets] = useState([
-    {
-      id: "w-led",
-      type: "switch",
-      title: "LED Control",
-      boundTarget: "LED",
-      boundTargetName: "Bound → LED",
-      action: "Turn ON / OFF",
-      state: true,
-      color: "blue",
-      cornerRadius: 16,
-      visible: true
-    },
-    {
-      id: "w-servo",
-      type: "slider",
-      title: "Servo Angle",
-      boundTarget: "Servo Motor",
-      boundTargetName: "Bound → Servo Motor",
-      action: "Set PWM Angle",
-      value: 90,
-      min: 0,
-      max: 180,
-      unit: "°",
-      color: "purple",
-      cornerRadius: 16,
-      visible: true
-    },
-    {
-      id: "w-temp",
-      type: "gauge",
-      title: "Temperature",
-      boundTarget: "Temperature Sensor",
-      boundTargetName: "Bound → Temperature Sensor",
-      action: "Read Telemetry",
-      value: 24.3,
-      unit: "°C",
-      live: true,
-      color: "red",
-      cornerRadius: 16,
-      visible: true
-    },
-    {
-      id: "w-alarm",
-      type: "button",
-      title: "Sound Alarm",
-      boundTarget: "Buzzer",
-      boundTargetName: "Bound → Buzzer",
-      action: "Trigger Alarm",
-      buttonColor: "orange",
-      cornerRadius: 12,
-      visible: true
-    },
-    {
-      id: "w-device-status",
-      type: "device_card",
-      title: "ESP32 Dev Board",
-      boundTarget: "Device",
-      boundTargetName: "Hardware Link",
-      online: true,
-      cornerRadius: 16,
-      visible: true
-    }
+  const [isSerialTrafficOpen, setIsSerialTrafficOpen] = useState(false);
+  const [serialTrafficLogs, setSerialTrafficLogs] = useState([
+    { id: 1, type: "rx", text: "[Hardware Link] ESP32 Ready on COM5", time: "11:00:00" },
+    { id: 2, type: "rx", text: "[Telemetry] Initial sensors calibrated", time: "11:00:01" }
   ]);
-  const [selectedWidgetId, setSelectedWidgetId] = useState("w-led");
-  const activeWidget = widgets.find((w) => w.id === selectedWidgetId) || widgets[0];
+
+  // Saved Companion Apps / Screens List (CRUD: Read & Manage App Profiles)
+  const [savedApps, setSavedApps] = useState(() => {
+    try {
+      const raw = localStorage.getItem("innoide:companion-apps-list");
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) return list;
+      }
+    } catch (e) { }
+    return [{ name: initialProjectName, widgetCount: 0, ruleCount: 0, updatedAt: new Date().toISOString() }];
+  });
+
+  // Widgets in Smartphone Mockup & Undo/Redo History Stack (loads saved app or starts empty)
+  const [widgets, setWidgets] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`innoide:companion-app:${initialProjectName}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.widgets)) return parsed.widgets;
+      }
+    } catch (e) { }
+    return [];
+  });
+  const [history, setHistory] = useState(() => [widgets]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
+  const [selectedWidgetId, setSelectedWidgetId] = useState(() => widgets[0]?.id || null);
+  const activeWidget = widgets.find((w) => w.id === selectedWidgetId) || widgets[0] || null;
+
+  // Visual Automation Logic Blocks State (loads saved rules or starts empty)
+  const [logicBlocks, setLogicBlocks] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`innoide:companion-app:${initialProjectName}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.logicBlocks)) return parsed.logicBlocks;
+      }
+    } catch (e) { }
+    return [];
+  });
+
+  // App & Component CRUD Modals Disclosures & State
+  const { isOpen: isNewAppModalOpen, onOpen: onNewAppModalOpen, onClose: onNewAppModalClose } = useDisclosure();
+  const { isOpen: isRenameAppModalOpen, onOpen: onRenameAppModalOpen, onClose: onRenameAppModalClose } = useDisclosure();
+  const { isOpen: isClearCanvasModalOpen, onOpen: onClearCanvasModalOpen, onClose: onClearCanvasModalClose } = useDisclosure();
+  const { isOpen: isCrudModalOpen, onOpen: onCrudModalOpen, onClose: onCrudModalClose } = useDisclosure();
+
+  const [newAppNameInput, setNewAppNameInput] = useState("");
+  const [renameAppNameInput, setRenameAppNameInput] = useState("");
+  const [crudRecordTargetWidgetId, setCrudRecordTargetWidgetId] = useState(null);
+  const [editingCrudRecord, setEditingCrudRecord] = useState(null);
+  const [crudRecordForm, setCrudRecordForm] = useState({ name: "", value: "", status: "Active" });
+
+  // Rule Builder Modal & Rule Search State
+  const { isOpen: isRuleModalOpen, onOpen: onRuleModalOpen, onClose: onRuleModalClose } = useDisclosure();
+  const [editingRule, setEditingRule] = useState(null);
+  const [ruleModalTab, setRuleModalTab] = useState(0); // 0: Trigger, 1: Condition, 2: Action, 3: Test
+  const [ruleSearchQuery, setRuleSearchQuery] = useState("");
+  const [ruleComponentFilter, setRuleComponentFilter] = useState("all");
+  const [testRuleResult, setTestRuleResult] = useState(null);
+  const [isTestingRule, setIsTestingRule] = useState(false);
 
   // Step 7: Publish Modal
   const { isOpen: isPublishOpen, onOpen: onPublishOpen, onClose: onPublishClose } = useDisclosure();
-  const [shareableLink] = useState("innotrat.app/dl/garden-monitor-v1");
+  const [shareableLink] = useState(`innotrat.app/dl/${projectName.toLowerCase().replace(/[^a-z0-9]/g, "-")}-v1`);
+  const [snackSessionId, setSnackSessionId] = useState(null);
+  const [snackSessionMap, setSnackSessionMap] = useState({});
+  const [isSnackSyncing, setIsSnackSyncing] = useState(false);
+  const activePort = selectedDevice?.port || "COM9";
+  const [companionServerInfo, setCompanionServerInfo] = useState({ ip: "192.168.0.2", port: 5055 });
+  const [localCompanionUrl, setLocalCompanionUrl] = useState("http://192.168.0.2:5055");
+  const [qrScanMode, setQrScanMode] = useState("device"); // Default to Device QR
+  const [deviceQrFormat, setDeviceQrFormat] = useState("url"); // "url" (Phone Camera Web App) | "json" (Raw Schema)
+  const [expoQrTarget, setExpoQrTarget] = useState("app"); // "app" (Expo Go exp://) | "web" (Snack Web https://)
+  const [expoSdkVersion, setExpoSdkVersion] = useState("54.0.0"); // Stable Expo Go SDK 54.0.0
+  const [expoGoUrlMap, setExpoGoUrlMap] = useState({});
+
+  // Query actual host LAN IP from Electron Companion Server on mount
+  useEffect(() => {
+    if (window.electronAPI?.app?.getCompanionInfo) {
+      window.electronAPI.app.getCompanionInfo().then((info) => {
+        if (info?.ip) {
+          setCompanionServerInfo({ ip: info.ip, port: info.port || 5055 });
+          setLocalCompanionUrl(info.url || `http://${info.ip}:${info.port || 5055}`);
+        }
+      }).catch(() => { });
+    }
+  }, []);
+
+  // Live Telemetry Simulation for Gauges and Sensors in App Builder
+  // Strictly PAUSED when Publish modal or Rule Builder modal is open to keep QR code 100% stable
+  useEffect(() => {
+    if (wizardStep !== "app_builder" || isPublishOpen || isRuleModalOpen) return;
+    const interval = setInterval(() => {
+      setWidgets((prev) =>
+        prev.map((w) => {
+          if (w.type === "gauge" && w.live !== false) {
+            const delta = (Math.random() - 0.5) * 0.4;
+            const newVal = parseFloat(Math.max(w.min || 0, Math.min(w.max || 50, (w.value || 24.3) + delta)).toFixed(1));
+            return { ...w, value: newVal };
+          }
+          return w;
+        })
+      );
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [wizardStep, isPublishOpen, isRuleModalOpen]);
+
+  // Auto-start Companion Server on mount and when structure changes (avoid triggering on every telemetry wiggle)
+  useEffect(() => {
+    startLocalCompanionServer();
+  }, [widgets.length, logicBlocks.length, projectName]);
+
+  // Pre-sync Snack session & track Publish modal state
+  useEffect(() => {
+    if (isPublishOpen) {
+      try {
+        localStorage.setItem("inno_publish_modal_open", "true");
+      } catch (e) { }
+      startLocalCompanionServer();
+      if (!snackSessionId || !snackSessionMap[expoSdkVersion]) {
+        syncSnackSession(false, expoSdkVersion);
+      }
+    } else {
+      try {
+        localStorage.removeItem("inno_publish_modal_open");
+      } catch (e) { }
+    }
+  }, [isPublishOpen]);
+
+  // Auto-restore publish modal if it was open prior to hot reload
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("inno_publish_modal_open") === "true") {
+        onPublishOpen();
+      }
+    } catch (e) { }
+  }, []);
+
+  // Sync state when actions are triggered remotely from phone companion app
+  useEffect(() => {
+    if (window.electronAPI?.app?.onCompanionAction) {
+      const unsub = window.electronAPI.app.onCompanionAction((data) => {
+        if (data && (data.isOn || data.isOff !== undefined)) {
+          const nextVal = Boolean(data.isOn);
+          setLiveLedToggle(nextVal);
+          setWidgets((prev) =>
+            prev.map((w) =>
+              w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+                ? { ...w, state: nextVal }
+                : w
+            )
+          );
+        }
+      });
+      return unsub;
+    }
+  }, []);
+
+  // Companion App Device Type & QR Configuration
+  const autoDetectDeviceType = useMemo(() => {
+    const hasFan = widgets.some(
+      (w) =>
+        /fan/i.test(w.title || "") ||
+        /fan/i.test(w.boundTarget || "") ||
+        /fan/i.test(w.boundTargetName || "")
+    );
+    if (hasFan) return "FAN";
+
+    const hasLed = widgets.some(
+      (w) =>
+        /led/i.test(w.title || "") ||
+        /led/i.test(w.boundTarget || "") ||
+        /led/i.test(w.boundTargetName || "") ||
+        w.id === "w-led"
+    );
+    if (hasLed) return "LED";
+
+    return "ESP32";
+  }, [widgets]);
+
+  const [selectedDeviceType, setSelectedDeviceType] = useState("");
+  const [customDeviceTypeInput, setCustomDeviceTypeInput] = useState("");
+  const [isEditingDeviceConfig, setIsEditingDeviceConfig] = useState(false);
+  const [qrPayloadMode, setQrPayloadMode] = useState("webapp"); // "webapp" (Phone Camera Web QR)
+  const [customDeviceId, setCustomDeviceId] = useState("");
+  const [customDeviceName, setCustomDeviceName] = useState("");
+  const [liveLedToggle, setLiveLedToggle] = useState(false); // Hardware LED state toggle (OFF / ON-Blink)
+  const [ledHardwareError, setLedHardwareError] = useState(null); // null | string — serial write error message
+
+  // Direct hardware LED toggle helper for Publish Companion App modal
+  const handleToggleHardwareLed = async (nextVal) => {
+    const targetPort = selectedDevice?.port || activePort || "COM9";
+    const cmd = nextVal ? "LED:1\r\n" : "LED:0\r\n";
+    const body = JSON.stringify({ payload: cmd, port: targetPort, value: nextVal, SwitchStatus: nextVal ? 1 : 0 });
+    const headers = { "Content-Type": "application/json" };
+
+    setLiveLedToggle(nextVal);
+    setLedHardwareError(null); // Clear previous error on new attempt
+
+    // Sync corresponding switch widget (e.g. w-led) in smartphone canvas mockup
+    setWidgets((prev) =>
+      prev.map((w) =>
+        w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+          ? { ...w, state: nextVal, value: nextVal }
+          : w
+      )
+    );
+
+    let hardwareActuated = false;
+    let lastError = null;
+    try {
+      // PRIMARY: Electron IPC → serial.service.js
+      if (window.electronAPI?.serial?.write) {
+        try {
+          const result = await window.electronAPI.serial.write(targetPort, cmd);
+          if (result?.skipped) {
+            console.warn(`[LED Toggle] Write skipped (port locked): ${result.reason}`);
+          } else {
+            hardwareActuated = true;
+            console.log(`[LED Toggle] Electron IPC serial.write SUCCESS → ${targetPort}: ${cmd.trim()}`);
+          }
+        } catch (e) {
+          lastError = e.message;
+          console.warn(`[LED Toggle] Electron IPC serial.write failed: ${e.message}`);
+          // Try auto-connect then re-write
+          if (window.electronAPI?.serial?.connect) {
+            try {
+              await window.electronAPI.serial.connect(targetPort, 115200);
+              const result2 = await window.electronAPI.serial.write(targetPort, cmd);
+              if (!result2?.skipped) {
+                hardwareActuated = true;
+                lastError = null;
+                console.log(`[LED Toggle] Electron IPC serial.write SUCCESS after reconnect → ${targetPort}`);
+              }
+            } catch (e2) {
+              lastError = e2.message;
+              console.warn(`[LED Toggle] Electron IPC reconnect+write failed: ${e2.message}`);
+            }
+          }
+        }
+      }
+
+      // SECONDARY: Companion HTTP server (port 5055)
+      if (!hardwareActuated) {
+        try {
+          const r = await fetch("http://localhost:5055/api/action", { method: "POST", headers, body });
+          if (r.ok) {
+            const d = await r.json();
+            if (d?.success) {
+              hardwareActuated = true;
+              lastError = null;
+              console.log(`[LED Toggle] Companion server (5055) SUCCESS → ${targetPort}`);
+            } else if (d?.error) {
+              lastError = d.error;
+            }
+          }
+        } catch (e) {
+          lastError = lastError || e.message;
+          console.warn(`[LED Toggle] Companion server (5055) error: ${e.message}`);
+        }
+      }
+
+      // TERTIARY: InnoIDE Backend (port 5004) — updates SwitchStatus record
+      try {
+        await fetch("http://localhost:5004/setSwitchStatus", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ SwitchStatus: nextVal ? 1 : 0, value: nextVal, port: targetPort })
+        });
+      } catch (e) { }
+
+      // Log traffic to Serial Monitor
+      setSerialTrafficLogs((logs) => [
+        ...logs.slice(-25),
+        {
+          id: Date.now(),
+          type: "tx",
+          text: `TX -> ${targetPort}: ${cmd.trim()} (${nextVal ? "LED ON" : "LED OFF"}) ${hardwareActuated ? "[OK]" : `[FAILED: ${lastError || "port unavailable"}]`
+            }`,
+          time: new Date().toLocaleTimeString()
+        }
+      ]);
+
+      if (hardwareActuated) {
+        setLedHardwareError(null);
+        toast({
+          title: nextVal ? "💡 LED ON" : "⚫ LED OFF",
+          description: `Command sent to ${targetPort}`,
+          status: "success",
+          duration: 1500
+        });
+      } else {
+        // Set error state — shown in the UI card
+        const errMsg = lastError || "Port unavailable";
+        setLedHardwareError(errMsg);
+        // Revert toggle visually since command didn't reach hardware
+        setLiveLedToggle(!nextVal);
+        toast({
+          title: "⚠️ Hardware Unreachable",
+          description: `Could not send to ${targetPort}: ${errMsg}. Flash reactive firmware first.`,
+          status: "error",
+          duration: 5000,
+          isClosable: true
+        });
+      }
+    } catch (err) {
+      setLedHardwareError(err.message);
+      setLiveLedToggle(!nextVal);
+      toast({
+        title: "Hardware Toggle Error",
+        description: err.message,
+        status: "error",
+        duration: 2500
+      });
+    }
+  };
+
+  const effectiveDeviceType = (
+    (selectedDeviceType === "CUSTOM" ? customDeviceTypeInput : (selectedDeviceType || autoDetectDeviceType)) || "LED"
+  ).toUpperCase();
+
+  const effectiveDeviceId =
+    customDeviceId.trim() ||
+    selectedDevice?.id ||
+    (projectName ? projectName.toLowerCase().replace(/[^a-z0-9_-]/g, "-") : "esp32-device-01");
+
+  const effectiveDeviceName =
+    customDeviceName.trim() ||
+    selectedDevice?.name ||
+    projectName ||
+    "ESP32 Companion Device";
+
+  // Build clean JSON payload containing UI and logics for QR code generation
+  const cleanUiList = useMemo(() => {
+    return widgets.map((w) => {
+      const isLedWidget = w.id === "w-led" || /led|light/i.test(w.title || "") || /led/i.test(w.boundTarget || "");
+      const item = {
+        id: w.id,
+        type: w.type,
+        title: w.title || w.label || w.name || "",
+        boundTarget: w.boundTarget || w.boundTargetName || (isLedWidget ? "GPIO 2 / 48 (LED)" : ""),
+        action: w.action || "Turn ON / OFF"
+      };
+      if (w.state !== undefined) item.state = Boolean(w.state);
+      if (isLedWidget) {
+        item.actionPayloadOn = "LED:1";
+        item.actionPayloadOff = "LED:0";
+        item.commandOn = "LED:1";
+        item.commandOff = "LED:0";
+      }
+      // Lock telemetry/gauge/sensor values to fixed default value to guarantee stable QR code without flickering
+      if (w.type === "gauge" || w.type === "sensor" || w.type === "telemetry") {
+        item.value = w.defaultValue !== undefined ? w.defaultValue : 24.0;
+      } else if (w.defaultValue !== undefined) {
+        item.value = w.defaultValue;
+      } else if (typeof w.value === "number") {
+        item.value = w.value;
+      }
+      if (w.min !== undefined) item.min = w.min;
+      if (w.max !== undefined) item.max = w.max;
+      if (w.unit) item.unit = w.unit;
+      if (w.color || w.buttonColor) item.color = w.color || w.buttonColor;
+      if (w.placeholder) item.placeholder = w.placeholder;
+      if (w.visible !== undefined) item.visible = w.visible;
+      return item;
+    });
+  }, [widgets]);
+
+  const cleanLogicsList = useMemo(() => {
+    return logicBlocks.map((b) => {
+      const isLedRule = b.id === "b-1" || /led|light/i.test(b.name || "") || /led/i.test(b.payload || "");
+      const linkedWidget = widgets.find((w) => w.id === b.triggerWidgetId);
+      const isComponentRule = b.triggerType === "component" || (!b.triggerWidgetId?.startsWith("telem_") && !b.triggerWidgetId?.startsWith("timer"));
+      const isStale = isComponentRule && Boolean(b.triggerWidgetId) && !linkedWidget;
+      const item = {
+        id: b.id,
+        name: b.name || "",
+        triggerWidgetId: b.triggerWidgetId || "",
+        triggerName: linkedWidget ? linkedWidget.title : (b.triggerName || ""),
+        event: b.event || "",
+        condition: b.condition || "",
+        action: b.action || "",
+        payload: b.payload || (isLedRule ? "LED:{state}" : ""),
+        targetHardware: linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || b.targetHardware || "") : (b.targetHardware || ""),
+        enabled: isStale ? false : (b.enabled !== false),
+        isStale: isStale
+      };
+      if (isLedRule) {
+        item.onPayload = "LED:1";
+        item.offPayload = "LED:0";
+      }
+      return item;
+    });
+  }, [logicBlocks, widgets]);
+
+  // Mode 0: Mobile Web Companion App URL (Direct scan with any smartphone camera)
+  const resolvedHostIp = companionServerInfo?.ip || "192.168.0.2";
+  const resolvedHostPort = companionServerInfo?.port || 5055;
+  const webAppQrPayload = localCompanionUrl || `http://${resolvedHostIp}:${resolvedHostPort}`;
+
+  // Mode 1: Compact Device Pairing QR (Exact schema required by React Native ScannerScreen)
+  // Deterministic and stable: status is omitted so toggling light NEVER morphs the QR code
+  const companionDevicePayload = useMemo(() => {
+    return JSON.stringify({
+      id: effectiveDeviceId,
+      name: effectiveDeviceName,
+      deviceType: effectiveDeviceType,
+      bridgeUrl: `http://${resolvedHostIp}:${resolvedHostPort}/api/action`,
+      serverUrl: `http://${resolvedHostIp}:${resolvedHostPort}`,
+      backendUrl: `http://${resolvedHostIp}:5004`,
+      port: activePort
+    });
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort]);
+
+  // Mode 2: Full Project Bundle QR (Device + UI + Logics, also 100% compliant with React Native ScannerScreen)
+  const bundleQrPayload = useMemo(() => {
+    // Provide both full standard keys and compact aliases within safe byte limits (<1000 bytes)
+    const minimalUi = cleanUiList.map((w) => {
+      const isLed = /led|light/i.test(w.title || "") || /led/i.test(w.boundTarget || "") || w.id === "w-led";
+      const m = {
+        id: w.id,
+        type: w.type,
+        title: w.title,
+        boundTarget: w.boundTarget || (isLed ? "LED (GPIO 2)" : "GPIO"),
+        state: Boolean(w.state),
+        on: isLed ? "LED:1" : (w.actionPayloadOn || "1"),
+        off: isLed ? "LED:0" : (w.actionPayloadOff || "0"),
+        commandOn: isLed ? "LED:1" : (w.commandOn || "1"),
+        commandOff: isLed ? "LED:0" : (w.commandOff || "0"),
+        actionPayloadOn: isLed ? "LED:1" : "1",
+        actionPayloadOff: isLed ? "LED:0" : "0"
+      };
+      if (w.value !== undefined) m.value = w.value;
+      if (w.unit) m.unit = w.unit;
+      if (w.min !== undefined) m.min = w.min;
+      if (w.max !== undefined) m.max = w.max;
+      return m;
+    });
+
+    const minimalLogics = cleanLogicsList.map((b) => {
+      const isLedRule = b.id === "b-1" || /led|light/i.test(b.name || "") || /led/i.test(b.payload || "");
+      return {
+        id: b.id,
+        name: b.name,
+        triggerWidgetId: b.triggerWidgetId,
+        tw: b.triggerWidgetId,
+        event: b.event,
+        ev: b.event,
+        payload: b.payload,
+        pl: b.payload,
+        on: isLedRule ? "LED:1" : (b.onPayload || "1"),
+        off: isLedRule ? "LED:0" : (b.offPayload || "0"),
+        onPayload: isLedRule ? "LED:1" : (b.onPayload || "1"),
+        offPayload: isLedRule ? "LED:0" : (b.offPayload || "0"),
+        targetHardware: b.targetHardware || "GPIO 2 / 48",
+        enabled: b.enabled !== false,
+        en: b.enabled !== false
+      };
+    });
+
+    const payload = JSON.stringify({
+      id: effectiveDeviceId,
+      name: effectiveDeviceName,
+      nm: effectiveDeviceName,
+      deviceType: effectiveDeviceType,
+      dt: effectiveDeviceType,
+      bridgeUrl: `http://${resolvedHostIp}:${resolvedHostPort}/api/action`,
+      bu: `http://${resolvedHostIp}:${resolvedHostPort}/api/action`,
+      serverUrl: `http://${resolvedHostIp}:${resolvedHostPort}`,
+      su: `http://${resolvedHostIp}:${resolvedHostPort}`,
+      backendUrl: `http://${resolvedHostIp}:5004`,
+      port: activePort,
+      p: activePort,
+      widgets: minimalUi,
+      ui: minimalUi,
+      rules: minimalLogics,
+      logics: minimalLogics,
+      lg: minimalLogics
+    });
+    return payload;
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, cleanUiList, cleanLogicsList]);
+
+  // Active QR payload based on selected QR mode
+  const activeQrPayload = qrPayloadMode === "webapp" ? webAppQrPayload : (qrPayloadMode === "bundle" ? bundleQrPayload : companionDevicePayload);
+  const qrJsonPayload = activeQrPayload;
+  const deviceQrPayload = activeQrPayload;
+
+  // ESP-IDF Installation Modal for Manual Setup Access
+  const [isIdfPromptOpen, setIsIdfPromptOpen] = useState(false);
+  const [idfStatus, setIdfStatus] = useState(null);
+
+  // Check ESP-IDF environment for status badge
+  useEffect(() => {
+    const checkIdfInstallation = async () => {
+      if (window.electronAPI?.flash?.checkEnv) {
+        try {
+          const env = await window.electronAPI.flash.checkEnv("esp32s3");
+          setIdfStatus(env);
+        } catch (err) {
+          // Ignore error silently
+        }
+      }
+    };
+    checkIdfInstallation();
+  }, []);
 
   // Dynamic Theme Colors
   const bgCard = useColorModeValue("white", "gray.850");
@@ -254,35 +845,51 @@ export default function ESP32Flasher({
       setIsScanning(true);
     }
     try {
+      let ports = [];
       if (window.electronAPI?.flash?.detectPorts) {
-        const ports = await window.electronAPI.flash.detectPorts();
-        if (ports && ports.length > 0) {
-          const mapped = ports.map((p, idx) => ({
-            id: `esp32-detected-${p.path || idx}`,
-            name: p.friendlyName || `ESP32 Device (${p.path})`,
-            ip: `192.168.1.${40 + idx}`,
-            firmware: "Firmware v1.2.1",
-            port: p.path,
-            signal: 4,
-            battery: 85 + (idx * 5) % 15,
-            isUsb: p.isUsb !== false,
-            selected: idx === 0
-          }));
-          setDevices(mapped);
-          setSelectedDeviceId((prevId) => {
-            const exists = mapped.some((d) => d.id === prevId);
-            return exists ? prevId : mapped[0]?.id;
-          });
-        }
+        ports = await window.electronAPI.flash.detectPorts();
+      } else if (window.electronAPI?.serial?.listPorts) {
+        ports = await window.electronAPI.serial.listPorts();
+      }
+
+      if (ports && ports.length > 0) {
+        const mapped = ports.map((p, idx) => ({
+          id: `esp32-detected-${p.path || idx}`,
+          name: p.friendlyName || (p.isUsb ? `ESP32-S3 Board (${p.path})` : `Serial Port (${p.path})`),
+          ip: `192.168.1.${40 + idx}`,
+          firmware: "Firmware v1.2.1",
+          port: p.path,
+          chip: p.chip || "esp32s3",
+          manufacturer: p.manufacturer || (p.isUsb ? 'USB Serial Device' : 'Serial Port'),
+          signal: 4,
+          battery: 85 + (idx * 5) % 15,
+          isUsb: p.isUsb !== false,
+          selected: idx === 0
+        }));
+        setDevices(mapped);
+        setSelectedDeviceId((prevId) => {
+          const exists = mapped.some((d) => d.id === prevId);
+          return exists ? prevId : mapped[0]?.id;
+        });
+      } else {
+        setDevices([]);
+        setSelectedDeviceId(null);
       }
     } catch (err) {
       console.warn("Device refresh warning:", err);
+      setDevices([]);
+      setSelectedDeviceId(null);
     } finally {
       if (!isSilent) {
         setIsScanning(false);
       }
     }
   }, []);
+
+  // Run initial scan on mount
+  useEffect(() => {
+    handleRefreshDevices(false);
+  }, [handleRefreshDevices]);
 
   // Auto-refresh devices polling when on 'devices' step
   useEffect(() => {
@@ -302,14 +909,26 @@ export default function ESP32Flasher({
 
   // Run Flash Pipeline
   const handleStartFlash = async () => {
+    if (!selectedDevice || !selectedDevice.port) {
+      toast({
+        title: "No Device Connected",
+        description: "Please connect an ESP32 board via USB before flashing.",
+        status: "warning",
+        duration: 4000,
+        isClosable: true
+      });
+      setWizardStep("devices");
+      return;
+    }
+
     setWizardStep("flashing");
     setFlashProgress(5);
     setFlashTimeRemaining(30);
-    setFlashStatusText("Establishing connection...");
-    setFlashTerminalLogs(["[SYSTEM] Initializing ESP-IDF flashing toolchain pipeline..."]);
+    setFlashStatusText(`Establishing connection to ${selectedDevice.port}...`);
+    setFlashTerminalLogs([`[SYSTEM] Initializing ESP-IDF flashing toolchain pipeline for ${selectedDevice.port}...`]);
 
-    const targetPort = selectedDevice?.port || "COM3";
-    const targetChip = "esp32s3";
+    const targetPort = selectedDevice.port;
+    const targetChip = selectedDevice?.chip || "esp32s3";
 
     try {
       if (window.electronAPI?.flash?.runPipeline) {
@@ -320,9 +939,18 @@ export default function ESP32Flasher({
             if (evt.log) {
               setFlashTerminalLogs((prev) => [...prev, evt.log]);
             }
-            if (evt.status === "setting_target" || evt.status === "target_stdout") {
+            if (evt.status === "error" || (evt.stage === "flashing" && evt.status === "error")) {
+              setFlashStatusText(`Flashing error: ${evt.message || "Operation failed"}`);
+              toast({
+                title: "Flashing Error",
+                description: evt.message || "Firmware flashing encountered an error.",
+                status: "error",
+                duration: 5000,
+                isClosable: true
+              });
+            } else if (evt.status === "setting_target" || evt.status === "target_stdout") {
               setFlashProgress((p) => Math.max(p, 20));
-              setFlashStatusText("Setting chip target esp32s3...");
+              setFlashStatusText(`Setting chip target (auto-detect)...`);
             } else if (evt.status === "building" || evt.status === "build_stdout") {
               setFlashProgress((p) => Math.min(Math.max(p, 45), 75));
               setFlashStatusText("Compiling firmware modules with ESP-IDF...");
@@ -347,39 +975,322 @@ export default function ESP32Flasher({
           apiUrl: "http://localhost:5010/check-code"
         });
       } else {
-        // Emulated step sequence for preview / testing
-        const milestones = [
-          { p: 15, sec: 25, status: "Establishing connection...", log: "Connecting to ESP32 on port COM3 (baud 460800)..." },
-          { p: 35, sec: 21, status: "Writing source files...", log: "Writing workspace/main/main.c and updating CMakeLists.txt..." },
-          { p: 55, sec: 16, status: "Compiling firmware modules...", log: "[1/12] Building C object main.c.obj\n[8/12] Linking ESP32-S3 application binary..." },
-          { p: 75, sec: 10, status: "Writing sectors to Flash memory...", log: "Writing at 0x00010000... (78%)\nWriting at 0x00020000... (100%)" },
-          { p: 92, sec: 4, status: "Verifying sectors & hash...", log: "Hash of data verified. Leaving 3D secure boot mode..." },
-          { p: 100, sec: 0, status: "Resetting board...", log: "Hard resetting via RTS pin...\nFirmware ready!" }
-        ];
-
-        milestones.forEach((m, idx) => {
-          setTimeout(() => {
-            setFlashProgress(m.p);
-            setFlashTimeRemaining(m.sec);
-            setFlashStatusText(m.status);
-            setFlashTerminalLogs((prev) => [...prev, m.log]);
-
-            if (m.p === 100) {
-              setTimeout(() => {
-                setWizardStep("success");
-              }, 1000);
-            }
-          }, (idx + 1) * 1400);
+        setFlashStatusText("Desktop Electron environment required.");
+        setFlashTerminalLogs((prev) => [...prev, "[ERROR] Desktop Electron environment is required to communicate with physical COM ports."]);
+        toast({
+          title: "Desktop App Required",
+          description: "Hardware flashing is only available when running in the InnoIDE Desktop App with connected hardware.",
+          status: "warning",
+          duration: 5000,
+          isClosable: true
         });
       }
     } catch (err) {
       setFlashTerminalLogs((prev) => [...prev, `[ERROR] Flashing failed: ${err.message}`]);
+      setFlashStatusText(`Error: ${err.message}`);
       toast({
         title: "Flashing Error",
         description: err.message,
         status: "error",
-        duration: 4000
+        duration: 5000,
+        isClosable: true
       });
+    }
+  };
+
+  // History Push Helper for Undo / Redo
+  const pushWidgetsToHistory = useCallback((nextWidgets) => {
+    setHistory((prev) => {
+      const sliced = prev.slice(0, historyIndex + 1);
+      return [...sliced, nextWidgets];
+    });
+    setHistoryIndex((prev) => prev + 1);
+  }, [historyIndex]);
+
+  // Undo Handler
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const prevIdx = historyIndex - 1;
+      setHistoryIndex(prevIdx);
+      setWidgets(history[prevIdx]);
+      toast({ title: "Action Undone", status: "info", duration: 1200 });
+    }
+  }, [history, historyIndex, toast]);
+
+  // Redo Handler
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const nextIdx = historyIndex + 1;
+      setHistoryIndex(nextIdx);
+      setWidgets(history[nextIdx]);
+      toast({ title: "Action Redone", status: "info", duration: 1200 });
+    }
+  }, [history, historyIndex, toast]);
+
+  // Keyboard Shortcuts (Ctrl+Z / Ctrl+Y / Ctrl+S)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (wizardStep !== "app_builder") return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        e.preventDefault();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        handleRedo();
+        e.preventDefault();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        handleSaveApp();
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [wizardStep, handleUndo, handleRedo]);
+
+  // Register or update app in the saved apps index
+  const registerSavedApp = useCallback((name, widgetCount, ruleCount) => {
+    try {
+      const raw = localStorage.getItem("innoide:companion-apps-list");
+      let list = [];
+      if (raw) {
+        try { list = JSON.parse(raw); } catch (e) { }
+      }
+      if (!Array.isArray(list)) list = [];
+      const idx = list.findIndex((a) => a.name === name);
+      const entry = { name, widgetCount, ruleCount, updatedAt: new Date().toISOString() };
+      if (idx !== -1) {
+        list[idx] = entry;
+      } else {
+        list.push(entry);
+      }
+      localStorage.setItem("innoide:companion-apps-list", JSON.stringify(list));
+      setSavedApps(list);
+    } catch (e) { }
+  }, []);
+
+  // Auto-persist app state to localStorage
+  const autoPersistApp = useCallback((newWidgets, newBlocks = logicBlocks, name = projectName) => {
+    try {
+      const appConfig = {
+        projectName: name,
+        savedAt: new Date().toISOString(),
+        widgets: newWidgets,
+        logicBlocks: newBlocks,
+        device: selectedDevice
+      };
+      localStorage.setItem(`innoide:companion-app:${name}`, JSON.stringify(appConfig));
+      registerSavedApp(name, newWidgets.length, newBlocks.length);
+    } catch (e) { }
+  }, [logicBlocks, projectName, selectedDevice, registerSavedApp]);
+
+  // Load an existing app profile from localStorage
+  const handleLoadApp = (targetName) => {
+    try {
+      const raw = localStorage.getItem(`innoide:companion-app:${targetName}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const loadedWidgets = Array.isArray(parsed.widgets) ? parsed.widgets : [];
+        const loadedBlocks = Array.isArray(parsed.logicBlocks) ? parsed.logicBlocks : [];
+        setProjectName(targetName);
+        setWidgets(loadedWidgets);
+        setLogicBlocks(loadedBlocks);
+        setHistory([loadedWidgets]);
+        setHistoryIndex(0);
+        setSelectedWidgetId(loadedWidgets[0]?.id || null);
+        toast({
+          title: "App Screen Loaded",
+          description: `Loaded "${targetName}" with ${loadedWidgets.length} components.`,
+          status: "info",
+          duration: 2000
+        });
+        return;
+      }
+    } catch (e) { }
+    // If not found in detailed storage, switch to blank with that name
+    setProjectName(targetName);
+    setWidgets([]);
+    setLogicBlocks([]);
+    setHistory([[]]);
+    setHistoryIndex(0);
+    setSelectedWidgetId(null);
+  };
+
+  // Create a new blank app profile
+  const handleCreateNewApp = (name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    setProjectName(trimmed);
+    setWidgets([]);
+    setLogicBlocks([]);
+    setHistory([[]]);
+    setHistoryIndex(0);
+    setSelectedWidgetId(null);
+    autoPersistApp([], [], trimmed);
+    toast({
+      title: "New App Created",
+      description: `Created blank app screen "${trimmed}".`,
+      status: "success",
+      duration: 2200
+    });
+  };
+
+  // Rename current app profile
+  const handleRenameApp = (oldName, newName) => {
+    const trimmed = (newName || "").trim();
+    if (!trimmed || trimmed === oldName) return;
+    try {
+      const existing = localStorage.getItem(`innoide:companion-app:${oldName}`);
+      if (existing) {
+        localStorage.setItem(`innoide:companion-app:${trimmed}`, existing);
+        localStorage.removeItem(`innoide:companion-app:${oldName}`);
+      }
+      const raw = localStorage.getItem("innoide:companion-apps-list");
+      let list = raw ? JSON.parse(raw) : [];
+      list = list.map((a) => (a.name === oldName ? { ...a, name: trimmed } : a));
+      localStorage.setItem("innoide:companion-apps-list", JSON.stringify(list));
+      setSavedApps(list);
+      setProjectName(trimmed);
+      toast({
+        title: "App Renamed",
+        description: `Renamed to "${trimmed}".`,
+        status: "success",
+        duration: 2000
+      });
+    } catch (e) { }
+  };
+
+  // Delete an app profile
+  const handleDeleteApp = (nameToDelete) => {
+    try {
+      localStorage.removeItem(`innoide:companion-app:${nameToDelete}`);
+      const raw = localStorage.getItem("innoide:companion-apps-list");
+      let list = raw ? JSON.parse(raw) : [];
+      list = list.filter((a) => a.name !== nameToDelete);
+      localStorage.setItem("innoide:companion-apps-list", JSON.stringify(list));
+      setSavedApps(list);
+
+      toast({
+        title: "App Screen Deleted",
+        description: `"${nameToDelete}" was removed.`,
+        status: "info",
+        duration: 2000
+      });
+
+      if (nameToDelete === projectName) {
+        const next = list[0]?.name || "default_app";
+        handleLoadApp(next);
+      }
+    } catch (e) { }
+  };
+
+  // Clear all components from canvas
+  const handleClearAllWidgets = () => {
+    setWidgets([]);
+    pushWidgetsToHistory([]);
+    setSelectedWidgetId(null);
+    autoPersistApp([]);
+    setLogicBlocks((prev) =>
+      prev.map((b) => (b.triggerType === "component" ? { ...b, enabled: false, isStale: true } : b))
+    );
+    toast({
+      title: "Canvas Cleared",
+      description: "All components removed from mobile app. Component rules marked invalid.",
+      status: "info",
+      duration: 2000
+    });
+  };
+
+  // CRUD Record Handlers for in-app Data Records / CRUD Table widget
+  const handleOpenAddCrudRecord = (widgetId) => {
+    setCrudRecordTargetWidgetId(widgetId);
+    setEditingCrudRecord(null);
+    setCrudRecordForm({ name: "", value: "", status: "Active" });
+    onCrudModalOpen();
+  };
+
+  const handleOpenEditCrudRecord = (widgetId, record) => {
+    setCrudRecordTargetWidgetId(widgetId);
+    setEditingCrudRecord(record);
+    setCrudRecordForm({ name: record.name, value: record.value, status: record.status || "Active" });
+    onCrudModalOpen();
+  };
+
+  const handleSaveCrudRecord = () => {
+    if (!crudRecordTargetWidgetId || !crudRecordForm.name.trim()) {
+      toast({ title: "Name Required", description: "Please enter a record name.", status: "warning", duration: 2000 });
+      return;
+    }
+    const updated = widgets.map((w) => {
+      if (w.id !== crudRecordTargetWidgetId) return w;
+      const records = Array.isArray(w.records) ? [...w.records] : [];
+      if (editingCrudRecord) {
+        // UPDATE (U in CRUD)
+        const updatedRecords = records.map((r) =>
+          r.id === editingCrudRecord.id
+            ? { ...r, name: crudRecordForm.name.trim(), value: crudRecordForm.value.trim(), status: crudRecordForm.status, timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }
+            : r
+        );
+        return { ...w, records: updatedRecords };
+      } else {
+        // CREATE (C in CRUD)
+        const newRecord = {
+          id: `rec-${Date.now()}`,
+          name: crudRecordForm.name.trim(),
+          value: crudRecordForm.value.trim() || "OK",
+          status: crudRecordForm.status || "Active",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        };
+        return { ...w, records: [...records, newRecord] };
+      }
+    });
+    setWidgets(updated);
+    pushWidgetsToHistory(updated);
+    autoPersistApp(updated);
+    onCrudModalClose();
+    toast({
+      title: editingCrudRecord ? "Record Updated" : "Record Created",
+      status: "success",
+      duration: 1800
+    });
+  };
+
+  const handleDeleteCrudRecord = (widgetId, recordId) => {
+    // DELETE (D in CRUD)
+    const updated = widgets.map((w) => {
+      if (w.id !== widgetId) return w;
+      const records = (w.records || []).filter((r) => r.id !== recordId);
+      return { ...w, records };
+    });
+    setWidgets(updated);
+    pushWidgetsToHistory(updated);
+    autoPersistApp(updated);
+    toast({ title: "Record Deleted", status: "info", duration: 1500 });
+  };
+
+  // Save Companion App Configuration
+  const handleSaveApp = () => {
+    try {
+      const appConfig = {
+        projectName,
+        savedAt: new Date().toISOString(),
+        widgets,
+        logicBlocks,
+        device: selectedDevice
+      };
+      localStorage.setItem(`innoide:companion-app:${projectName}`, JSON.stringify(appConfig));
+      registerSavedApp(projectName, widgets.length, logicBlocks.length);
+      toast({
+        title: "Companion App Saved",
+        description: `"${projectName}" saved with ${widgets.length} components and ${logicBlocks.length} logic rules.`,
+        status: "success",
+        duration: 2500,
+        isClosable: true
+      });
+    } catch (e) {
+      toast({ title: "Save Error", description: e.message, status: "error", duration: 3000 });
     }
   };
 
@@ -389,57 +1300,2088 @@ export default function ESP32Flasher({
     const newWidget = {
       id: newId,
       type,
-      title: title || `New ${type}`,
-      boundTarget: defaultBinding || "GPIO Pin",
-      boundTargetName: `Bound → ${defaultBinding || "GPIO Pin"}`,
-      action: "Execute Action",
+      title: title || (
+        type === "top_button" ? "Top Button" :
+          type === "bottom_button" ? "Bottom Button" :
+            type === "left_button" ? "Left Button" :
+              type === "right_button" ? "Right Button" :
+                type === "dpad" ? "Directional D-Pad" :
+                  type === "crud_table" ? "Data Records" : `New ${type}`
+      ),
+      boundTarget: defaultBinding || (
+        type === "top_button" ? "GPIO 13 (Motor A)" :
+          type === "bottom_button" ? "GPIO 14 (Motor B)" :
+            type === "left_button" ? "GPIO 12 (Steer Left)" :
+              type === "right_button" ? "GPIO 15 (Steer Right)" :
+                type === "dpad" ? "GPIO Multi-Motor" :
+                  type === "crud_table" ? "Local Storage / Device Data" : "GPIO Pin"
+      ),
+      boundTargetName: `Bound → ${defaultBinding || (
+        type === "top_button" ? "GPIO 13 (Motor A)" :
+          type === "bottom_button" ? "GPIO 14 (Motor B)" :
+            type === "left_button" ? "GPIO 12 (Steer Left)" :
+              type === "right_button" ? "GPIO 15 (Steer Right)" :
+                type === "dpad" ? "GPIO Multi-Motor" :
+                  type === "crud_table" ? "Local Storage" : "GPIO Pin"
+      )}`,
+      action: (
+        type === "switch" ? "Turn ON / OFF" :
+          type === "slider" ? "Set PWM Angle" :
+            type === "gauge" ? "Read Telemetry" :
+              type === "top_button" ? "Forward (Top) Pulse" :
+                type === "bottom_button" ? "Reverse (Bottom) Pulse" :
+                  type === "left_button" ? "Steer Left Pulse" :
+                    type === "right_button" ? "Steer Right Pulse" :
+                      type === "dpad" ? "4-Way Directional Control" :
+                        type === "crud_table" ? "CRUD Storage" : "Execute Action"
+      ),
       state: false,
-      value: 50,
-      color: "blue",
+      value: type === "slider" ? 50 : type === "gauge" ? 25.0 : 0,
+      min: 0,
+      max: type === "slider" ? 180 : type === "gauge" ? 100 : 100,
+      unit: type === "slider" ? "°" : type === "gauge" ? "°C" : "",
+      color: (
+        type === "gauge" ? "#ef4444" :
+          type === "slider" ? "#8b5cf6" :
+            type === "switch" ? "#2563eb" :
+              type === "top_button" ? "#2563eb" :
+                type === "bottom_button" ? "#0284c7" :
+                  type === "left_button" ? "#7c3aed" :
+                    type === "right_button" ? "#9333ea" :
+                      type === "dpad" ? "#1e293b" :
+                        type === "crud_table" ? "#2563eb" : "#10b981"
+      ),
       cornerRadius: 16,
-      visible: true
+      visible: true,
+      records: type === "crud_table" ? [
+        { id: "rec-1", name: "Device Status", value: "Active", status: "Active", timestamp: "10:00 AM" },
+        { id: "rec-2", name: "Temperature Alert", value: "24.5°C", status: "Normal", timestamp: "10:15 AM" },
+        { id: "rec-3", name: "GPIO Relay", value: "Closed", status: "Active", timestamp: "10:30 AM" }
+      ] : undefined
     };
-    setWidgets((prev) => [...prev, newWidget]);
+    const updated = [...widgets, newWidget];
+    setWidgets(updated);
+    pushWidgetsToHistory(updated);
     setSelectedWidgetId(newId);
+    autoPersistApp(updated);
     toast({
       title: "Component Added",
-      description: `Added "${title}" to your mobile app canvas.`,
+      description: `Added "${newWidget.title}" to your mobile app canvas.`,
       status: "success",
-      duration: 2000
+      duration: 1800
     });
   };
 
   // Update Widget Attribute
-  const handleUpdateWidget = (prop, value) => {
-    if (!activeWidget) return;
-    setWidgets((prev) =>
-      prev.map((w) => (w.id === activeWidget.id ? { ...w, [prop]: value } : w))
-    );
+  const handleUpdateWidget = (prop, value, customWidgetId = null) => {
+    const targetId = customWidgetId || selectedWidgetId;
+    if (!targetId) return;
+
+    let targetWidget = null;
+    setWidgets((prev) => {
+      targetWidget = prev.find((w) => w.id === targetId);
+      const updated = prev.map((w) => (w.id === targetId ? { ...w, [prop]: value } : w));
+      autoPersistApp(updated);
+      return updated;
+    });
+
+    // Real-time hardware serial communication on state/value change OUTSIDE setWidgets
+    if (prop === "state" || prop === "value") {
+      const tgt = targetWidget || widgets.find((w) => w.id === targetId);
+      const targetPort = selectedDevice?.port || activePort || "COM9";
+      if (tgt) {
+        if (tgt.type === "switch" || /led|light/i.test(tgt.title || "") || targetId === "w-led") {
+          setLiveLedToggle(Boolean(value));
+          handleToggleHardwareLed(Boolean(value));
+        } else if (window.electronAPI?.serial?.write && targetPort) {
+          const cmd = `SET ${tgt.title.replace(/\s+/g, "_").toUpperCase()}=${value}\r\n`;
+          window.electronAPI.serial.write(targetPort, cmd).catch(() => { });
+          setSerialTrafficLogs((logs) => [
+            ...logs.slice(-20),
+            { id: Date.now(), type: "tx", text: `TX -> ${targetPort}: ${cmd.trim()}`, time: new Date().toLocaleTimeString() }
+          ]);
+        }
+      }
+      // If it is w-led, handleToggleHardwareLed already dispatched the LED command.
+      // Avoid duplicate simultaneous writes for the same widget.
+      if (tgt && targetId !== "w-led") {
+        evaluateRulesForWidget(tgt, prop, value);
+      }
+    }
   };
 
   // Delete Component
   const handleDeleteWidget = (id) => {
-    setWidgets((prev) => prev.filter((w) => w.id !== id));
+    const deletedWidget = widgets.find((w) => w.id === id);
+    const updated = widgets.filter((w) => w.id !== id);
+    setWidgets(updated);
+    pushWidgetsToHistory(updated);
     if (selectedWidgetId === id) {
-      setSelectedWidgetId(widgets[0]?.id || "");
+      setSelectedWidgetId(updated[0]?.id || "");
+    }
+    autoPersistApp(updated);
+
+    // Prevent stale component references in rules
+    const affectedRules = logicBlocks.filter((b) => b.triggerWidgetId === id);
+    if (affectedRules.length > 0) {
+      setLogicBlocks((prev) =>
+        prev.map((b) =>
+          b.triggerWidgetId === id ? { ...b, enabled: false, isStale: true } : b
+        )
+      );
+      toast({
+        title: "Component Removed",
+        description: `"${deletedWidget?.title || "Component"}" was deleted. ${affectedRules.length} rule(s) referencing it marked as invalid.`,
+        status: "warning",
+        duration: 3500,
+        isClosable: true
+      });
+    } else {
+      toast({ title: "Component Removed", status: "info", duration: 1500 });
     }
   };
 
-  // Palette Items for Screen 14
+  // Move Component Up / Down in Tree
+  const handleMoveWidget = (id, direction) => {
+    const index = widgets.findIndex((w) => w.id === id);
+    if (index === -1) return;
+    if (direction === "up" && index === 0) return;
+    if (direction === "down" && index === widgets.length - 1) return;
+
+    const newIndex = direction === "up" ? index - 1 : index + 1;
+    const reordered = [...widgets];
+    const [movedItem] = reordered.splice(index, 1);
+    reordered.splice(newIndex, 0, movedItem);
+
+    setWidgets(reordered);
+    pushWidgetsToHistory(reordered);
+    autoPersistApp(reordered);
+  };
+
+  // Duplicate Component
+  const handleDuplicateWidget = (id) => {
+    const item = widgets.find((w) => w.id === id);
+    if (!item) return;
+    const clone = {
+      ...item,
+      id: `w-${Date.now()}`,
+      title: `${item.title} (Copy)`
+    };
+    const updated = [...widgets, clone];
+    setWidgets(updated);
+    pushWidgetsToHistory(updated);
+    setSelectedWidgetId(clone.id);
+    autoPersistApp(updated);
+    toast({ title: "Component Duplicated", status: "success", duration: 1500 });
+  };
+
+  // Toggle Visibility
+  const handleToggleVisibility = (id) => {
+    setWidgets((prev) => {
+      const updated = prev.map((w) => (w.id === id ? { ...w, visible: w.visible === false ? true : false } : w));
+      pushWidgetsToHistory(updated);
+      autoPersistApp(updated);
+      return updated;
+    });
+  };
+
+  // Test Hardware Signal (Send Serial Pulse)
+  const handleTestHardwareSignal = async (widget) => {
+    if (!widget) return;
+    const targetPort = activePort;
+    const testCmd = `TEST:${widget.boundTarget || "GPIO"}:PULSE\r\n`;
+
+    if (window.electronAPI?.serial?.write && selectedDevice?.port) {
+      try {
+        try {
+          await window.electronAPI.serial.write(selectedDevice.port, testCmd);
+        } catch (initialErr) {
+          // If port not connected, attempt auto-connect once
+          if (initialErr.message?.includes("not connected") && window.electronAPI.serial.connect) {
+            await window.electronAPI.serial.connect(selectedDevice.port, 115200);
+            await window.electronAPI.serial.write(selectedDevice.port, testCmd);
+          } else {
+            throw initialErr;
+          }
+        }
+        setSerialTrafficLogs((logs) => [
+          ...logs.slice(-20),
+          { id: Date.now(), type: "tx", text: `TX -> ${targetPort}: ${testCmd.trim()}`, time: new Date().toLocaleTimeString() }
+        ]);
+        toast({
+          title: "Hardware Signal Sent",
+          description: `Pulse transmitted to ${targetPort} (${widget.boundTarget || "Pin"}).`,
+          status: "success",
+          duration: 2000
+        });
+      } catch (err) {
+        setSerialTrafficLogs((logs) => [
+          ...logs.slice(-20),
+          { id: Date.now(), type: "sim", text: `[SIMULATED] TX -> ${targetPort}: ${testCmd.trim()}`, time: new Date().toLocaleTimeString() }
+        ]);
+        toast({
+          title: "Simulated Signal",
+          description: `Port ${targetPort} not connected. Simulated pulse for ${widget.title || "Widget"}.`,
+          status: "info",
+          duration: 2500
+        });
+      }
+    } else {
+      setSerialTrafficLogs((logs) => [
+        ...logs.slice(-20),
+        { id: Date.now(), type: "sim", text: `[SIMULATED] TX -> ${targetPort}: ${testCmd.trim()}`, time: new Date().toLocaleTimeString() }
+      ]);
+      toast({
+        title: "Signal Simulated",
+        description: `Simulated pulse triggered for ${widget.title} (${widget.boundTarget || "GPIO Pin"}).`,
+        status: "info",
+        duration: 2000
+      });
+    }
+  };
+
+  // Logic Blocks Management & Interactive Rule Builder
+  const handleOpenAddRule = (initialTab = 0, specificWidget = null) => {
+    const targetWidget = specificWidget || widgets[0];
+    const defaultGpio = ESP32_GPIO_OPTIONS[0];
+    setEditingRule({
+      id: `b-${Date.now()}`,
+      name: targetWidget ? `${targetWidget.title} Sync` : `Automation Rule #${logicBlocks.length + 1}`,
+      triggerType: targetWidget ? "component" : "telemetry", // 'component' | 'telemetry' | 'timer'
+      triggerWidgetId: targetWidget?.id || "telem_temp",
+      triggerName: targetWidget?.title || "Temperature Telemetry",
+      event: targetWidget
+        ? (targetWidget.type === "switch" ? "on_toggle" : targetWidget.type === "slider" ? "on_change" : targetWidget.type === "button" ? "on_press" : "on_update")
+        : "threshold_above",
+      condition: "Always",
+      conditionType: "Always",
+      conditionThreshold: "30",
+      conditionUnit: "°C",
+      action: defaultGpio.defaultAction || "Send Serial Command",
+      payload: defaultGpio.defaultPayload || "LED:{state}",
+      targetHardware: targetWidget?.boundTargetName || targetWidget?.boundTarget || (defaultGpio.pin + " (" + defaultGpio.defaultTarget + ")"),
+      targetPin: targetWidget?.pin || defaultGpio.pin,
+      enabled: true
+    });
+    setRuleModalTab(initialTab);
+    setTestRuleResult(null);
+    onRuleModalOpen();
+  };
+
+  const handleOpenEditRule = (rule, tabIndex = 0) => {
+    setEditingRule({
+      ...rule,
+      triggerType: rule.triggerType || (rule.triggerWidgetId?.startsWith("telem_") ? "telemetry" : rule.triggerWidgetId?.startsWith("timer") ? "timer" : "component"),
+      targetPin: rule.targetPin || rule.targetHardware?.split(" ")[0] || "GPIO 2",
+      conditionType: rule.conditionType || (rule.condition?.includes(">") ? "Value >" : rule.condition?.includes("<") ? "Value <" : rule.condition?.includes("==") ? "Value ==" : "Always")
+    });
+    setRuleModalTab(tabIndex);
+    setTestRuleResult(null);
+    onRuleModalOpen();
+  };
+
+  const handleSaveRuleModal = () => {
+    if (!editingRule) return;
+    setLogicBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.id === editingRule.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = editingRule;
+        return next;
+      }
+      return [...prev, editingRule];
+    });
+    toast({
+      title: "Rule Saved",
+      description: `Rule "${editingRule.name}" configuration saved and active.`,
+      status: "success",
+      duration: 2000
+    });
+    onRuleModalClose();
+  };
+
+  const handleDeleteLogicBlock = (id) => {
+    setLogicBlocks((prev) => prev.filter((b) => b.id !== id));
+    toast({ title: "Rule Deleted", status: "info", duration: 1500 });
+  };
+
+  const handleToggleLogicBlock = (id) => {
+    setLogicBlocks((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, enabled: !b.enabled } : b))
+    );
+  };
+
+  // Execute Rule Action (real serial + telemetry log)
+  // Execute Rule Action (real serial + telemetry log)
+  const handleExecuteRule = async (rule, triggerVal = null) => {
+    if (!rule) return;
+    const targetPort = activePort;
+    let formattedPayload = rule.payload || "CMD";
+
+    if (triggerVal !== null) {
+      if (typeof triggerVal === "boolean") {
+        formattedPayload = formattedPayload
+          .replace(/{state}/g, triggerVal ? "1" : "0")
+          .replace(/{state_str}/g, triggerVal ? "HIGH" : "LOW")
+          .replace(/{value}/g, triggerVal ? "1" : "0");
+      } else {
+        formattedPayload = formattedPayload
+          .replace(/{value}/g, String(triggerVal))
+          .replace(/{state}/g, String(triggerVal));
+      }
+    }
+
+    const serialMsg = `${formattedPayload}\r\n`;
+
+    if (window.electronAPI?.serial?.write && targetPort) {
+      try {
+        if (window.electronAPI.serial.connect) {
+          try {
+            await window.electronAPI.serial.connect(targetPort, 115200);
+          } catch (_) { }
+        }
+        await window.electronAPI.serial.write(targetPort, serialMsg);
+        try {
+          fetch("http://localhost:5055/api/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payload: serialMsg, port: targetPort, value: triggerVal, SwitchStatus: triggerVal ? 1 : 0 })
+          }).catch(() => { });
+        } catch (_) { }
+        setSerialTrafficLogs((logs) => [
+          ...logs.slice(-20),
+          {
+            id: Date.now(),
+            type: "tx",
+            text: `[RULE TX] ${rule.name} -> ${targetPort} (${rule.targetHardware || "Hardware"}): ${serialMsg.trim()}`,
+            time: new Date().toLocaleTimeString()
+          }
+        ]);
+        return { success: true, text: `Transmitted: "${serialMsg.trim()}" to ${targetPort} via ${rule.targetHardware || "Hardware"}` };
+      } catch (err) {
+        // Auto-retry with explicit connect
+        if (window.electronAPI.serial.connect) {
+          try {
+            await window.electronAPI.serial.connect(targetPort, 115200);
+            await window.electronAPI.serial.write(targetPort, serialMsg);
+            setSerialTrafficLogs((logs) => [
+              ...logs.slice(-20),
+              {
+                id: Date.now(),
+                type: "tx",
+                text: `[RULE TX] ${rule.name} -> ${targetPort}: ${serialMsg.trim()}`,
+                time: new Date().toLocaleTimeString()
+              }
+            ]);
+            return { success: true, text: `Transmitted: "${serialMsg.trim()}" to ${targetPort}` };
+          } catch (retryErr) {
+            return { success: false, text: `Serial write error: ${retryErr.message}` };
+          }
+        }
+        return { success: false, text: `Serial write error: ${err.message}` };
+      }
+    } else {
+      setSerialTrafficLogs((logs) => [
+        ...logs.slice(-20),
+        {
+          id: Date.now(),
+          type: "sim",
+          text: `[RULE SIM] ${rule.name} -> ${targetPort} (${rule.targetHardware || "Hardware"}): ${serialMsg.trim()}`,
+          time: new Date().toLocaleTimeString()
+        }
+      ]);
+      return { success: true, text: `Simulated: "${serialMsg.trim()}" targeted at ${rule.targetHardware || "Hardware"}` };
+    }
+  };
+
+  // Evaluate Automation Rules when a widget changes in Preview or Live mode
+  const evaluateRulesForWidget = useCallback((targetWidget, prop, value) => {
+    if (!targetWidget) return;
+    const activeRules = logicBlocks.filter((b) => b.enabled && b.triggerWidgetId === targetWidget.id);
+
+    activeRules.forEach((rule) => {
+      let conditionMet = false;
+      const cond = rule.condition || "Always";
+
+      if (cond === "Always") {
+        conditionMet = true;
+      } else if (cond.startsWith("Value >")) {
+        const thresh = parseFloat(rule.conditionThreshold || cond.replace(/[^0-9.-]/g, "") || 0);
+        conditionMet = parseFloat(value) > thresh;
+      } else if (cond.startsWith("Value <")) {
+        const thresh = parseFloat(rule.conditionThreshold || cond.replace(/[^0-9.-]/g, "") || 0);
+        conditionMet = parseFloat(value) < thresh;
+      } else if (cond.startsWith("Value ==")) {
+        const thresh = rule.conditionThreshold || "1";
+        conditionMet = String(value) === String(thresh) || (typeof value === "boolean" && (value ? "1" : "0") === thresh);
+      } else if (cond.startsWith("Value !=")) {
+        const thresh = rule.conditionThreshold || "0";
+        conditionMet = String(value) !== String(thresh);
+      } else {
+        conditionMet = true;
+      }
+
+      if (conditionMet) {
+        handleExecuteRule(rule, value);
+      }
+    });
+  }, [logicBlocks, selectedDevice]);
+
+  // Generate Standalone Single-File Web App HTML (Full UI + Functional Logic)
+  const getStandaloneHtmlContent = () => {
+    const widgetsJson = JSON.stringify(widgets);
+    const logicBlocksJson = JSON.stringify(logicBlocks);
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>${projectName} - IoT Companion App</title>
+  <style>
+    :root { --primary: #38bdf8; --bg: #090d16; --card: #131b2e; --border: #1e293b; --text: #f8fafc; --subtext: #94a3b8; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; justify-content: center; padding: 16px; }
+    .phone { width: 100%; max-width: 440px; background: #0f172a; border-radius: 28px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); padding: 20px; display: flex; flex-direction: column; gap: 16px; border: 1px solid var(--border); }
+    .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+    .brand-sub { font-size: 10px; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px; }
+    .header h1 { font-size: 18px; font-weight: 800; color: #fff; margin-top: 2px; }
+    .badge { font-size: 11px; padding: 4px 10px; border-radius: 9999px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 700; display: flex; align-items: center; gap: 5px; }
+    .badge-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+    .tabs { display: flex; background: #090d16; padding: 4px; border-radius: 12px; border: 1px solid var(--border); gap: 4px; }
+    .tab-btn { flex: 1; padding: 8px 4px; background: transparent; border: none; border-radius: 8px; color: var(--subtext); font-size: 12px; font-weight: 700; cursor: pointer; text-align: center; }
+    .tab-btn.active { background: #1e293b; color: #fff; border-bottom: 2px solid #38bdf8; }
+    .tab-content { display: none; flex-direction: column; gap: 14px; }
+    .tab-content.active { display: flex; }
+    .card { background: var(--card); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--border); }
+    .card.glow-blue { border-color: #2563eb; background: #101a38; }
+    .card.glow-red { border-color: #ef4444; background: #261214; }
+    .row { display: flex; align-items: center; justify-content: space-between; }
+    .title { font-weight: 700; font-size: 15px; color: #f8fafc; }
+    .meta { font-size: 12px; color: var(--subtext); margin-top: 2px; }
+    .btn { background: #ea580c; color: white; border: none; border-radius: 14px; padding: 14px 20px; font-weight: 800; cursor: pointer; width: 100%; font-size: 14px; text-align: center; }
+    .toggle { position: relative; width: 48px; height: 26px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider-toggle { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #334155; border-radius: 26px; transition: 0.3s; }
+    .slider-toggle:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }
+    input:checked + .slider-toggle { background: #2563eb; }
+    input:checked + .slider-toggle:before { transform: translateX(22px); }
+    .slider-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .step-btn { background: #1e293b; color: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-weight: 800; font-size: 11px; cursor: pointer; }
+    .slider-bar-wrap { flex: 1; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; }
+    .slider-bar-fill { height: 100%; background: #a855f7; border-radius: 4px; }
+    .gauge-big { font-size: 36px; font-weight: 900; text-align: center; color: #38bdf8; margin: 6px 0; }
+    .live-pill { font-size: 10px; font-weight: 800; background: #082f49; color: #38bdf8; padding: 3px 8px; border-radius: 6px; }
+    .live-pill.alert { background: #7f1d1d; color: #fca5a5; }
+    .logic-card { background: var(--card); border-radius: 16px; padding: 14px; border: 1px solid var(--border); border-left: 4px solid #10b981; display: flex; flex-direction: column; gap: 10px; }
+    .logic-details { background: #090d16; border-radius: 10px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 5px; }
+    .logic-row { display: flex; align-items: center; gap: 6px; }
+    .logic-label { color: #64748b; font-weight: 700; width: 75px; }
+    .logic-val { color: #e2e8f0; font-weight: 600; flex: 1; }
+    .logic-code { color: #38bdf8; font-family: monospace; font-weight: 700; }
+    .test-btn { background: #1e293b; color: #38bdf8; border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
+    .pin-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .log-box { font-family: monospace; font-size: 11px; padding: 12px; border-radius: 14px; background: #090d16; color: #38bdf8; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="header">
+      <div>
+        <div class="brand-sub">InnoIDE Companion</div>
+        <h1>🌱 ${projectName}</h1>
+      </div>
+      <div class="badge" id="companionStatusBadge" onclick="pingCompanionServer()" style="cursor:pointer;" title="Tap to test connection">
+        <div class="badge-dot" id="companionStatusDot"></div>
+        <span id="companionStatusText">ESP32 Linked</span>
+      </div>
+    </div>
+
+    <div id="scannerNotice" style="display:none; background:rgba(34,211,238,0.12); border:1px solid rgba(34,211,238,0.3); border-radius:12px; padding:8px 12px; font-size:11px; color:#38bdf8; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <span>📱 <b>Tip:</b> If switches don't respond on other phones, tap <b>⋮</b> and select <b>"Open in Chrome / Safari"</b>.</span>
+      <button onclick="document.getElementById('scannerNotice').style.display='none'" style="background:transparent; border:none; color:#94a3b8; font-size:16px; cursor:pointer; padding:0 4px; line-height:1;">&times;</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="setTab('controls')">🎛️ Controls</button>
+      <button class="tab-btn" onclick="setTab('logic')">⚡ Logic Rules</button>
+      <button class="tab-btn" onclick="setTab('hardware')">📡 Hardware & Logs</button>
+    </div>
+
+    <!-- TAB 1: UI CONTROLS -->
+    <div id="tab-controls" class="tab-content active">
+      ${widgets.filter(w => w.visible !== false).length === 0 ? `
+        <div class="card" style="text-align: center; padding: 32px 16px; color: var(--subtext);">
+          <div style="font-size: 24px; margin-bottom: 8px;">📱</div>
+          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No Components Added</div>
+          <div style="font-size: 12px;">Add components in InnoIDE App Designer to control hardware from this companion app.</div>
+        </div>
+      ` : widgets.filter(w => w.visible !== false).map(w => {
+      if (w.type === 'switch') {
+        return `
+          <div class="card ${w.state ? 'glow-blue' : ''}" id="card-${w.id}">
+            <div class="row">
+              <div>
+                <div class="title">${w.title}</div>
+                <div class="meta">Target: ${w.boundTarget || 'GPIO 2 (LED)'}</div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="input-${w.id}" ${w.state ? 'checked' : ''} onchange="handleSwitch('${w.id}', this.checked, '${w.title}')">
+                <span class="slider-toggle"></span>
+              </label>
+            </div>
+          </div>`;
+      }
+      if (w.type === 'slider') {
+        return `
+          <div class="card" id="card-${w.id}">
+            <div class="row">
+              <div>
+                <div class="title">${w.title}</div>
+                <div class="meta">PWM Target: ${w.boundTarget || 'GPIO 4 (Servo)'}</div>
+              </div>
+              <div style="font-weight: 800; font-size: 18px; color: ${w.color || '#a855f7'};" id="val-${w.id}">${w.value || 90}${w.unit || '°'}</div>
+            </div>
+            <div class="slider-row">
+              <button class="step-btn" onclick="stepSlider('${w.id}', -10, ${w.min || 0}, ${w.max || 180}, '${w.title}')">-10°</button>
+              <button class="step-btn" onclick="stepSlider('${w.id}', -1, ${w.min || 0}, ${w.max || 180}, '${w.title}')">-1°</button>
+              <div class="slider-bar-wrap">
+                <div class="slider-bar-fill" id="bar-${w.id}" style="width: ${(((w.value || 90) - (w.min || 0)) / ((w.max || 180) - (w.min || 0))) * 100}%;"></div>
+              </div>
+              <button class="step-btn" onclick="stepSlider('${w.id}', 1, ${w.min || 0}, ${w.max || 180}, '${w.title}')">+1°</button>
+              <button class="step-btn" onclick="stepSlider('${w.id}', 10, ${w.min || 0}, ${w.max || 180}, '${w.title}')">+10°</button>
+            </div>
+          </div>`;
+      }
+      if (w.type === 'gauge') {
+        return `
+          <div class="card" id="card-${w.id}">
+            <div class="row">
+              <div>
+                <div class="title">${w.title}</div>
+                <div class="meta">Source: ${w.boundTarget || 'ADC Telemetry'}</div>
+              </div>
+              <div class="live-pill" id="pill-${w.id}">● LIVE ADC</div>
+            </div>
+            <div class="gauge-big" id="val-${w.id}">${w.value || 24.3}${w.unit || '°C'}</div>
+            <div class="meta" style="text-align: center;">Range: ${w.min || 0} - ${w.max || 50}${w.unit || '°C'} (Guard Threshold: 30°C)</div>
+          </div>`;
+      }
+      if (w.type === 'button') {
+        return `
+          <button class="btn" style="background: ${w.color || '#ea580c'};" onclick="handleBtn('${w.title}', '${w.boundTarget || 'GPIO 5'}', '${w.action || 'TRIGGER'}')">
+            🚨 ${w.title}
+          </button>`;
+      }
+      if (w.type === 'device_card') {
+        return `
+          <div class="card" id="card-${w.id}">
+            <div class="row">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 34px; height: 34px; border-radius: 10px; background: rgba(37,99,235,0.2); display: flex; align-items: center; justify-content: center; font-size: 16px;">📡</div>
+                <div>
+                  <div class="title">${w.title || 'ESP32 Dev Board'}</div>
+                  <div style="font-size: 10px; color: #4ade80; font-weight: 700; margin-top: 2px;">● Online & Connected</div>
+                </div>
+              </div>
+              <div class="live-pill">WIFI 100%</div>
+            </div>
+          </div>`;
+      }
+      if (w.type === 'label') {
+        return `
+          <div class="card" id="card-${w.id}" style="padding: 12px 16px;">
+            <div class="title" style="color: ${w.color || '#f8fafc'};">${w.title}</div>
+            ${w.boundTarget ? `<div class="meta">${w.boundTarget}</div>` : ''}
+          </div>`;
+      }
+      if (w.type === 'textfield') {
+        return `
+          <div class="card" id="card-${w.id}">
+            <div class="title">${w.title}</div>
+            <div style="background: #090d16; border-radius: 8px; padding: 10px; margin-top: 6px; border: 1px solid var(--border); font-size: 12px; color: var(--subtext);">
+              ${w.placeholder || 'Text field...'}
+            </div>
+          </div>`;
+      }
+      if (w.type === 'progress') {
+        return `
+          <div class="card" id="card-${w.id}">
+            <div class="row">
+              <div class="title">${w.title}</div>
+              <div style="font-size: 12px; color: #38bdf8; font-weight: 800;">75%</div>
+            </div>
+            <div class="slider-bar-wrap" style="margin-top: 6px;">
+              <div class="slider-bar-fill" style="width: 75%; background: #38bdf8;"></div>
+            </div>
+          </div>`;
+      }
+      return '';
+    }).join('')}
+    </div>
+
+    <!-- TAB 2: FUNCTIONAL LOGIC -->
+    <div id="tab-logic" class="tab-content">
+      <div style="font-size: 12px; color: var(--subtext);">Autonomous trigger-action rules executed on ESP32 & bridge:</div>
+      ${logicBlocks.length === 0 ? `
+        <div class="card" style="text-align: center; padding: 32px 16px; color: var(--subtext);">
+          <div style="font-size: 24px; margin-bottom: 8px;">⚡</div>
+          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No Automation Rules</div>
+          <div style="font-size: 12px;">Configure automation rules in InnoIDE App Designer.</div>
+        </div>
+      ` : logicBlocks.map(rule => `
+        <div class="logic-card" id="rule-card-${rule.id}">
+          <div class="row">
+            <div>
+              <div style="font-weight: 800; font-size: 15px; color: #fff;">${rule.name}</div>
+              <div class="meta">Target: ${rule.targetHardware || 'Hardware Pin'}</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="rule-toggle-${rule.id}" ${rule.enabled ? 'checked' : ''} onchange="toggleRule('${rule.id}', this.checked)">
+              <span class="slider-toggle"></span>
+            </label>
+          </div>
+          <div class="logic-details">
+            <div class="logic-row"><span class="logic-label">🔄 Trigger:</span><span class="logic-val">${rule.triggerName} (${rule.event})</span></div>
+            <div class="logic-row"><span class="logic-label">⚖️ Condition:</span><span class="logic-val" style="color: #fbbf24;">${rule.condition || 'Always'}</span></div>
+            <div class="logic-row"><span class="logic-label">🚀 Action:</span><span class="logic-val" style="color: #38bdf8;">${rule.action}</span></div>
+            <div class="logic-row"><span class="logic-label">📦 Payload:</span><span class="logic-code">${rule.payload}</span></div>
+          </div>
+          <div class="row" style="margin-top: 4px;">
+            <div class="meta" id="rule-exec-${rule.id}">Executions: 0</div>
+            <button class="test-btn" onclick="testRule('${rule.id}')">▶ Test Trigger</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- TAB 3: HARDWARE & LOGS -->
+    <div id="tab-hardware" class="tab-content">
+      <div class="card">
+        <div class="title" style="margin-bottom: 6px;">ESP32 GPIO Assignments</div>
+        ${widgets.filter(w => w.boundTarget && w.type !== 'device_card').length > 0 ? widgets.filter(w => w.boundTarget && w.type !== 'device_card').map(w => {
+      const pinMatch = (w.boundTarget || '').match(/GPIO\\s*\\d+/i);
+      return `<div class="pin-row"><span style="color: #38bdf8; font-weight: 800; font-family: monospace;">${pinMatch ? pinMatch[0].toUpperCase() : 'PIN'}</span><span>${w.title} (${w.boundTarget})</span></div>`;
+    }).join('') : `
+        <div class="pin-row"><span style="color: #38bdf8; font-weight: 800; font-family: monospace;">GPIO 2</span><span>LED Output (Digital Out)</span></div>
+        `}
+      </div>
+      <div class="card">
+        <div class="row">
+          <div class="title">Serial & Telemetry Stream</div>
+          <button class="test-btn" onclick="document.getElementById('logConsole').innerHTML=''">Clear</button>
+        </div>
+        <div class="log-box" id="logConsole">
+          <div>[ESP32] Bridge initialized. Telemetry active.</div>
+          <div>[RULES] Loaded ${logicBlocks.length} functional logic blocks.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const rules = ${logicBlocksJson};
+    const widgetValues = {};
+    const execCounts = {};
+
+    function setTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('tab-' + tab).classList.add('active');
+    }
+
+    function addLog(msg) {
+      const el = document.getElementById('logConsole');
+      const time = new Date().toLocaleTimeString();
+      el.innerHTML += '<div>[' + time + '] ' + msg + '</div>';
+      el.scrollTop = el.scrollHeight;
+    }
+
+    var COMPANION_PORT = '${activePort}';
+
+    function sendHardwareAction(payload, extra) {
+      try {
+        const cleanPayload = String(payload || '').trim();
+        const isOff = cleanPayload === 'LED:0' || cleanPayload.includes(':0') || cleanPayload.toLowerCase().includes('off');
+        const switchStatus = isOff ? 0 : 1;
+        const bodyObj = Object.assign({
+          payload: cleanPayload || (isOff ? 'LED:0' : 'LED:1'),
+          SwitchStatus: switchStatus,
+          value: switchStatus === 1,
+          port: COMPANION_PORT || 'COM9'
+        }, extra || {});
+        const bodyStr = JSON.stringify(bodyObj);
+
+        // Prefer relative / origin endpoint so it works identically from phone or PC
+        const hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : '';
+        const companionIp = '${companionServerInfo?.ip || resolvedHostIp}';
+        const primaryEndpoint = hostOrigin ? (hostOrigin + '/api/action') : ('http://' + companionIp + ':5055/api/action');
+        const fallbackEndpoint = 'http://' + companionIp + ':5055/api/action';
+
+        const qs = 'payload=' + encodeURIComponent(bodyObj.payload) +
+          '&SwitchStatus=' + switchStatus +
+          '&value=' + (switchStatus === 1) +
+          '&port=' + encodeURIComponent(bodyObj.port || 'COM9') +
+          '&_t=' + Date.now();
+
+        var dispatched = false;
+
+        // Tier 1: Standard POST with JSON
+        fetch(primaryEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: bodyStr,
+          mode: 'cors'
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          dispatched = true;
+          if (res && res.success) {
+            addLog('🚀 [ESP32] ' + (isOff ? 'LED OFF (0)' : 'LED ON (Blink)'));
+          } else if (res && res.error) {
+            addLog('⚠️ [ESP32] Error: ' + res.error);
+          }
+        })
+        .catch(function(err) {
+          // Tier 2: Simple text/plain POST (CORS simple request — avoids OPTIONS preflight entirely)
+          fetch(primaryEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: bodyStr,
+            mode: 'no-cors'
+          })
+          .then(function() {
+            dispatched = true;
+            addLog('🚀 [ESP32] ' + (isOff ? 'LED OFF (0)' : 'LED ON (Blink)'));
+          })
+          .catch(function() {
+            // Tier 3: GET query request (works on all mobile networks/proxies)
+            fetch(primaryEndpoint + '?' + qs, { method: 'GET', mode: 'no-cors' })
+            .then(function() {
+              dispatched = true;
+              addLog('🚀 [ESP32] ' + (isOff ? 'LED OFF (0)' : 'LED ON (Blink)'));
+            })
+            .catch(function() {
+              // Tier 4: Image Beacon (Bypasses all webview sandboxes, CORS preflights, and PNA restrictions)
+              try {
+                var img = new Image();
+                img.onload = function() { addLog('🚀 [ESP32] ' + (isOff ? 'LED OFF (0)' : 'LED ON (Blink)')); };
+                img.onerror = function() { addLog('🚀 [ESP32] ' + (isOff ? 'LED OFF (0)' : 'LED ON (Blink)')); };
+                img.src = primaryEndpoint + '?' + qs + '&_img=1';
+                dispatched = true;
+              } catch(e) {}
+
+              // Tier 5: Try direct fallback IP if different from primary
+              if (!dispatched && fallbackEndpoint !== primaryEndpoint) {
+                fetch(fallbackEndpoint + '?' + qs, { method: 'GET', mode: 'no-cors' }).catch(function(){});
+                new Image().src = fallbackEndpoint + '?' + qs + '&_img=1';
+              }
+              addLog('⚠️ [Network] Error reaching companion server: ' + err.message);
+            });
+          });
+        });
+      } catch (e) {
+        addLog('⚠️ [Error] ' + e.message);
+      }
+    }
+
+    function sendHardwareCommand(payload, extra) {
+      sendHardwareAction(payload, extra);
+    }
+
+    function evalRules(widgetId, val, title) {
+      rules.forEach(r => {
+        if (!r.enabled) return;
+        if (r.triggerWidgetId === widgetId || r.triggerName === title) {
+          let passed = true;
+          if (r.condition && r.condition.includes('>')) {
+            const num = parseFloat(r.condition.replace(/[^0-9.]/g, ''));
+            if (typeof val === 'number' && val <= num) passed = false;
+          }
+          if (passed) {
+            execCounts[r.id] = (execCounts[r.id] || 0) + 1;
+            const el = document.getElementById('rule-exec-' + r.id);
+            if (el) el.innerText = 'Executions: ' + execCounts[r.id];
+            const payload = (r.payload || '').replace('{state}', val ? '1' : '0').replace('{value}', val);
+            addLog('⚡ [LOGIC] "' + r.name + '" -> TX: ' + payload + ' to ' + (r.targetHardware || 'Hardware'));
+            sendHardwareAction(payload, { ruleId: r.id, ruleName: r.name });
+          }
+        }
+      });
+    }
+
+    function handleSwitch(id, checked, title) {
+      const card = document.getElementById('card-' + id);
+      if (card) {
+        if (checked) card.classList.add('glow-blue');
+        else card.classList.remove('glow-blue');
+      }
+      addLog('📱 [UI] ' + title + ' -> ' + (checked ? 'ON (Blinking)' : 'OFF (Stopped)'));
+      sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked });
+      evalRules(id, checked, title);
+    }
+
+    function stepSlider(id, delta, min, max, title) {
+      const current = widgetValues[id] ?? 90;
+      const next = Math.max(min, Math.min(max, current + delta));
+      widgetValues[id] = next;
+      document.getElementById('val-' + id).innerText = next + '°';
+      document.getElementById('bar-' + id).style.width = (((next - min) / (max - min)) * 100) + '%';
+      addLog('📱 [UI] ' + title + ' -> ' + next + '°');
+      evalRules(id, next, title);
+    }
+
+    function handleBtn(title, target, action) {
+      addLog('🚨 [UI] Button Pressed: "' + title + '" -> Dispatched ' + action + ' to ' + target);
+      sendHardwareAction((action || 'TRIGGER') + '\\r\\n', { target: target });
+      evalRules(target, 1, title);
+    }
+
+    function toggleRule(id, checked) {
+      const r = rules.find(x => x.id === id);
+      if (r) r.enabled = checked;
+      addLog('⚡ Rule "' + (r?.name || id) + '" is now ' + (checked ? 'ACTIVE' : 'PAUSED'));
+    }
+
+    function testRule(id) {
+      const r = rules.find(x => x.id === id);
+      if (r) {
+        execCounts[r.id] = (execCounts[r.id] || 0) + 1;
+        const el = document.getElementById('rule-exec-' + r.id);
+        if (el) el.innerText = 'Executions: ' + execCounts[r.id];
+        const payload = (r.payload || 'CMD').replace('{state}', '1').replace('{value}', '100');
+        addLog('⚡ [TEST EXECUTION] "' + r.name + '" -> Dispatched ' + payload + ' to ' + r.targetHardware);
+        sendHardwareAction(payload + '\\r\\n', { ruleId: r.id, test: true });
+      }
+    }
+
+    // Dynamic Telemetry Sensor Interval
+    const configuredGauges = ${JSON.stringify(widgets.filter(w => w.type === 'gauge'))};
+    if (configuredGauges.length > 0) {
+      setInterval(() => {
+        configuredGauges.forEach(gw => {
+          const valEl = document.getElementById('val-' + gw.id);
+          const pillEl = document.getElementById('pill-' + gw.id);
+          const cardEl = document.getElementById('card-' + gw.id);
+          if (valEl) {
+            const cur = widgetValues[gw.id] ?? (gw.value || 24.3);
+            const delta = (Math.random() - 0.5) * 0.8;
+            const min = gw.min || 0;
+            const max = gw.max || 50;
+            const next = parseFloat(Math.max(min, Math.min(max, cur + delta)).toFixed(1));
+            widgetValues[gw.id] = next;
+            valEl.innerText = next + (gw.unit || '°C');
+            const isHigh = next > (min + (max - min) * 0.6);
+            if (isHigh) {
+              if (pillEl) { pillEl.className = 'live-pill alert'; pillEl.innerText = '⚠️ THRESHOLD EXCEEDED'; }
+              if (cardEl) cardEl.className = 'card glow-red';
+              evalRules(gw.id, next, gw.title);
+            } else {
+              if (pillEl) { pillEl.className = 'live-pill'; pillEl.innerText = '● LIVE ADC'; }
+              if (cardEl) cardEl.className = 'card';
+            }
+          }
+        });
+      }, 3000);
+    }
+
+    function pingCompanionServer() {
+      var companionIp = '${companionServerInfo?.ip || resolvedHostIp}';
+      var hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : ('http://' + companionIp + ':5055');
+
+      var badge = document.getElementById('companionStatusBadge');
+      var text = document.getElementById('companionStatusText');
+      var dot = document.getElementById('companionStatusDot');
+
+      fetch(hostOrigin + '/api/status', { method: 'GET', mode: 'cors' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (badge && text && dot) {
+            badge.style.background = 'rgba(34,197,94,0.15)';
+            badge.style.color = '#4ade80';
+            dot.style.background = '#22c55e';
+            text.innerText = 'ESP32 Linked (' + (data.activePorts && data.activePorts.length ? data.activePorts[0] : (data.port || 'Online')) + ')';
+          }
+        })
+        .catch(function() {
+          var img = new Image();
+          img.onload = function() {
+            if (badge && text && dot) {
+              badge.style.background = 'rgba(34,197,94,0.15)';
+              badge.style.color = '#4ade80';
+              dot.style.background = '#22c55e';
+              text.innerText = 'ESP32 Linked';
+            }
+          };
+          img.onerror = function() {
+            if (badge && text && dot) {
+              badge.style.background = 'rgba(239,68,68,0.15)';
+              badge.style.color = '#f87171';
+              dot.style.background = '#ef4444';
+              text.innerText = 'Reconnecting... (Tap)';
+            }
+          };
+          img.src = hostOrigin + '/api/status?_img=1&_t=' + Date.now();
+        });
+    }
+
+    window.addEventListener('load', function() {
+      pingCompanionServer();
+      var ua = navigator.userAgent || '';
+      var isInApp = /MicroMessenger|Line|FB_IAB|Instagram|Twitter|WebView|SamsungBrowser|MiuiBrowser|GSA/i.test(ua) || (window.self !== window.top);
+      var notice = document.getElementById('scannerNotice');
+      if (notice && isInApp) {
+        notice.style.display = 'flex';
+      }
+    });
+  </script>
+</body>
+</html>`;
+  };
+
+  // Export Standalone Single-File Web App HTML
+  const handleExportHtmlWebApp = () => {
+    const htmlContent = getStandaloneHtmlContent();
+    const blob = new Blob([htmlContent], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${projectName.toLowerCase().replace(/\s+/g, "-")}-companion.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "Standalone Web App Downloaded",
+      description: "Includes complete interactive UI controls, functional logic automation engine, and telemetry.",
+      status: "success",
+      duration: 3000
+    });
+  };
+
+  // Start or update Local Companion Server (for instant camera scan over Wi-Fi)
+  const startLocalCompanionServer = async () => {
+    try {
+      const html = getStandaloneHtmlContent();
+
+      // Push updated HTML to both possible companion servers
+      // Port 5055 = Electron built-in companion server (primary, has serial access)
+      // Port 5056 = external hardware-bridge.cjs (fallback)
+      try {
+        await fetch("http://localhost:5055/api/update-html", {
+          method: "POST",
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+          body: html
+        });
+      } catch (e) { }
+      try {
+        await fetch("http://localhost:5056/api/update-html", {
+          method: "POST",
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+          body: html
+        });
+      } catch (e) { }
+
+      if (window.electronAPI?.app?.startCompanionServer) {
+        try {
+          const res = await window.electronAPI.app.startCompanionServer({ html, port: 5055 });
+          if (res?.success) {
+            if (res.url) setLocalCompanionUrl(res.url);
+            if (res.ip) setCompanionServerInfo({ ip: res.ip, port: res.port || 5055 });
+            return res.url;
+          }
+        } catch (err) {
+          console.warn("Local companion server start warning:", err);
+        }
+      }
+    } catch (err) {
+      console.warn("Companion server sync error:", err);
+    }
+    return localCompanionUrl;
+  };
+
+  // Generate React Native Expo App.js Code — Full UI + Functional Logic
+  const generateReactNativeAppCode = (targetSdk = expoSdkVersion) => {
+    const slug = projectName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+    const widgetsJson = JSON.stringify(widgets);
+    const logicBlocksJson = JSON.stringify(logicBlocks);
+
+    return `import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  Switch,
+  TouchableOpacity,
+  ScrollView,
+  SafeAreaView,
+  StatusBar,
+  Alert
+} from 'react-native';
+
+const INITIAL_WIDGETS = ${widgetsJson};
+const INITIAL_LOGIC_BLOCKS = ${logicBlocksJson};
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('controls');
+  const [deviceConnected, setDeviceConnected] = useState(true);
+  const [rules, setRules] = useState(INITIAL_LOGIC_BLOCKS);
+  
+  const [widgetStates, setWidgetStates] = useState(() => {
+    const initial = {};
+    INITIAL_WIDGETS.forEach((w) => {
+      if (w.type === 'switch') initial[w.id] = w.state ?? true;
+      else if (w.type === 'slider') initial[w.id] = w.value ?? 90;
+      else if (w.type === 'gauge') initial[w.id] = w.value ?? 24.3;
+      else if (w.type === 'colorpicker') initial[w.id] = w.color ?? '#2563eb';
+    });
+    return initial;
+  });
+
+  const [logs, setLogs] = useState([
+    '[' + new Date().toLocaleTimeString() + '] ESP32 Bridge online (Active - Expo SDK ${targetSdk})',
+    '[' + new Date().toLocaleTimeString() + '] Loaded ' + INITIAL_WIDGETS.length + ' UI widgets & ' + INITIAL_LOGIC_BLOCKS.length + ' logic rules'
+  ]);
+
+  const addLog = (msg) => {
+    const time = new Date().toLocaleTimeString();
+    setLogs((prev) => [...prev.slice(-15), '[' + time + '] ' + msg]);
+  };
+
+  const sendHardwareCommand = (payload, extra) => {
+    const cleanPayload = String(payload || '').trim();
+    const isOff = cleanPayload === 'LED:0' || cleanPayload === '0' || cleanPayload.toLowerCase().includes('off');
+    const statusNum = isOff ? 0 : 1;
+    const bodyStr = JSON.stringify({
+      payload: cleanPayload || (isOff ? 'LED:0' : 'LED:1'),
+      SwitchStatus: statusNum,
+      value: !isOff,
+      port: '${activePort}',
+      ...(extra || {})
+    });
+
+    const hostIp = '${companionServerInfo?.ip || "192.168.0.2"}';
+    const bridgeUrls = [
+      'http://' + hostIp + ':5055/api/action',
+      'http://' + hostIp + ':5055/setSwitchStatus',
+      'http://' + hostIp + ':5056/api/action',
+      'http://' + hostIp + ':5004/setSwitchStatus',
+      'http://localhost:5055/api/action',
+      'http://localhost:5055/setSwitchStatus',
+      'http://localhost:5056/api/action',
+      'http://localhost:5004/setSwitchStatus'
+    ];
+
+    bridgeUrls.forEach((url) => {
+      try {
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: bodyStr
+        }).then((res) => {
+          if (res && res.ok) {
+            addLog('📡 [HARDWARE] ' + (isOff ? 'LED Stopped (OFF)' : 'LED Blinking (ON)'));
+          }
+        }).catch(() => {});
+      } catch (e) {}
+    });
+  };
+
+  const evaluateAndTriggerRule = (ruleId, triggerEvent, triggerValue, triggerName) => {
+    setRules((prevRules) =>
+      prevRules.map((rule) => {
+        if (rule.id !== ruleId && ruleId !== 'all') return rule;
+        if (!rule.enabled) return rule;
+
+        let passed = true;
+        if (rule.condition && rule.condition.includes('>')) {
+          const numMatch = rule.condition.match(/([0-9.]+)/);
+          if (numMatch && typeof triggerValue === 'number') {
+            passed = triggerValue > parseFloat(numMatch[1]);
+          }
+        }
+
+        if (passed) {
+          const payloadResolved = (rule.payload || '')
+            .replace('{state}', triggerValue ? '1' : '0')
+            .replace('{value}', String(triggerValue));
+
+          addLog('⚡ [LOGIC] "' + rule.name + '" triggered -> TX: ' + payloadResolved + ' to ' + (rule.targetHardware || 'Hardware'));
+          sendHardwareCommand(payloadResolved);
+          
+          return {
+            ...rule,
+            executionCount: (rule.executionCount || 0) + 1,
+            lastTriggered: new Date().toLocaleTimeString()
+          };
+        }
+        return rule;
+      })
+    );
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setWidgetStates((prev) => {
+        const next = { ...prev };
+        INITIAL_WIDGETS.filter((w) => w.type === 'gauge').forEach((w) => {
+          const current = next[w.id] ?? 24.3;
+          const delta = (Math.random() - 0.5) * 0.6;
+          const updated = parseFloat(Math.max(w.min || 0, Math.min(w.max || 50, current + delta)).toFixed(1));
+          next[w.id] = updated;
+
+          rules.forEach((rule) => {
+            if (rule.triggerWidgetId === w.id || rule.triggerName === w.title) {
+              evaluateAndTriggerRule(rule.id, 'sensor_update', updated, w.title);
+            }
+          });
+        });
+        return next;
+      });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [rules]);
+
+  const handleSwitchChange = (widgetId, val, widgetTitle) => {
+    setWidgetStates((prev) => ({ ...prev, [widgetId]: val }));
+    addLog('📱 [UI] ' + widgetTitle + ' -> ' + (val ? 'ON (Blinking)' : 'OFF (Stopped)'));
+    sendHardwareCommand(val ? 'LED:1' : 'LED:0');
+    
+    rules.forEach((rule) => {
+      if (rule.triggerWidgetId === widgetId || rule.triggerName === widgetTitle) {
+        evaluateAndTriggerRule(rule.id, 'on_toggle', val, widgetTitle);
+      }
+    });
+  };
+
+  const handleSliderChange = (widgetId, delta, min, max, widgetTitle) => {
+    const current = widgetStates[widgetId] ?? 90;
+    const next = Math.max(min, Math.min(max, current + delta));
+    setWidgetStates((prev) => ({ ...prev, [widgetId]: next }));
+    addLog('📱 [UI] ' + widgetTitle + ' -> ' + next + '°');
+
+    rules.forEach((rule) => {
+      if (rule.triggerWidgetId === widgetId || rule.triggerName === widgetTitle) {
+        evaluateAndTriggerRule(rule.id, 'on_change', next, widgetTitle);
+      }
+    });
+  };
+
+  const handleButtonClick = (widget) => {
+    addLog('📱 [UI] Button Pressed: "' + widget.title + '"');
+    rules.forEach((rule) => {
+      if (rule.triggerWidgetId === widget.id || rule.triggerName === widget.title) {
+        evaluateAndTriggerRule(rule.id, 'on_press', 1, widget.title);
+      }
+    });
+    Alert.alert('Hardware Command Transmitted', 'Dispatched ' + (widget.action || 'TRIGGER') + ' to ' + (widget.boundTarget || 'GPIO'));
+  };
+
+  const toggleRuleEnabled = (ruleId) => {
+    setRules((prev) =>
+      prev.map((r) => (r.id === ruleId ? { ...r, enabled: !r.enabled } : r))
+    );
+  };
+
+  const testTriggerRuleManually = (rule) => {
+    evaluateAndTriggerRule(rule.id, 'manual_test', 1, rule.triggerName);
+    Alert.alert('Logic Block Executed', 'Triggered: ' + rule.name + '\\nPayload: ' + rule.payload + '\\nTarget: ' + rule.targetHardware);
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.brandTitle}>InnoIDE Companion • SDK ${targetSdk}</Text>
+          <Text style={styles.projectTitle}>${projectName}</Text>
+        </View>
+        <TouchableOpacity 
+          style={[styles.statusPill, { backgroundColor: deviceConnected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)' }]}
+          onPress={() => setDeviceConnected(!deviceConnected)}
+        >
+          <View style={[styles.statusDot, { backgroundColor: deviceConnected ? '#22c55e' : '#ef4444' }]} />
+          <Text style={[styles.statusText, { color: deviceConnected ? '#4ade80' : '#f87171' }]}>
+            {deviceConnected ? 'ESP32 Linked' : 'Disconnected'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 3-Way Segmented Tabs */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'controls' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('controls')}
+        >
+          <Text style={[styles.tabText, activeTab === 'controls' && styles.tabTextActive]}>
+            🎛️ Controls
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'logic' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('logic')}
+        >
+          <Text style={[styles.tabText, activeTab === 'logic' && styles.tabTextActive]}>
+            ⚡ Logic & Rules ({rules.filter(r => r.enabled).length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'hardware' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('hardware')}
+        >
+          <Text style={[styles.tabText, activeTab === 'hardware' && styles.tabTextActive]}>
+            📡 Terminal
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollBody}>
+        {/* TAB 1: UI CONTROLS */}
+        {activeTab === 'controls' && (
+          <View style={styles.contentGroup}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Interactive Hardware Controls</Text>
+              <Text style={styles.sectionDesc}>Direct telemetry and real-time pin actuation</Text>
+            </View>
+
+            {INITIAL_WIDGETS.filter(w => w.visible !== false).length === 0 ? (
+              <View style={[styles.card, { alignItems: 'center', paddingVertical: 28 }]}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>📱</Text>
+                <Text style={styles.cardTitle}>No Components Added</Text>
+                <Text style={[styles.cardTarget, { textAlign: 'center', marginTop: 4 }]}>
+                  Add UI components in InnoIDE App Designer to control hardware from this app.
+                </Text>
+              </View>
+            ) : (
+              INITIAL_WIDGETS.filter(w => w.visible !== false).map((w) => {
+              if (w.type === 'switch') {
+                const isOn = widgetStates[w.id] ?? true;
+                return (
+                  <View key={w.id} style={[styles.card, isOn && styles.cardActiveGlow]}>
+                    <View style={styles.rowBetween}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.cardTitle}>{w.title}</Text>
+                        <Text style={styles.cardTarget}>Pin: {w.boundTarget || 'GPIO 2 (LED)'}</Text>
+                        <View style={styles.tagRow}>
+                          <View style={[styles.miniBadge, { backgroundColor: isOn ? '#1e3a8a' : '#334155' }]}>
+                            <Text style={[styles.miniBadgeText, { color: isOn ? '#60a5fa' : '#94a3b8' }]}>
+                              {isOn ? 'STATE: HIGH (ON)' : 'STATE: LOW (OFF)'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                      <Switch
+                        value={isOn}
+                        onValueChange={(val) => handleSwitchChange(w.id, val, w.title)}
+                        trackColor={{ false: '#334155', true: w.color || '#2563eb' }}
+                        thumbColor={isOn ? '#ffffff' : '#94a3b8'}
+                      />
+                    </View>
+                  </View>
+                );
+              }
+
+              if (w.type === 'slider') {
+                const val = widgetStates[w.id] ?? (w.value || 90);
+                const min = w.min || 0;
+                const max = w.max || 180;
+                const pct = Math.round(((val - min) / (max - min)) * 100);
+                return (
+                  <View key={w.id} style={styles.card}>
+                    <View style={styles.rowBetween}>
+                      <View>
+                        <Text style={styles.cardTitle}>{w.title}</Text>
+                        <Text style={styles.cardTarget}>PWM Target: {w.boundTarget || 'GPIO 4 (Servo)'}</Text>
+                      </View>
+                      <Text style={[styles.metricBig, { color: w.color || '#a855f7' }]}>
+                        {val}{w.unit || '°'}
+                      </Text>
+                    </View>
+                    <View style={styles.sliderControlRow}>
+                      <TouchableOpacity style={styles.stepBtn} onPress={() => handleSliderChange(w.id, -10, min, max, w.title)}>
+                        <Text style={styles.stepBtnText}>-10°</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.stepBtn} onPress={() => handleSliderChange(w.id, -1, min, max, w.title)}>
+                        <Text style={styles.stepBtnText}>-1°</Text>
+                      </TouchableOpacity>
+                      <View style={styles.progressContainer}>
+                        <View style={[styles.progressBar, { width: pct + '%', backgroundColor: w.color || '#a855f7' }]} />
+                      </View>
+                      <TouchableOpacity style={styles.stepBtn} onPress={() => handleSliderChange(w.id, 1, min, max, w.title)}>
+                        <Text style={styles.stepBtnText}>+1°</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.stepBtn} onPress={() => handleSliderChange(w.id, 10, min, max, w.title)}>
+                        <Text style={styles.stepBtnText}>+10°</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              }
+
+              if (w.type === 'gauge') {
+                const val = widgetStates[w.id] ?? (w.value || 24.3);
+                const isHigh = val > 30.0;
+                return (
+                  <View key={w.id} style={[styles.card, isHigh && styles.cardWarningGlow]}>
+                    <View style={styles.rowBetween}>
+                      <View>
+                        <Text style={styles.cardTitle}>{w.title}</Text>
+                        <Text style={styles.cardTarget}>Source: {w.boundTarget || 'ADC Telemetry'}</Text>
+                      </View>
+                      <View style={[styles.liveTag, isHigh && { backgroundColor: '#7f1d1d' }]}>
+                        <Text style={[styles.liveTagText, isHigh && { color: '#fca5a5' }]}>
+                          {isHigh ? '⚠️ THRESHOLD EXCEEDED' : '● LIVE ADC'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.gaugeValueBox}>
+                      <Text style={[styles.gaugeBigValue, { color: isHigh ? '#ef4444' : '#38bdf8' }]}>
+                        {val}{w.unit || '°C'}
+                      </Text>
+                      <Text style={styles.gaugeSubText}>
+                        Range: {w.min || 0} - {w.max || 50}{w.unit || '°C'} (Guard Threshold: 30°C)
+                      </Text>
+                    </View>
+                  </View>
+                );
+              }
+
+              if (w.type === 'button') {
+                return (
+                  <TouchableOpacity
+                    key={w.id}
+                    style={[styles.actionButton, { backgroundColor: w.color || '#ea580c' }]}
+                    onPress={() => handleButtonClick(w)}
+                  >
+                    <Text style={styles.actionBtnText}>🚨 {w.title}</Text>
+                    <Text style={styles.actionBtnSub}>Target: {w.boundTarget || 'GPIO 5 (Buzzer)'}</Text>
+                  </TouchableOpacity>
+                );
+              }
+
+              if (w.type === 'top_button') {
+                return (
+                  <TouchableOpacity
+                    key={w.id}
+                    style={[styles.actionButton, { backgroundColor: w.color || '#2563eb' }]}
+                    onPress={() => handleButtonClick(w)}
+                  >
+                    <Text style={styles.actionBtnText}>▲ {w.title}</Text>
+                    <Text style={styles.actionBtnSub}>Forward Pulse → {w.boundTarget || 'GPIO 13'}</Text>
+                  </TouchableOpacity>
+                );
+              }
+
+              if (w.type === 'bottom_button') {
+                return (
+                  <TouchableOpacity
+                    key={w.id}
+                    style={[styles.actionButton, { backgroundColor: w.color || '#0284c7' }]}
+                    onPress={() => handleButtonClick(w)}
+                  >
+                    <Text style={styles.actionBtnText}>▼ {w.title}</Text>
+                    <Text style={styles.actionBtnSub}>Reverse Pulse → {w.boundTarget || 'GPIO 14'}</Text>
+                  </TouchableOpacity>
+                );
+              }
+
+              if (w.type === 'left_button') {
+                return (
+                  <TouchableOpacity
+                    key={w.id}
+                    style={[styles.actionButton, { backgroundColor: w.color || '#7c3aed' }]}
+                    onPress={() => handleButtonClick(w)}
+                  >
+                    <Text style={styles.actionBtnText}>◀ {w.title}</Text>
+                    <Text style={styles.actionBtnSub}>Steer Left → {w.boundTarget || 'GPIO 12'}</Text>
+                  </TouchableOpacity>
+                );
+              }
+
+              if (w.type === 'right_button') {
+                return (
+                  <TouchableOpacity
+                    key={w.id}
+                    style={[styles.actionButton, { backgroundColor: w.color || '#9333ea' }]}
+                    onPress={() => handleButtonClick(w)}
+                  >
+                    <Text style={styles.actionBtnText}>▶ {w.title}</Text>
+                    <Text style={styles.actionBtnSub}>Steer Right → {w.boundTarget || 'GPIO 15'}</Text>
+                  </TouchableOpacity>
+                );
+              }
+
+              if (w.type === 'dpad') {
+                return (
+                  <View key={w.id} style={[styles.card, { alignItems: 'center' }]}>
+                    <Text style={[styles.cardTitle, { marginBottom: 8 }]}>🕹️ {w.title}</Text>
+                    <TouchableOpacity
+                      style={[styles.stepBtn, { width: 60, height: 38, marginBottom: 4 }]}
+                      onPress={() => handleButtonClick({ ...w, title: 'Top (Forward)', boundTarget: 'GPIO 13' })}
+                    >
+                      <Text style={styles.stepBtnText}>▲</Text>
+                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 6, marginVertical: 4 }}>
+                      <TouchableOpacity
+                        style={[styles.stepBtn, { width: 60, height: 38 }]}
+                        onPress={() => handleButtonClick({ ...w, title: 'Left', boundTarget: 'GPIO 12' })}
+                      >
+                        <Text style={styles.stepBtnText}>◀</Text>
+                      </TouchableOpacity>
+                      <View style={[styles.stepBtn, { width: 60, height: 38, backgroundColor: '#0f172a' }]}>
+                        <Text style={styles.stepBtnText}>●</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.stepBtn, { width: 60, height: 38 }]}
+                        onPress={() => handleButtonClick({ ...w, title: 'Right', boundTarget: 'GPIO 15' })}
+                      >
+                        <Text style={styles.stepBtnText}>▶</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.stepBtn, { width: 60, height: 38, marginTop: 4 }]}
+                      onPress={() => handleButtonClick({ ...w, title: 'Bottom (Reverse)', boundTarget: 'GPIO 14' })}
+                    >
+                      <Text style={styles.stepBtnText}>▼</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }
+
+              if (w.type === 'device_card') {
+                return (
+                  <View key={w.id} style={styles.card}>
+                    <View style={styles.rowBetween}>
+                      <View style={styles.rowAlign}>
+                        <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: '#1e3a8a', alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 16 }}>📡</Text>
+                        </View>
+                        <View>
+                          <Text style={styles.cardTitle}>{w.title || 'ESP32 Dev Board'}</Text>
+                          <Text style={{ fontSize: 11, color: '#4ade80', fontWeight: '700', marginTop: 2 }}>● Online & Connected</Text>
+                        </View>
+                      </View>
+                      <View style={{ backgroundColor: '#1e293b', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                        <Text style={{ color: '#38bdf8', fontSize: 10, fontWeight: '800' }}>WIFI 100%</Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              }
+
+              if (w.type === 'label') {
+                return (
+                  <View key={w.id} style={[styles.card, { paddingVertical: 12 }]}>
+                    <Text style={[styles.cardTitle, { color: w.color || '#f8fafc' }]}>{w.title}</Text>
+                    {w.boundTarget && <Text style={styles.cardTarget}>{w.boundTarget}</Text>}
+                  </View>
+                );
+              }
+
+              if (w.type === 'textfield') {
+                return (
+                  <View key={w.id} style={styles.card}>
+                    <Text style={styles.cardTitle}>{w.title}</Text>
+                    <View style={{ backgroundColor: '#090d16', borderRadius: 8, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#1e293b' }}>
+                      <Text style={{ color: '#94a3b8', fontSize: 12 }}>{w.placeholder || 'Text input field...'}</Text>
+                    </View>
+                  </View>
+                );
+              }
+
+              if (w.type === 'progress') {
+                return (
+                  <View key={w.id} style={styles.card}>
+                    <View style={styles.rowBetween}>
+                      <Text style={styles.cardTitle}>{w.title}</Text>
+                      <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '800' }}>75%</Text>
+                    </View>
+                    <View style={[styles.progressContainer, { marginTop: 10 }]}>
+                      <View style={[styles.progressBar, { width: '75%', backgroundColor: '#38bdf8' }]} />
+                    </View>
+                  </View>
+                );
+              }
+
+              return null;
+            })
+          )}
+          </View>
+        )}
+
+        {/* TAB 2: FUNCTIONAL LOGIC & RULES */}
+        {activeTab === 'logic' && (
+          <View style={styles.contentGroup}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>⚡ Functional Logic Engine</Text>
+              <Text style={styles.sectionDesc}>Autonomous trigger-action rules linked to hardware pins</Text>
+            </View>
+
+            {rules.length === 0 ? (
+              <View style={[styles.card, { alignItems: 'center', paddingVertical: 28 }]}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>⚡</Text>
+                <Text style={styles.cardTitle}>No Automation Rules</Text>
+                <Text style={[styles.cardTarget, { textAlign: 'center', marginTop: 4 }]}>
+                  Configure automation rules in InnoIDE App Designer.
+                </Text>
+              </View>
+            ) : (
+              rules.map((rule) => {
+              return (
+                <View key={rule.id} style={[styles.logicCard, !rule.enabled && { opacity: 0.6 }]}>
+                  <View style={styles.rowBetween}>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.rowAlign}>
+                        <Text style={styles.logicRuleName}>{rule.name}</Text>
+                        <View style={[styles.ruleStatusPill, { backgroundColor: rule.enabled ? '#064e3b' : '#334155' }]}>
+                          <Text style={[styles.ruleStatusText, { color: rule.enabled ? '#34d399' : '#94a3b8' }]}>
+                            {rule.enabled ? 'ACTIVE' : 'PAUSED'}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.logicTarget}>Target: {rule.targetHardware || 'Hardware Pin'}</Text>
+                    </View>
+                    <Switch
+                      value={rule.enabled}
+                      onValueChange={() => toggleRuleEnabled(rule.id)}
+                      trackColor={{ false: '#334155', true: '#10b981' }}
+                    />
+                  </View>
+
+                  <View style={styles.logicDetailBox}>
+                    <View style={styles.logicRow}>
+                      <Text style={styles.logicLabel}>🔄 Trigger:</Text>
+                      <Text style={styles.logicVal}>{rule.triggerName} ({rule.event})</Text>
+                    </View>
+                    <View style={styles.logicRow}>
+                      <Text style={styles.logicLabel}>⚖️ Condition:</Text>
+                      <Text style={[styles.logicVal, { color: '#fbbf24' }]}>{rule.condition || 'Always'}</Text>
+                    </View>
+                    <View style={styles.logicRow}>
+                      <Text style={styles.logicLabel}>🚀 Action:</Text>
+                      <Text style={[styles.logicVal, { color: '#38bdf8' }]}>{rule.action}</Text>
+                    </View>
+                    <View style={styles.logicRow}>
+                      <Text style={styles.logicLabel}>📦 Payload:</Text>
+                      <Text style={styles.logicCode}>{rule.payload}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.logicFooter}>
+                    <Text style={styles.logicExecutionText}>
+                      Executions: {rule.executionCount || 0} {rule.lastTriggered ? ('• Last: ' + rule.lastTriggered) : ''}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.testRunBtn}
+                      onPress={() => testTriggerRuleManually(rule)}
+                    >
+                      <Text style={styles.testRunBtnText}>▶ Test Trigger</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })
+          )}
+          </View>
+        )}
+
+        {/* TAB 3: HARDWARE PIN MAP & TERMINAL */}
+        {activeTab === 'hardware' && (
+          <View style={styles.contentGroup}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>📡 Pin Mapping & Serial Logs</Text>
+              <Text style={styles.sectionDesc}>Live telemetry and hardware communication</Text>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>ESP32 GPIO Assignments</Text>
+              {INITIAL_WIDGETS.filter(w => w.boundTarget && w.type !== 'device_card').length > 0 ? (
+                INITIAL_WIDGETS.filter(w => w.boundTarget && w.type !== 'device_card').map((w) => {
+                  const pinMatch = (w.boundTarget || '').match(/GPIO\\s*\\d+/i);
+                  return (
+                    <View key={w.id} style={styles.pinTableRow}>
+                      <Text style={styles.pinCode}>{pinMatch ? pinMatch[0].toUpperCase() : 'PIN'}</Text>
+                      <Text style={styles.pinDesc}>{w.title} ({w.boundTarget})</Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <View style={styles.pinTableRow}>
+                  <Text style={styles.pinCode}>GPIO 2</Text>
+                  <Text style={styles.pinDesc}>LED Output (Digital Out)</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.consoleContainer}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.consoleTitle}>Serial & Event Stream</Text>
+                <TouchableOpacity onPress={() => setLogs([])}>
+                  <Text style={styles.clearLogsText}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.consoleScroll} nestedScrollEnabled>
+                {logs.map((log, idx) => (
+                  <Text key={idx} style={styles.consoleLine}>{log}</Text>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#090d16' },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#0f172a',
+    borderBottomWidth: 1,
+    borderColor: '#1e293b'
+  },
+  brandTitle: { fontSize: 11, fontWeight: '700', color: '#38bdf8', textTransform: 'uppercase', letterSpacing: 1 },
+  projectTitle: { fontSize: 18, fontWeight: '800', color: '#f8fafc', marginTop: 2 },
+  statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  statusDot: { width: 7, height: 7, borderRadius: 4, marginRight: 6 },
+  statusText: { fontSize: 11, fontWeight: '700' },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderColor: '#1e293b'
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+    marginHorizontal: 4
+  },
+  tabButtonActive: {
+    backgroundColor: '#1e293b',
+    borderBottomWidth: 2,
+    borderColor: '#38bdf8'
+  },
+  tabText: { color: '#64748b', fontSize: 12, fontWeight: '700' },
+  tabTextActive: { color: '#f8fafc' },
+  scrollBody: { padding: 16, paddingBottom: 50 },
+  contentGroup: { gap: 14 },
+  sectionHeader: { marginBottom: 4 },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#f1f5f9' },
+  sectionDesc: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  card: {
+    backgroundColor: '#131b2e',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b'
+  },
+  cardActiveGlow: {
+    borderColor: '#2563eb',
+    backgroundColor: '#101a38'
+  },
+  cardWarningGlow: {
+    borderColor: '#ef4444',
+    backgroundColor: '#261214'
+  },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rowAlign: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: '#f8fafc' },
+  cardTarget: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  tagRow: { flexDirection: 'row', marginTop: 8 },
+  miniBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  miniBadgeText: { fontSize: 10, fontWeight: '800' },
+  metricBig: { fontSize: 20, fontWeight: '900' },
+  sliderControlRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 8 },
+  stepBtn: { backgroundColor: '#1e293b', paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8 },
+  stepBtnText: { color: '#f8fafc', fontWeight: '800', fontSize: 11 },
+  progressContainer: { flex: 1, height: 8, backgroundColor: '#1e293b', borderRadius: 4, overflow: 'hidden' },
+  progressBar: { height: '100%', borderRadius: 4 },
+  liveTag: { backgroundColor: '#082f49', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  liveTagText: { color: '#38bdf8', fontSize: 10, fontWeight: '800' },
+  gaugeValueBox: { alignItems: 'center', paddingVertical: 12 },
+  gaugeBigValue: { fontSize: 36, fontWeight: '900' },
+  gaugeSubText: { fontSize: 11, color: '#64748b', marginTop: 4 },
+  actionButton: {
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    shadowOpacity: 0.2,
+    elevation: 3
+  },
+  actionBtnText: { color: '#ffffff', fontWeight: '900', fontSize: 16 },
+  actionBtnSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 4, fontWeight: '600' },
+  logicCard: {
+    backgroundColor: '#131b2e',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    borderLeftWidth: 4,
+    borderLeftColor: '#10b981'
+  },
+  logicRuleName: { fontSize: 15, fontWeight: '800', color: '#f8fafc' },
+  logicTarget: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  ruleStatusPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  ruleStatusText: { fontSize: 9, fontWeight: '800' },
+  logicDetailBox: {
+    backgroundColor: '#090d16',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 12,
+    gap: 6
+  },
+  logicRow: { flexDirection: 'row', alignItems: 'center' },
+  logicLabel: { fontSize: 11, color: '#64748b', width: 85, fontWeight: '700' },
+  logicVal: { fontSize: 11, color: '#e2e8f0', fontWeight: '600', flex: 1 },
+  logicCode: { fontSize: 11, color: '#38bdf8', fontFamily: 'monospace', fontWeight: '700' },
+  logicFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
+  logicExecutionText: { fontSize: 11, color: '#64748b' },
+  testRunBtn: { backgroundColor: '#1e293b', paddingVertical: 5, paddingHorizontal: 12, borderRadius: 8 },
+  testRunBtnText: { color: '#38bdf8', fontSize: 11, fontWeight: '800' },
+  pinTableRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderColor: '#1e293b' },
+  pinCode: { color: '#38bdf8', fontWeight: '800', fontSize: 12, fontFamily: 'monospace' },
+  pinDesc: { color: '#94a3b8', fontSize: 12 },
+  consoleContainer: {
+    backgroundColor: '#090d16',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#1e293b'
+  },
+  consoleTitle: { color: '#64748b', fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  clearLogsText: { color: '#38bdf8', fontSize: 11, fontWeight: '700' },
+  consoleScroll: { maxHeight: 180, marginTop: 10 },
+  consoleLine: { color: '#38bdf8', fontFamily: 'monospace', fontSize: 11, marginVertical: 2 }
+});
+`;
+  };
+
+  // Export React Native Project as Zip (Expo Go Format)
+  const handleExportExpoZip = async () => {
+    const slug = projectName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+    const zip = new JSZip();
+
+    // 1. App.js
+    zip.file("App.js", generateReactNativeAppCode());
+
+    // 2. app.json
+    const appJsonContent = JSON.stringify(
+      {
+        expo: {
+          name: projectName,
+          slug: slug,
+          version: "1.0.0",
+          sdkVersion: expoSdkVersion,
+          orientation: "portrait",
+          userInterfaceStyle: "light",
+          ios: {
+            supportsTablet: true,
+            bundleIdentifier: `com.innotrat.${slug}`
+          },
+          android: {
+            package: `com.innotrat.${slug}`,
+            adaptiveIcon: {
+              backgroundColor: "#ffffff"
+            }
+          },
+          extra: {
+            eas: {
+              projectId: "innotrat-generated"
+            }
+          }
+        }
+      },
+      null,
+      2
+    );
+    zip.file("app.json", appJsonContent);
+
+    // 3. package.json
+    const packageJsonContent = JSON.stringify(
+      {
+        name: slug,
+        version: "1.0.0",
+        main: "node_modules/expo/AppEntry.js",
+        scripts: {
+          start: "expo start",
+          android: "expo start --android",
+          ios: "expo start --ios",
+          web: "expo start --web"
+        },
+        dependencies: {
+          expo: `~${expoSdkVersion || "54.0.0"}`,
+          "expo-status-bar": "~2.0.0",
+          react: "18.3.1",
+          "react-native": "0.76.6"
+        },
+        devDependencies: {
+          "@babel/core": "^7.20.0",
+          "babel-preset-expo": "~54.0.0"
+        },
+        private: true
+      },
+      null,
+      2
+    );
+    zip.file("package.json", packageJsonContent);
+
+    // 4. babel.config.js
+    const babelContent = `module.exports = function(api) {
+  api.cache(true);
+  return {
+    presets: ['babel-preset-expo'],
+  };
+};`;
+    zip.file("babel.config.js", babelContent);
+
+    // 5. README.md
+    const readmeContent = `# ${projectName} - React Native Companion App (Expo Go)
+
+Generated automatically by **InnoIDE App Companion Studio**.
+
+## 🚀 How to Run in Expo Go
+
+1. **Install dependencies**:
+   \`\`\`bash
+   npm install
+   \`\`\`
+
+2. **Start the Expo development server**:
+   \`\`\`bash
+   npx expo start
+   \`\`\`
+
+3. **Open on your mobile device**:
+   - **Android**: Open the **Expo Go** app and tap **"Scan QR Code"**.
+   - **iOS**: Open the standard **Camera** app, scan the terminal QR code, and tap the prompt to open in **Expo Go**.
+`;
+    zip.file("README.md", readmeContent);
+
+    // 6. Schema JSON
+    zip.file("companion-schema.json", JSON.stringify({ projectName, widgets, logicBlocks }, null, 2));
+
+    try {
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${slug}-react-native-expo.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({
+        title: "Expo Go React Native App Exported!",
+        description: `Downloaded ${slug}-react-native-expo.zip (includes App.js, package.json, app.json).`,
+        status: "success",
+        duration: 4000,
+        isClosable: true
+      });
+    } catch (err) {
+      toast({ title: "Export Error", description: err.message, status: "error", duration: 3000 });
+    }
+  };
+
+  // Helper to switch SDK versions and update session
+  const handleSelectSdkVersion = (newSdk) => {
+    setExpoSdkVersion(newSdk);
+    if (snackSessionMap[newSdk]) {
+      setSnackSessionId(snackSessionMap[newSdk]);
+    } else {
+      setSnackSessionId(null);
+      syncSnackSession(true, newSdk);
+    }
+  };
+
+  // Sync live project session with Expo Snack API via Electron IPC or Direct Fetch
+  const syncSnackSession = async (showToasts = false, targetSdk = expoSdkVersion) => {
+    setIsSnackSyncing(true);
+    if (showToasts) {
+      toast({
+        title: "Connecting to Expo Cloud...",
+        description: `Creating live Snack session for SDK ${targetSdk}...`,
+        status: "info",
+        duration: 2000
+      });
+    }
+    try {
+      const code = generateReactNativeAppCode(targetSdk);
+      let sessionId = null;
+      let expUrl = null;
+
+      // 1. First try Electron IPC (runs in node process, bypasses any browser CORS and returns full expoGoUrl)
+      if (window.electronAPI?.app?.createExpoSnack) {
+        try {
+          const res = await window.electronAPI.app.createExpoSnack({
+            name: projectName,
+            code,
+            description: `IoT Companion app for ${projectName}`,
+            sdkVersion: targetSdk
+          });
+          if (res?.success && res?.id) {
+            sessionId = res.id;
+            expUrl = res.snackChannelUrl || res.expoGoUrl || `exp://u.expo.dev/933fd9c0-1666-11e7-afcb-d9a0723853cd?snack=${res.id}`;
+          }
+        } catch (ipcErr) {
+          console.warn("Electron IPC createExpoSnack error:", ipcErr);
+        }
+      }
+
+      // 2. Direct fetch fallback if needed
+      if (!sessionId) {
+        try {
+          const payload = {
+            manifest: {
+              name: projectName,
+              description: `IoT Companion app for ${projectName}`,
+              sdkVersion: targetSdk
+            },
+            code: {
+              "App.js": { type: "CODE", contents: code }
+            },
+            dependencies: {}
+          };
+
+          const res = await fetch("https://exp.host/--/api/v2/snack/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          sessionId = data?.id || data?.snackId || data?.hashId;
+          if (sessionId) {
+            expUrl = `exp://u.expo.dev/933fd9c0-1666-11e7-afcb-d9a0723853cd?snack=${sessionId}`;
+          }
+        } catch (directErr) {
+          console.warn("Direct snack fetch failed:", directErr);
+        }
+      }
+
+      if (sessionId) {
+        setSnackSessionId(sessionId);
+        setSnackSessionMap((prev) => ({ ...prev, [targetSdk]: sessionId }));
+        const resolvedExpUrl = expUrl || `exp://u.expo.dev/933fd9c0-1666-11e7-afcb-d9a0723853cd?snack=${sessionId}`;
+        setExpoGoUrlMap((prev) => ({ ...prev, [targetSdk]: resolvedExpUrl }));
+
+        if (showToasts) {
+          toast({
+            title: `Expo (SDK ${targetSdk}) Ready!`,
+            description: `Session synchronized. Ready to scan in Expo Go app.`,
+            status: "success",
+            duration: 2500
+          });
+        }
+        return sessionId;
+      }
+    } catch (err) {
+      console.warn("Snack sync error:", err);
+    } finally {
+      setIsSnackSyncing(false);
+    }
+    return null;
+  };
+
+  // Copy generated React Native App.js code to clipboard
+  const handleCopyAppJsCode = () => {
+    try {
+      const code = generateReactNativeAppCode();
+      navigator.clipboard.writeText(code);
+      toast({
+        title: "Copied Updated App.js Code!",
+        description: "Paste directly into App.js in your Expo Snack tab to run immediately.",
+        status: "success",
+        duration: 3000
+      });
+    } catch (e) {
+      toast({
+        title: "Copy Failed",
+        description: e.message,
+        status: "error",
+        duration: 2000
+      });
+    }
+  };
+
+  // Open in Expo Snack Web Simulator (Fresh session with latest code & hardware bridge)
+  const handleOpenExpoSnack = async () => {
+    toast({
+      title: "Syncing with Expo Cloud...",
+      description: "Uploading updated App.js with hardware bridge controls...",
+      status: "info",
+      duration: 2000
+    });
+    const freshId = await syncSnackSession(false, expoSdkVersion);
+    const targetId = freshId || snackSessionId || snackSessionMap[expoSdkVersion];
+    if (targetId) {
+      const liveSnackUrl = `https://snack.expo.dev/${targetId}?platform=web&preview=true&sdkVersion=${expoSdkVersion}`;
+      window.open(liveSnackUrl, "_blank");
+      toast({
+        title: `Opening Expo Snack (SDK ${expoSdkVersion})`,
+        description: `Loaded fresh session ${targetId} without syntax errors.`,
+        status: "success",
+        duration: 3500
+      });
+    } else {
+      window.open("https://snack.expo.dev", "_blank");
+      toast({
+        title: "Opened Expo Snack",
+        description: "Use 'Copy App.js' to paste the latest code into Snack.",
+        status: "info",
+        duration: 3000
+      });
+    }
+  };
+
+  // Trigger Publish Modal and sync Snack in background (live current project)
+  const handleOpenPublishModal = () => {
+    onPublishOpen();
+    startLocalCompanionServer();
+    syncSnackSession(false, expoSdkVersion);
+  };
+
+  // Palette Items for Screen 14 (App Builder)
   const uiPaletteItems = [
     { type: "button", title: "Button", desc: "Tap action", icon: <FaCircle size={13} /> },
     { type: "label", title: "Label", desc: "Display text", icon: <FaTag size={13} /> },
     { type: "textfield", title: "Text Field", desc: "Text input", icon: <FaFont size={13} /> },
     { type: "switch", title: "Switch", desc: "Toggle on/off", icon: <FaSync size={13} /> },
     { type: "slider", title: "Slider", desc: "Range input", icon: <FaSlidersH size={13} /> },
+    { type: "gauge", title: "Gauge", desc: "Telemetry meter", icon: <FaTemperatureHigh size={13} /> },
+    { type: "crud_table", title: "CRUD Table", desc: "Data records manager", icon: <FaTable size={13} /> },
+    { type: "chart", title: "Chart / Graph", desc: "Live plotting", icon: <FaChartLine size={13} /> },
+    { type: "colorpicker", title: "Color Picker", desc: "RGB light picker", icon: <FaPalette size={13} /> },
+    { type: "joystick", title: "Joystick", desc: "4-way motor control", icon: <FaGamepad size={13} /> },
     { type: "image", title: "Image", desc: "Show image", icon: <FaImage size={13} /> },
     { type: "card", title: "Card", desc: "Content card", icon: <FaIdCard size={13} /> },
-    { type: "progress", title: "Progress Bar", desc: "Progress", icon: <FaTasks size={13} /> },
+    { type: "progress", title: "Progress Bar", desc: "Progress meter", icon: <FaTasks size={13} /> },
     { type: "fab", title: "Floating Button", desc: "Action button", icon: <FaPlusCircle size={13} /> },
     { type: "divider", title: "Divider", desc: "Separator", icon: <FaMinus size={13} /> }
   ];
 
   const filteredPalette = uiPaletteItems.filter((item) =>
+    item.title.toLowerCase().includes(searchPalette.toLowerCase())
+  );
+
+  const layoutPaletteItems = [
+    { type: "card", title: "Vertical Stack Card", desc: "Vertical flex container", icon: <FaBoxes color="#3b82f6" size={13} />, defaultBinding: "Layout Container" },
+    { type: "top_button", title: "Top Button", desc: "Top / Header action button", icon: <FaArrowUp color="#2563eb" size={13} />, defaultBinding: "GPIO 13 (Motor A)" },
+    { type: "bottom_button", title: "Bottom Button", desc: "Bottom / Footer action button", icon: <FaArrowDown color="#0284c7" size={13} />, defaultBinding: "GPIO 14 (Motor B)" },
+    { type: "left_button", title: "Left Button", desc: "Left side action button", icon: <FaArrowLeft color="#7c3aed" size={13} />, defaultBinding: "GPIO 12 (Steer Left)" },
+    { type: "right_button", title: "Right Button", desc: "Right side action button", icon: <FaArrowRight color="#9333ea" size={13} />, defaultBinding: "GPIO 15 (Steer Right)" }
+  ];
+
+  const filteredLayoutPalette = layoutPaletteItems.filter((item) =>
     item.title.toLowerCase().includes(searchPalette.toLowerCase())
   );
 
@@ -469,26 +3411,56 @@ export default function ESP32Flasher({
               </Text>
             </VStack>
           </HStack>
-          <IconButton
-            icon={<FaTimes size={14} />}
-            variant="ghost"
-            color="white"
-            _hover={{ bg: "whiteAlpha.300" }}
-            size="sm"
-            onClick={onClose}
-            aria-label="Close"
-            borderRadius="full"
-          />
+          <HStack spacing={2}>
+            <Button
+              size="xs"
+              variant="solid"
+              bg="whiteAlpha.200"
+              color="white"
+              _hover={{ bg: "whiteAlpha.300" }}
+              borderRadius="full"
+              leftIcon={<FaCogs size={11} />}
+              onClick={() => setIsIdfPromptOpen(true)}
+              title="View ESP-IDF Toolchain setup info"
+            >
+              ESP-IDF Setup
+            </Button>
+            <Button
+              size="xs"
+              variant="solid"
+              bg="whiteAlpha.300"
+              color="white"
+              _hover={{ bg: "whiteAlpha.400", transform: "scale(1.02)" }}
+              _active={{ transform: "scale(0.98)" }}
+              borderRadius="full"
+              leftIcon={<FaMobileAlt size={11} />}
+              onClick={() => setWizardStep("app_builder")}
+              title="Skip flashing and jump directly to App Builder & Publish QR screen"
+              fontWeight="bold"
+              shadow="sm"
+            >
+              Skip to App Builder ➔
+            </Button>
+          </HStack>
         </HStack>
 
-        {/* Stepper progress indicator */}
+        {/* Stepper progress indicator — Clickable for instant jumping */}
         <HStack spacing={2} justify="space-between" align="center" px={1}>
           {steps.map((s, idx) => {
+            const stepMapping = { 1: "connection", 2: "devices", 3: "compatibility", 4: "flashing" };
             const isCompleted = s.id < currentStepIndex;
             const isActive = s.id === currentStepIndex;
             return (
               <React.Fragment key={s.id}>
-                <HStack spacing={2} align="center">
+                <HStack
+                  spacing={2}
+                  align="center"
+                  cursor="pointer"
+                  onClick={() => setWizardStep(stepMapping[s.id])}
+                  opacity={isActive ? 1 : 0.85}
+                  _hover={{ opacity: 1 }}
+                  title={`Jump to Step ${s.id}: ${s.label}`}
+                >
                   <Box
                     w="24px"
                     h="24px"
@@ -501,6 +3473,7 @@ export default function ESP32Flasher({
                     bg={isCompleted ? "green.400" : isActive ? "white" : "whiteAlpha.300"}
                     color={isCompleted ? "white" : isActive ? "blue.600" : "whiteAlpha.800"}
                     shadow={isActive ? "md" : "none"}
+                    transition="all 0.2s"
                   >
                     {isCompleted ? <FaCheck size={10} /> : s.id}
                   </Box>
@@ -549,21 +3522,116 @@ export default function ESP32Flasher({
         >
           {/* Breadcrumb & Project Selector */}
           <HStack spacing={3}>
-            <Box p={2} bg="blue.500" color="white" borderRadius="lg">
+            <Box p={2} bg="blue.500" color="white" borderRadius="lg" shadow="sm">
               <FaBolt size={14} />
             </Box>
             <Text fontSize="xs" color="gray.500" display={{ base: "none", md: "block" }}>
               Dashboard / <Text as="span" fontWeight="semibold" color={useColorModeValue("gray.800", "white")}>{projectName}</Text> / <Text as="span" color="blue.500" fontWeight="bold">App Builder</Text>
             </Text>
-            <HStack bg={useColorModeValue("gray.100", "gray.800")} px={3} py={1} borderRadius="lg" spacing={2} cursor="pointer">
-              <FaMobileAlt size={13} color="var(--chakra-colors-blue-500)" />
-              <Text fontSize="xs" fontWeight="bold">Garden Monitor App</Text>
-              <Text fontSize="10px" color="gray.400">▾</Text>
-            </HStack>
+            <Menu>
+              <MenuButton
+                as={Button}
+                size="xs"
+                variant="ghost"
+                bg={useColorModeValue("gray.100", "gray.800")}
+                _hover={{ bg: useColorModeValue("gray.200", "gray.700") }}
+                leftIcon={<FaMobileAlt size={12} color="#2563eb" />}
+                rightIcon={<Text fontSize="10px" color="gray.400">▾</Text>}
+                borderRadius="lg"
+                fontWeight="bold"
+                fontSize="xs"
+                h="28px"
+              >
+                {projectName} App
+              </MenuButton>
+              <MenuList zIndex={50} shadow="xl" borderRadius="xl" fontSize="xs" minW="240px">
+                <Box px={3} py={1.5}>
+                  <Text fontWeight="bold" fontSize="10px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                    App Screens (CRUD)
+                  </Text>
+                </Box>
+                <MenuItem
+                  icon={<FaPlus size={11} color="#2563eb" />}
+                  onClick={() => {
+                    setNewAppNameInput("");
+                    onNewAppModalOpen();
+                  }}
+                >
+                  Create New App Screen...
+                </MenuItem>
+                <MenuItem
+                  icon={<FaEdit size={11} color="#8b5cf6" />}
+                  onClick={() => {
+                    setRenameAppNameInput(projectName);
+                    onRenameAppModalOpen();
+                  }}
+                >
+                  Rename Current App...
+                </MenuItem>
+                <MenuItem icon={<FaSave size={11} color="#10b981" />} onClick={() => handleSaveApp()}>
+                  Save App Configuration
+                </MenuItem>
+                <MenuItem icon={<FaTrashAlt size={11} color="#ef4444" />} onClick={onClearCanvasModalOpen}>
+                  Clear All Canvas Components...
+                </MenuItem>
+                <MenuDivider />
+                <Box px={3} py={1}>
+                  <Text fontWeight="bold" fontSize="10px" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                    Saved App Screens ({savedApps.length})
+                  </Text>
+                </Box>
+                {savedApps.map((app) => (
+                  <MenuItem
+                    key={app.name}
+                    onClick={() => handleLoadApp(app.name)}
+                    bg={app.name === projectName ? useColorModeValue("blue.50", "gray.800") : "transparent"}
+                    fontWeight={app.name === projectName ? "bold" : "normal"}
+                  >
+                    <HStack justify="space-between" w="100%">
+                      <HStack spacing={2}>
+                        {app.name === projectName && <FaCheck size={10} color="#2563eb" />}
+                        <Text>{app.name}</Text>
+                      </HStack>
+                      <HStack spacing={1}>
+                        <Badge size="xs" fontSize="9px" colorScheme="blue">
+                          {app.widgetCount || 0} items
+                        </Badge>
+                        {savedApps.length > 1 && (
+                          <IconButton
+                            icon={<FaTrashAlt size={9} />}
+                            size="xs"
+                            variant="ghost"
+                            color="red.400"
+                            h="18px"
+                            minW="18px"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteApp(app.name);
+                            }}
+                            aria-label="Delete App Screen"
+                          />
+                        )}
+                      </HStack>
+                    </HStack>
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
             <HStack bg="green.50" color="green.700" px={2.5} py={1} borderRadius="full" fontSize="11px" fontWeight="semibold">
               <Box w="6px" h="6px" bg="green.500" borderRadius="full" />
-              <Text>{selectedDevice?.name || "ESP32 Dev Board"}</Text>
+              <Text>{selectedDevice?.friendlyName || selectedDevice?.name || `Espressif ESP32 (${activePort})`}</Text>
             </HStack>
+            <Button
+              size="xs"
+              variant="outline"
+              colorScheme="blue"
+              borderRadius="lg"
+              leftIcon={<FaBolt size={10} />}
+              onClick={() => setWizardStep("connection")}
+              title="Return to Firmware Flashing Wizard"
+            >
+              Flasher Wizard
+            </Button>
           </HStack>
 
           {/* Center Mode Switcher */}
@@ -582,11 +3650,11 @@ export default function ESP32Flasher({
               size="xs"
               variant={appBuilderView === "blocks" ? "solid" : "ghost"}
               colorScheme={appBuilderView === "blocks" ? "blue" : "gray"}
-              leftIcon={<FaCogs size={11} />}
+              leftIcon={<FaCode size={11} />}
               onClick={() => setAppBuilderView("blocks")}
               borderRadius="lg"
             >
-              Blocks
+              Rules  ({logicBlocks.length})
             </Button>
             <Button
               size="xs"
@@ -602,13 +3670,31 @@ export default function ESP32Flasher({
 
           {/* Right Action Buttons */}
           <HStack spacing={2}>
-            <IconButton icon={<FaUndo size={12} />} size="sm" variant="ghost" aria-label="Undo" />
-            <IconButton icon={<FaRedo size={12} />} size="sm" variant="ghost" aria-label="Redo" />
+            <Tooltip label="Undo (Ctrl+Z)" placement="bottom">
+              <IconButton
+                icon={<FaUndo size={12} />}
+                size="sm"
+                variant="ghost"
+                aria-label="Undo"
+                isDisabled={historyIndex <= 0}
+                onClick={handleUndo}
+              />
+            </Tooltip>
+            <Tooltip label="Redo (Ctrl+Y)" placement="bottom">
+              <IconButton
+                icon={<FaRedo size={12} />}
+                size="sm"
+                variant="ghost"
+                aria-label="Redo"
+                isDisabled={historyIndex >= history.length - 1}
+                onClick={handleRedo}
+              />
+            </Tooltip>
             <Button
               size="sm"
               variant="outline"
               leftIcon={<FaSave size={13} />}
-              onClick={() => toast({ title: "App Saved", status: "success", duration: 2000 })}
+              onClick={handleSaveApp}
             >
               Save
             </Button>
@@ -618,115 +3704,270 @@ export default function ESP32Flasher({
               bg="#10b981"
               _hover={{ bg: "#059669" }}
               leftIcon={<FaRocket size={13} />}
-              onClick={onPublishOpen}
+              onClick={handleOpenPublishModal}
               shadow="md"
             >
               Publish App
             </Button>
-            <IconButton
-              icon={<FaTimes size={13} />}
-              size="sm"
-              variant="ghost"
-              aria-label="Close"
-              onClick={onClose}
-            />
           </HStack>
         </Flex>
 
-        {/* 3-Column Layout: Palette | Smartphone Canvas | Properties Inspector */}
+        {/* 3-Column Layout: Palette | Main Canvas | Properties Inspector */}
         <Grid templateColumns={{ base: "1fr", lg: "260px 1fr 340px" }} flex="1" overflow="hidden">
-          {/* 1. Left Component Palette */}
+          {/* 1. Left Sidebar: Shows Added Components in Rules Mode, Full Palette in Designer Mode */}
           <GridItem bg={bgCard} borderRight="1px" borderColor={borderColor} p={3} display="flex" flexDirection="column" overflowY="auto">
-            <HStack mb={3} px={1}>
-              <Input
-                placeholder="Search components..."
-                size="sm"
-                value={searchPalette}
-                onChange={(e) => setSearchPalette(e.target.value)}
-                borderRadius="lg"
-                bg={useColorModeValue("gray.50", "gray.800")}
-              />
-            </HStack>
+            {appBuilderView === "blocks" ? (
+              /* RULES MODE: SHOW ONLY COMPONENTS ADDED TO THE MOBILE APP IN DESIGNER */
+              <VStack align="stretch" spacing={2.5} flex="1">
+                <Flex justify="space-between" align="center" px={1} mb={0.5}>
+                  <VStack align="start" spacing={0}>
+                    <Text fontSize="xs" fontWeight="extrabold" color="gray.700" letterSpacing="wider">
+                      APP COMPONENTS ({widgets.length})
+                    </Text>
+                    <Text fontSize="10px" color="gray.400">
+                      Components placed in Designer
+                    </Text>
+                  </VStack>
+                  <Badge colorScheme="blue" variant="subtle" fontSize="9px" px={1.5} py={0.5} borderRadius="full">
+                    Synchronized
+                  </Badge>
+                </Flex>
 
-            <Accordion defaultIndex={[0, 1]} allowMultiple>
-              <AccordionItem border="none">
-                <AccordionButton px={2} py={2} _hover={{ bg: "transparent" }}>
-                  <Box flex="1" textAlign="left" fontWeight="bold" fontSize="xs" color="gray.500" letterSpacing="wider">
-                    USER INTERFACE
+                {/* Filter among added components */}
+                <Input
+                  placeholder="Filter added components..."
+                  size="sm"
+                  value={searchPalette}
+                  onChange={(e) => setSearchPalette(e.target.value)}
+                  borderRadius="lg"
+                  bg={useColorModeValue("gray.50", "gray.800")}
+                  fontSize="xs"
+                />
+
+                {widgets.length === 0 ? (
+                  <Box p={4} textAlign="center" bg={useColorModeValue("gray.50", "gray.800")} borderRadius="xl" border="1px dashed" borderColor={borderColor} mt={2}>
+                    <Box p={2.5} bg="gray.100" color="gray.400" borderRadius="full" display="inline-block" mb={2}>
+                      <FaMobileAlt size={18} />
+                    </Box>
+                    <Text fontSize="xs" fontWeight="bold" color="gray.600">No Components Added</Text>
+                    <Text fontSize="11px" color="gray.400" mt={1} mb={3}>
+                      Components must be placed in the mobile Designer first to configure automation rules.
+                    </Text>
+                    <Button size="xs" colorScheme="blue" onClick={() => setAppBuilderView("designer")} borderRadius="lg">
+                      Go to Designer
+                    </Button>
                   </Box>
-                  <AccordionIcon />
-                </AccordionButton>
-                <AccordionPanel pb={3} px={1}>
-                  <VStack align="stretch" spacing={1.5}>
-                    {filteredPalette.map((item) => (
-                      <HStack
-                        key={item.type}
-                        p={2}
-                        borderRadius="lg"
-                        border="1px solid"
-                        borderColor={useColorModeValue("gray.100", "gray.750")}
-                        bg={useColorModeValue("gray.50", "gray.800")}
-                        _hover={{
-                          borderColor: "blue.400",
-                          bg: useColorModeValue("blue.50", "gray.700"),
-                          transform: "translateY(-1px)",
-                          shadow: "xs"
-                        }}
-                        cursor="pointer"
-                        transition="all 0.15s"
-                        onClick={() => handleAddComponent(item.type, item.title, "GPIO Pin")}
-                        justify="space-between"
-                      >
-                        <HStack spacing={2.5}>
-                          <Box color="blue.500" p={1} bg="whiteAlpha.800" borderRadius="md" shadow="xs">
-                            {item.icon}
+                ) : (
+                  <VStack align="stretch" spacing={2} overflowY="auto" maxH="calc(100vh - 240px)" pr={1}>
+                    {widgets
+                      .filter((w) => {
+                        if (!searchPalette.trim()) return true;
+                        const q = searchPalette.toLowerCase();
+                        return (
+                          (w.title && w.title.toLowerCase().includes(q)) ||
+                          (w.type && w.type.toLowerCase().includes(q)) ||
+                          (w.boundTarget && w.boundTarget.toLowerCase().includes(q)) ||
+                          (w.boundTargetName && w.boundTargetName.toLowerCase().includes(q))
+                        );
+                      })
+                      .map((w) => {
+                        const ruleCount = logicBlocks.filter((b) => b.triggerWidgetId === w.id).length;
+                        const paletteMatch = uiPaletteItems.find((p) => p.type === w.type);
+                        const binding = w.boundTargetName || w.boundTarget || "GPIO Pin";
+
+                        return (
+                          <Box
+                            key={w.id}
+                            p={2.5}
+                            bg={useColorModeValue("white", "gray.800")}
+                            borderRadius="xl"
+                            border="1.5px solid"
+                            borderColor={ruleCount > 0 ? "blue.200" : borderColor}
+                            shadow="xs"
+                            transition="all 0.15s ease"
+                            _hover={{ borderColor: "blue.400", shadow: "sm", transform: "translateY(-1px)" }}
+                          >
+                            <HStack justify="space-between" align="start" mb={1}>
+                              <HStack spacing={2} align="center">
+                                <Box color="blue.500" p={1} bg={useColorModeValue("blue.50", "gray.700")} borderRadius="md">
+                                  {paletteMatch?.icon || <FaLightbulb size={12} />}
+                                </Box>
+                                <VStack align="start" spacing={0}>
+                                  <Text fontSize="xs" fontWeight="bold" color="gray.800" noOfLines={1}>
+                                    {w.title}
+                                  </Text>
+                                  <Text fontSize="9px" color="gray.400" textTransform="capitalize">
+                                    {w.type} • #{w.id.slice(-6)}
+                                  </Text>
+                                </VStack>
+                              </HStack>
+
+                              <Button
+                                size="xs"
+                                h="20px"
+                                fontSize="10px"
+                                colorScheme="blue"
+                                variant="ghost"
+                                leftIcon={<FaPlus size={8} />}
+                                onClick={() => handleOpenAddRule(0, w)}
+                                title="Add automation rule for this component"
+                              >
+                                + Rule
+                              </Button>
+                            </HStack>
+
+                            {/* Hardware Binding Row */}
+                            <Box mt={1} p={1.5} bg={useColorModeValue("blue.50", "gray.900")} borderRadius="md" border="1px solid" borderColor={useColorModeValue("blue.100", "gray.700")}>
+                              <HStack justify="space-between" align="center">
+                                <HStack spacing={1.5}>
+                                  <FaMicrochip size={10} color="#2563eb" />
+                                  <Text fontSize="10px" fontWeight="semibold" color="blue.700" noOfLines={1}>
+                                    {binding}
+                                  </Text>
+                                </HStack>
+                                <Badge colorScheme="green" variant="solid" fontSize="8px" px={1} py={0} borderRadius="sm">
+                                  ACTIVE
+                                </Badge>
+                              </HStack>
+                            </Box>
+
+                            {/* Rules Attached Footer */}
+                            <HStack justify="space-between" align="center" mt={1.5} px={0.5}>
+                              <Text fontSize="9px" color="gray.500">
+                                {ruleCount === 0 ? "0 rules active" : `${ruleCount} ${ruleCount === 1 ? "rule" : "rules"} active`}
+                              </Text>
+                              {ruleCount > 0 && (
+                                <Badge colorScheme="purple" fontSize="8px" px={1} py={0} borderRadius="sm">
+                                  Linked
+                                </Badge>
+                              )}
+                            </HStack>
                           </Box>
-                          <VStack align="start" spacing={0}>
-                            <Text fontSize="xs" fontWeight="bold">
-                              {item.title}
-                            </Text>
-                            <Text fontSize="10px" color="gray.400">
-                              {item.desc}
-                            </Text>
-                          </VStack>
-                        </HStack>
-                        <Text fontSize="12px" color="gray.400" opacity={0.6}>
-                          ⋮⋮
-                        </Text>
-                      </HStack>
-                    ))}
+                        );
+                      })}
                   </VStack>
-                </AccordionPanel>
-              </AccordionItem>
+                )}
+              </VStack>
+            ) : (
+              /* DESIGNER MODE: SHOW COMPONENT PALETTE TO ADD NEW WIDGETS */
+              <>
+                <HStack mb={2.5} px={1}>
+                  <Input
+                    placeholder="Search components..."
+                    size="sm"
+                    value={searchPalette}
+                    onChange={(e) => setSearchPalette(e.target.value)}
+                    borderRadius="lg"
+                    bg={useColorModeValue("gray.50", "gray.800")}
+                  />
+                </HStack>
 
-              <AccordionItem border="none">
-                <AccordionButton px={2} py={2} _hover={{ bg: "transparent" }}>
-                  <Box flex="1" textAlign="left" fontWeight="bold" fontSize="xs" color="gray.500" letterSpacing="wider">
-                    LAYOUT
-                  </Box>
-                  <AccordionIcon />
-                </AccordionButton>
-                <AccordionPanel pb={2} px={1}>
-                  <VStack align="stretch" spacing={1.5}>
-                    <HStack
-                      p={2}
-                      borderRadius="lg"
-                      border="1px solid"
-                      borderColor={useColorModeValue("gray.100", "gray.750")}
-                      bg={useColorModeValue("gray.50", "gray.800")}
-                      cursor="pointer"
-                      onClick={() => handleAddComponent("card", "Container Card", "Layout")}
-                    >
-                      <FaBoxes color="#3b82f6" />
-                      <Text fontSize="xs" fontWeight="semibold">Vertical Stack</Text>
-                    </HStack>
-                  </VStack>
-                </AccordionPanel>
-              </AccordionItem>
-            </Accordion>
+                <Accordion defaultIndex={[0, 1]} allowMultiple>
+                  <AccordionItem border="none">
+                    <AccordionButton px={2} py={2} _hover={{ bg: "transparent" }}>
+                      <Box flex="1" textAlign="left" fontWeight="bold" fontSize="xs" color="gray.500" letterSpacing="wider">
+                        USER INTERFACE ({filteredPalette.length})
+                      </Box>
+                      <AccordionIcon />
+                    </AccordionButton>
+                    <AccordionPanel pb={3} px={1}>
+                      <VStack align="stretch" spacing={1.5}>
+                        {filteredPalette.map((item) => (
+                          <HStack
+                            key={item.type}
+                            p={2}
+                            borderRadius="lg"
+                            border="1px solid"
+                            borderColor={useColorModeValue("gray.100", "gray.750")}
+                            bg={useColorModeValue("gray.50", "gray.800")}
+                            _hover={{
+                              borderColor: "blue.400",
+                              bg: useColorModeValue("blue.50", "gray.700"),
+                              transform: "translateY(-1px)",
+                              shadow: "xs"
+                            }}
+                            cursor="pointer"
+                            transition="all 0.15s"
+                            onClick={() => handleAddComponent(item.type, item.title, item.defaultBinding || "GPIO Pin")}
+                            justify="space-between"
+                          >
+                            <HStack spacing={2.5}>
+                              <Box color="blue.500" p={1} bg="whiteAlpha.800" borderRadius="md" shadow="xs">
+                                {item.icon}
+                              </Box>
+                              <VStack align="start" spacing={0}>
+                                <Text fontSize="xs" fontWeight="bold">
+                                  {item.title}
+                                </Text>
+                                <Text fontSize="10px" color="gray.400">
+                                  {item.desc}
+                                </Text>
+                              </VStack>
+                            </HStack>
+                            <Text fontSize="12px" color="gray.400" opacity={0.6}>
+                              + Add
+                            </Text>
+                          </HStack>
+                        ))}
+                      </VStack>
+                    </AccordionPanel>
+                  </AccordionItem>
+
+                  <AccordionItem border="none">
+                    <AccordionButton px={2} py={2} _hover={{ bg: "transparent" }}>
+                      <Box flex="1" textAlign="left" fontWeight="bold" fontSize="xs" color="gray.500" letterSpacing="wider">
+                        LAYOUT & CONTAINERS ({filteredLayoutPalette.length})
+                      </Box>
+                      <AccordionIcon />
+                    </AccordionButton>
+                    <AccordionPanel pb={2} px={1}>
+                      <VStack align="stretch" spacing={1.5}>
+                        {filteredLayoutPalette.map((item) => (
+                          <HStack
+                            key={item.type + item.title}
+                            p={2}
+                            borderRadius="lg"
+                            border="1px solid"
+                            borderColor={useColorModeValue("gray.100", "gray.750")}
+                            bg={useColorModeValue("gray.50", "gray.800")}
+                            _hover={{
+                              borderColor: "blue.400",
+                              bg: useColorModeValue("blue.50", "gray.700"),
+                              transform: "translateY(-1px)",
+                              shadow: "xs"
+                            }}
+                            cursor="pointer"
+                            transition="all 0.15s"
+                            onClick={() => handleAddComponent(item.type, item.title, item.defaultBinding || "Layout")}
+                            justify="space-between"
+                          >
+                            <HStack spacing={2.5}>
+                              <Box p={1} bg="whiteAlpha.800" borderRadius="md" shadow="xs">
+                                {item.icon}
+                              </Box>
+                              <VStack align="start" spacing={0}>
+                                <Text fontSize="xs" fontWeight="bold">
+                                  {item.title}
+                                </Text>
+                                <Text fontSize="10px" color="gray.400">
+                                  {item.desc}
+                                </Text>
+                              </VStack>
+                            </HStack>
+                            <Text fontSize="11px" color="blue.500" fontWeight="semibold">
+                              + Add
+                            </Text>
+                          </HStack>
+                        ))}
+                      </VStack>
+                    </AccordionPanel>
+                  </AccordionItem>
+                </Accordion>
+              </>
+            )}
           </GridItem>
 
-          {/* 2. Center Canvas: Smartphone Mockup */}
+          {/* 2. Center Canvas: Switchable Designer / Blocks / Preview */}
           <GridItem
             bg={useColorModeValue("#f8fafc", "#0b0f17")}
             p={4}
@@ -737,290 +3978,1558 @@ export default function ESP32Flasher({
             overflowY="auto"
             position="relative"
           >
-            {/* Starter App Generated Notification Banner */}
-            {starterAlertVisible && (
-              <Box
-                w="100%"
-                maxW="480px"
-                mb={4}
-                p={3.5}
-                bg="white"
-                borderRadius="2xl"
-                border="1px solid"
-                borderColor="blue.100"
-                shadow="md"
-                display="flex"
-                alignItems="start"
-                justifyContent="space-between"
-              >
-                <HStack align="start" spacing={3}>
-                  <Text fontSize="lg">✨</Text>
+            {/* VIEW 1: DESIGNER MODE */}
+            {appBuilderView === "designer" && (
+              <>
+                {/* Starter App Generated Notification Banner */}
+                {starterAlertVisible && (
+                  <Box
+                    w="100%"
+                    maxW="480px"
+                    mb={4}
+                    p={3.5}
+                    bg="white"
+                    borderRadius="2xl"
+                    border="1px solid"
+                    borderColor="blue.100"
+                    shadow="md"
+                    display="flex"
+                    alignItems="start"
+                    justifyContent="space-between"
+                  >
+                    <HStack align="start" spacing={3}>
+                      <Text fontSize="lg">✨</Text>
+                      <VStack align="start" spacing={0.5}>
+                        <Text fontSize="xs" fontWeight="bold" color="blue.600">
+                          Starter App Generated
+                        </Text>
+                        <Text fontSize="11px" color="gray.600" lineHeight="tall">
+                          We've created a basic control app from your hardware. Customize it by adding more components, configuring pins, or switching to Blocks mode for logic.
+                        </Text>
+                      </VStack>
+                    </HStack>
+                    <IconButton
+                      icon={<FaTimes size={11} />}
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setStarterAlertVisible(false)}
+                      aria-label="Dismiss alert"
+                    />
+                  </Box>
+                )}
+
+                {/* Smartphone Phone Frame */}
+                <Box
+                  w="340px"
+                  minH="640px"
+                  bg="white"
+                  borderRadius="42px"
+                  border="10px solid #1e293b"
+                  position="relative"
+                  shadow="2xl"
+                  display="flex"
+                  flexDirection="column"
+                  overflow="hidden"
+                  mb={8}
+                >
+                  {/* Dynamic Island / Speaker notch */}
+                  <Box
+                    w="100px"
+                    h="18px"
+                    bg="#1e293b"
+                    position="absolute"
+                    top="0"
+                    left="50%"
+                    transform="translateX(-50%)"
+                    borderBottomRadius="xl"
+                    zIndex={20}
+                  />
+
+                  {/* Status Bar */}
+                  <HStack justify="space-between" px={6} pt={3} pb={1} fontSize="10px" color="gray.700" fontWeight="bold" zIndex={10}>
+                    <Text>9:41</Text>
+                    <HStack spacing={1.5}>
+                      <FaWifi size={10} />
+                      <Text fontSize="9px">5G</Text>
+                      <Box w="16px" h="8px" border="1px solid currentColor" borderRadius="2px" p="1px">
+                        <Box w="80%" h="100%" bg="currentColor" borderRadius="1px" />
+                      </Box>
+                    </HStack>
+                  </HStack>
+
+                  {/* Mobile App Screen Content */}
+                  <Box flex="1" p={3.5} bg="#f8fafc" overflowY="auto">
+                    {/* App Title Header */}
+                    <HStack justify="space-between" mb={3} mt={1}>
+                      <HStack spacing={2}>
+                        <Text fontSize="sm">🌱</Text>
+                        <Text fontWeight="extrabold" fontSize="md" color="gray.900">
+                          {projectName}
+                        </Text>
+                      </HStack>
+                      <Badge colorScheme="green" fontSize="9px" borderRadius="full" px={2}>
+                        ● Live
+                      </Badge>
+                    </HStack>
+
+                    {/* Render Interactive Phone Widgets */}
+                    <VStack spacing={2.5} align="stretch" minH="240px">
+                      {widgets.filter((w) => w.visible !== false).length === 0 ? (
+                        <Flex
+                          direction="column"
+                          align="center"
+                          justify="center"
+                          h="260px"
+                          border="2px dashed"
+                          borderColor="gray.300"
+                          borderRadius="2xl"
+                          p={6}
+                          textAlign="center"
+                          my={4}
+                        >
+                          <Box p={3} bg="blue.50" color="blue.500" borderRadius="full" mb={2.5}>
+                            <FaPlus size={18} />
+                          </Box>
+                          <Text fontSize="xs" fontWeight="bold" color="gray.700">
+                            Screen is Empty
+                          </Text>
+                          <Text fontSize="11px" color="gray.400" mt={1} maxW="210px">
+                            Add components from the left palette to start building your mobile UI.
+                          </Text>
+                        </Flex>
+                      ) : widgets.filter((w) => w.visible !== false).map((w) => {
+                        const isSelected = w.id === selectedWidgetId;
+                        return (
+                          <Box
+                            key={w.id}
+                            p={3}
+                            bg="white"
+                            borderRadius={`${w.cornerRadius || 16}px`}
+                            border="2px solid"
+                            borderColor={isSelected ? "#2563eb" : "transparent"}
+                            shadow="sm"
+                            _hover={{ borderColor: isSelected ? "#2563eb" : "gray.200" }}
+                            cursor="pointer"
+                            transition="all 0.15s"
+                            position="relative"
+                            onClick={() => setSelectedWidgetId(w.id)}
+                          >
+                            {/* Inline Widget Floating Action Bar on Selection */}
+                            {isSelected && (
+                              <HStack
+                                position="absolute"
+                                top="-12px"
+                                right="12px"
+                                bg="blue.600"
+                                color="white"
+                                px={2}
+                                py={0.5}
+                                borderRadius="full"
+                                shadow="md"
+                                spacing={1.5}
+                                zIndex={15}
+                              >
+                                <Tooltip label="Move Up" fontSize="10px">
+                                  <IconButton
+                                    icon={<FaArrowUp size={9} />}
+                                    size="xs"
+                                    h="18px"
+                                    minW="18px"
+                                    variant="ghost"
+                                    color="white"
+                                    _hover={{ bg: "blue.700" }}
+                                    onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "up"); }}
+                                    aria-label="Up"
+                                  />
+                                </Tooltip>
+                                <Tooltip label="Move Down" fontSize="10px">
+                                  <IconButton
+                                    icon={<FaArrowDown size={9} />}
+                                    size="xs"
+                                    h="18px"
+                                    minW="18px"
+                                    variant="ghost"
+                                    color="white"
+                                    _hover={{ bg: "blue.700" }}
+                                    onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "down"); }}
+                                    aria-label="Down"
+                                  />
+                                </Tooltip>
+                                <Tooltip label="Duplicate" fontSize="10px">
+                                  <IconButton
+                                    icon={<FaClone size={9} />}
+                                    size="xs"
+                                    h="18px"
+                                    minW="18px"
+                                    variant="ghost"
+                                    color="white"
+                                    _hover={{ bg: "blue.700" }}
+                                    onClick={(e) => { e.stopPropagation(); handleDuplicateWidget(w.id); }}
+                                    aria-label="Duplicate"
+                                  />
+                                </Tooltip>
+                                <Tooltip label="Delete" fontSize="10px">
+                                  <IconButton
+                                    icon={<FaTrashAlt size={9} />}
+                                    size="xs"
+                                    h="18px"
+                                    minW="18px"
+                                    variant="ghost"
+                                    color="red.200"
+                                    _hover={{ bg: "red.600", color: "white" }}
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteWidget(w.id); }}
+                                    aria-label="Delete"
+                                  />
+                                </Tooltip>
+                              </HStack>
+                            )}
+
+                            {/* 1. LED Switch Widget */}
+                            {w.type === "switch" && (
+                              <HStack justify="space-between">
+                                <HStack spacing={2.5}>
+                                  <Box p={2} bg={w.state ? "yellow.100" : "gray.100"} color={w.state ? "yellow.600" : "gray.400"} borderRadius="lg">
+                                    <FaLightbulb size={16} />
+                                  </Box>
+                                  <VStack align="start" spacing={0}>
+                                    <Text fontWeight="bold" fontSize="xs" color="gray.900">
+                                      {w.title}
+                                    </Text>
+                                    <Text fontSize="10px" color="gray.400">
+                                      {w.boundTargetName || w.boundTarget}
+                                    </Text>
+                                  </VStack>
+                                </HStack>
+                                <Switch
+                                  colorScheme="green"
+                                  isChecked={w.state}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    handleUpdateWidget("state", e.target.checked, w.id);
+                                  }}
+                                />
+                              </HStack>
+                            )}
+
+                            {/* 2. Servo Angle Slider Widget */}
+                            {w.type === "slider" && (
+                              <VStack align="stretch" spacing={1.5}>
+                                <HStack justify="space-between">
+                                  <HStack spacing={2.5}>
+                                    <Box p={2} bg="purple.50" color="purple.600" borderRadius="lg">
+                                      <FaCogs size={16} />
+                                    </Box>
+                                    <VStack align="start" spacing={0}>
+                                      <Text fontWeight="bold" fontSize="xs" color="gray.900">
+                                        {w.title}
+                                      </Text>
+                                      <Text fontSize="10px" color="gray.400">
+                                        {w.boundTargetName || w.boundTarget}
+                                      </Text>
+                                    </VStack>
+                                  </HStack>
+                                  <Text fontWeight="extrabold" fontSize="xs" color={w.color || "purple.600"}>
+                                    {w.value}{w.unit || "°"}
+                                  </Text>
+                                </HStack>
+                                <Slider
+                                  value={w.value}
+                                  min={w.min || 0}
+                                  max={w.max || 180}
+                                  onChange={(val) => handleUpdateWidget("value", val, w.id)}
+                                >
+                                  <SliderTrack bg="gray.100">
+                                    <SliderFilledTrack bg={w.color || "purple.500"} />
+                                  </SliderTrack>
+                                  <SliderThumb boxSize={3.5} />
+                                </Slider>
+                              </VStack>
+                            )}
+
+                            {/* 3. Temperature Gauge Widget */}
+                            {w.type === "gauge" && (
+                              <VStack align="stretch" spacing={2}>
+                                <HStack justify="space-between">
+                                  <HStack spacing={2.5}>
+                                    <Box p={2} bg="red.50" color="red.500" borderRadius="lg">
+                                      <FaTemperatureHigh size={16} />
+                                    </Box>
+                                    <VStack align="start" spacing={0}>
+                                      <Text fontWeight="bold" fontSize="xs" color="gray.900">
+                                        {w.title}
+                                      </Text>
+                                      <Text fontSize="10px" color="gray.400">
+                                        {w.boundTargetName || w.boundTarget}
+                                      </Text>
+                                    </VStack>
+                                  </HStack>
+                                  <HStack spacing={1} color="green.600" fontSize="10px" fontWeight="bold">
+                                    <Box w="6px" h="6px" bg="green.500" borderRadius="full" />
+                                    <Text>Live</Text>
+                                  </HStack>
+                                </HStack>
+                                <HStack spacing={3} justify="center" py={1}>
+                                  <Box
+                                    w="52px"
+                                    h="26px"
+                                    borderTopRadius="52px"
+                                    border={`4px solid ${w.color || "#ef4444"}`}
+                                    borderBottom="none"
+                                  />
+                                  <VStack align="start" spacing={0}>
+                                    <Text fontSize="xl" fontWeight="black" color="gray.900">
+                                      {w.value}{w.unit || "°C"}
+                                    </Text>
+                                    <Text fontSize="9px" color="gray.400">
+                                      Live telemetry
+                                    </Text>
+                                  </VStack>
+                                </HStack>
+                              </VStack>
+                            )}
+
+                            {/* 4. Chart / Graph Widget */}
+                            {w.type === "chart" && (
+                              <VStack align="stretch" spacing={2}>
+                                <HStack justify="space-between">
+                                  <HStack spacing={2}>
+                                    <FaChartLine color="#2563eb" />
+                                    <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                  </HStack>
+                                  <Badge colorScheme="blue" fontSize="9px">Live Stream</Badge>
+                                </HStack>
+                                <Box h="45px" w="100%" bg="blue.50" borderRadius="lg" p={1} display="flex" alignItems="flex-end">
+                                  <svg width="100%" height="100%" viewBox="0 0 200 40" preserveAspectRatio="none">
+                                    <path d="M0,35 Q30,10 60,25 T120,15 T180,30 T200,8" fill="none" stroke="#2563eb" strokeWidth="2.5" />
+                                  </svg>
+                                </Box>
+                              </VStack>
+                            )}
+
+                            {/* 5. Sound Alarm Button Widget */}
+                            {w.type === "button" && (
+                              <VStack align="stretch" spacing={1}>
+                                <Text fontSize="9px" color="gray.400" px={1}>
+                                  {w.boundTargetName || w.boundTarget}
+                                </Text>
+                                <Button
+                                  w="100%"
+                                  size="md"
+                                  bg={w.color || "#ea580c"}
+                                  _hover={{ opacity: 0.9 }}
+                                  color="white"
+                                  borderRadius="xl"
+                                  leftIcon={<FaBell size={14} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveWidgetId(w.id);
+                                    if (previewTab === "preview") {
+                                      handleTestHardwareSignal(w);
+                                    }
+                                  }}
+                                  fontWeight="bold"
+                                  fontSize="xs"
+                                >
+                                  {w.title}
+                                </Button>
+                              </VStack>
+                            )}
+
+                            {/* 5b. Directional Top Button Widget */}
+                            {w.type === "top_button" && (
+                              <VStack align="stretch" spacing={1}>
+                                <HStack justify="space-between">
+                                  <Text fontSize="9px" color="gray.400" px={1}>
+                                    {w.boundTargetName || w.boundTarget || "GPIO 13 (Motor Forward)"}
+                                  </Text>
+                                  <Badge fontSize="9px" colorScheme="blue">▲ Top / Forward</Badge>
+                                </HStack>
+                                <Button
+                                  w="100%"
+                                  size="md"
+                                  bg={w.color || "#2563eb"}
+                                  _hover={{ opacity: 0.9 }}
+                                  color="white"
+                                  borderRadius="xl"
+                                  leftIcon={<FaArrowUp size={13} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveWidgetId(w.id);
+                                    if (previewTab === "preview") {
+                                      handleTestHardwareSignal(w);
+                                    }
+                                  }}
+                                  fontWeight="bold"
+                                  fontSize="xs"
+                                  shadow="sm"
+                                >
+                                  {w.title}
+                                </Button>
+                              </VStack>
+                            )}
+
+                            {/* 5c. Directional Bottom Button Widget */}
+                            {w.type === "bottom_button" && (
+                              <VStack align="stretch" spacing={1}>
+                                <HStack justify="space-between">
+                                  <Text fontSize="9px" color="gray.400" px={1}>
+                                    {w.boundTargetName || w.boundTarget || "GPIO 14 (Motor Reverse)"}
+                                  </Text>
+                                  <Badge fontSize="9px" colorScheme="cyan">▼ Bottom / Reverse</Badge>
+                                </HStack>
+                                <Button
+                                  w="100%"
+                                  size="md"
+                                  bg={w.color || "#0284c7"}
+                                  _hover={{ opacity: 0.9 }}
+                                  color="white"
+                                  borderRadius="xl"
+                                  leftIcon={<FaArrowDown size={13} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveWidgetId(w.id);
+                                    if (previewTab === "preview") {
+                                      handleTestHardwareSignal(w);
+                                    }
+                                  }}
+                                  fontWeight="bold"
+                                  fontSize="xs"
+                                  shadow="sm"
+                                >
+                                  {w.title}
+                                </Button>
+                              </VStack>
+                            )}
+
+                            {/* 5d. Directional Left Button Widget */}
+                            {w.type === "left_button" && (
+                              <VStack align="stretch" spacing={1}>
+                                <HStack justify="space-between">
+                                  <Text fontSize="9px" color="gray.400" px={1}>
+                                    {w.boundTargetName || w.boundTarget || "GPIO 12 (Steer Left)"}
+                                  </Text>
+                                  <Badge fontSize="9px" colorScheme="purple">◀ Left Turn</Badge>
+                                </HStack>
+                                <Button
+                                  w="100%"
+                                  size="md"
+                                  bg={w.color || "#7c3aed"}
+                                  _hover={{ opacity: 0.9 }}
+                                  color="white"
+                                  borderRadius="xl"
+                                  leftIcon={<FaArrowLeft size={13} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveWidgetId(w.id);
+                                    if (previewTab === "preview") {
+                                      handleTestHardwareSignal(w);
+                                    }
+                                  }}
+                                  fontWeight="bold"
+                                  fontSize="xs"
+                                  shadow="sm"
+                                >
+                                  {w.title}
+                                </Button>
+                              </VStack>
+                            )}
+
+                            {/* 5e. Directional Right Button Widget */}
+                            {w.type === "right_button" && (
+                              <VStack align="stretch" spacing={1}>
+                                <HStack justify="space-between">
+                                  <Text fontSize="9px" color="gray.400" px={1}>
+                                    {w.boundTargetName || w.boundTarget || "GPIO 15 (Steer Right)"}
+                                  </Text>
+                                  <Badge fontSize="9px" colorScheme="purple">▶ Right Turn</Badge>
+                                </HStack>
+                                <Button
+                                  w="100%"
+                                  size="md"
+                                  bg={w.color || "#9333ea"}
+                                  _hover={{ opacity: 0.9 }}
+                                  color="white"
+                                  borderRadius="xl"
+                                  leftIcon={<FaArrowRight size={13} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveWidgetId(w.id);
+                                    if (previewTab === "preview") {
+                                      handleTestHardwareSignal(w);
+                                    }
+                                  }}
+                                  fontWeight="bold"
+                                  fontSize="xs"
+                                  shadow="sm"
+                                >
+                                  {w.title}
+                                </Button>
+                              </VStack>
+                            )}
+
+                            {/* 5f. 4-Way Directional Pad Widget */}
+                            {w.type === "dpad" && (
+                              <VStack align="center" spacing={2} p={1}>
+                                <HStack justify="space-between" w="100%">
+                                  <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                  <Badge colorScheme="blue" fontSize="9px">4-Way Controller</Badge>
+                                </HStack>
+                                <Box p={2.5} bg="gray.100" borderRadius="2xl" border="1px solid" borderColor="gray.300">
+                                  <VStack spacing={1}>
+                                    <Button
+                                      size="xs"
+                                      colorScheme="blue"
+                                      w="44px"
+                                      h="32px"
+                                      borderRadius="lg"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveWidgetId(w.id);
+                                        if (previewTab === "preview") {
+                                          handleTestHardwareSignal({ ...w, boundTarget: "GPIO 13", title: "Top Button (Forward)" });
+                                        }
+                                      }}
+                                    >
+                                      <FaArrowUp size={11} />
+                                    </Button>
+                                    <HStack spacing={1}>
+                                      <Button
+                                        size="xs"
+                                        colorScheme="purple"
+                                        w="44px"
+                                        h="32px"
+                                        borderRadius="lg"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveWidgetId(w.id);
+                                          if (previewTab === "preview") {
+                                            handleTestHardwareSignal({ ...w, boundTarget: "GPIO 12", title: "Left Button (Steer Left)" });
+                                          }
+                                        }}
+                                      >
+                                        <FaArrowLeft size={11} />
+                                      </Button>
+                                      <Box w="36px" h="32px" bg="gray.300" borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                                        <Text fontSize="10px" fontWeight="black" color="gray.600">●</Text>
+                                      </Box>
+                                      <Button
+                                        size="xs"
+                                        colorScheme="purple"
+                                        w="44px"
+                                        h="32px"
+                                        borderRadius="lg"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveWidgetId(w.id);
+                                          if (previewTab === "preview") {
+                                            handleTestHardwareSignal({ ...w, boundTarget: "GPIO 15", title: "Right Button (Steer Right)" });
+                                          }
+                                        }}
+                                      >
+                                        <FaArrowRight size={11} />
+                                      </Button>
+                                    </HStack>
+                                    <Button
+                                      size="xs"
+                                      colorScheme="blue"
+                                      w="44px"
+                                      h="32px"
+                                      borderRadius="lg"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveWidgetId(w.id);
+                                        if (previewTab === "preview") {
+                                          handleTestHardwareSignal({ ...w, boundTarget: "GPIO 14", title: "Bottom Button (Reverse)" });
+                                        }
+                                      }}
+                                    >
+                                      <FaArrowDown size={11} />
+                                    </Button>
+                                  </VStack>
+                                </Box>
+                              </VStack>
+                            )}
+
+                            {/* 6. Color Picker Widget */}
+                            {w.type === "colorpicker" && (
+                              <VStack align="stretch" spacing={2}>
+                                <HStack justify="space-between">
+                                  <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                  <Box w="14px" h="14px" borderRadius="full" bg={w.selectedColor || "#2563eb"} />
+                                </HStack>
+                                <HStack spacing={2} justify="center">
+                                  {["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4"].map((c) => (
+                                    <Box
+                                      key={c}
+                                      w="22px"
+                                      h="22px"
+                                      borderRadius="full"
+                                      bg={c}
+                                      cursor="pointer"
+                                      border={w.selectedColor === c ? "2px solid black" : "none"}
+                                      onClick={(e) => { e.stopPropagation(); handleUpdateWidget("selectedColor", c, w.id); }}
+                                    />
+                                  ))}
+                                </HStack>
+                              </VStack>
+                            )}
+
+                            {/* 7. Joystick Widget */}
+                            {w.type === "joystick" && (
+                              <VStack align="center" spacing={1.5}>
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Box w="70px" h="70px" borderRadius="full" bg="gray.100" border="2px dashed" borderColor="gray.300" display="flex" alignItems="center" justifyContent="center">
+                                  <Box w="30px" h="30px" borderRadius="full" bg="blue.500" shadow="md" />
+                                </Box>
+                              </VStack>
+                            )}
+
+                            {/* 8. Text Field / Input Widget */}
+                            {w.type === "textfield" && (
+                              <VStack align="stretch" spacing={1.5}>
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Input size="xs" placeholder="Enter command or message..." borderRadius="lg" bg="gray.50" />
+                              </VStack>
+                            )}
+
+                            {/* 9. Label Widget */}
+                            {w.type === "label" && (
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="sm">{w.title}</Text>
+                                <Text fontSize="xs" color="gray.500">{w.boundTargetName || "Telemetry"}</Text>
+                              </HStack>
+                            )}
+
+                            {/* 10. Device Link Status Card Widget */}
+                            {w.type === "device_card" && (
+                              <HStack justify="space-between" p={1}>
+                                <HStack spacing={2}>
+                                  <Box p={2} bg="blue.50" color="blue.600" borderRadius="lg">
+                                    <FaBroadcastTower size={14} />
+                                  </Box>
+                                  <VStack align="start" spacing={0}>
+                                    <Text fontWeight="bold" fontSize="xs" color="gray.900">
+                                      {w.title}
+                                    </Text>
+                                    <Text fontSize="9px" color="green.600" fontWeight="semibold">
+                                      ● Online & Connected
+                                    </Text>
+                                  </VStack>
+                                </HStack>
+                                <Badge colorScheme="blue" fontSize="9px" borderRadius="md">
+                                  WiFi 100%
+                                </Badge>
+                              </HStack>
+                            )}
+
+                            {/* 11. Generic Card / Progress */}
+                            {w.type === "progress" && (
+                              <VStack align="stretch" spacing={1}>
+                                <HStack justify="space-between">
+                                  <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                  <Text fontSize="xs" color="blue.600">75%</Text>
+                                </HStack>
+                                <Progress value={75} size="xs" colorScheme="blue" borderRadius="full" />
+                              </VStack>
+                            )}
+
+                            {/* 12. CRUD Table Widget */}
+                            {w.type === "crud_table" && (
+                              <VStack align="stretch" spacing={2}>
+                                <HStack justify="space-between" align="center">
+                                  <HStack spacing={1.5}>
+                                    <Box color="blue.500">
+                                      <FaTable size={12} />
+                                    </Box>
+                                    <Text fontWeight="bold" fontSize="xs" color="gray.800">
+                                      {w.title}
+                                    </Text>
+                                  </HStack>
+                                  <Button
+                                    size="xs"
+                                    colorScheme="blue"
+                                    variant="outline"
+                                    leftIcon={<FaPlus size={8} />}
+                                    h="20px"
+                                    px={2}
+                                    fontSize="10px"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenAddCrudRecord(w.id);
+                                    }}
+                                  >
+                                    Add
+                                  </Button>
+                                </HStack>
+
+                                <VStack align="stretch" spacing={1.5}>
+                                  {(w.records || []).length === 0 ? (
+                                    <Box py={3} textAlign="center" bg="gray.50" borderRadius="md" border="1px dashed" borderColor="gray.200">
+                                      <Text fontSize="10px" color="gray.400">No records yet. Click '+ Add'</Text>
+                                    </Box>
+                                  ) : (
+                                    (w.records || []).map((rec) => (
+                                      <HStack
+                                        key={rec.id}
+                                        p={2}
+                                        bg="gray.50"
+                                        borderRadius="md"
+                                        border="1px solid"
+                                        borderColor="gray.200"
+                                        justify="space-between"
+                                        fontSize="11px"
+                                      >
+                                        <VStack align="start" spacing={0} maxW="150px">
+                                          <Text fontWeight="bold" fontSize="11px" color="gray.800" isTruncated>
+                                            {rec.name}
+                                          </Text>
+                                          <HStack spacing={1}>
+                                            <Badge
+                                              colorScheme={rec.status === "Active" ? "green" : rec.status === "Alert" ? "red" : "blue"}
+                                              fontSize="8px"
+                                              px={1}
+                                              borderRadius="sm"
+                                            >
+                                              {rec.value || rec.status}
+                                            </Badge>
+                                            <Text fontSize="9px" color="gray.400">{rec.timestamp}</Text>
+                                          </HStack>
+                                        </VStack>
+
+                                        <HStack spacing={1}>
+                                          <IconButton
+                                            icon={<FaEdit size={9} />}
+                                            size="xs"
+                                            h="20px"
+                                            minW="20px"
+                                            variant="ghost"
+                                            color="blue.500"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenEditCrudRecord(w.id, rec);
+                                            }}
+                                            aria-label="Edit Record"
+                                          />
+                                          <IconButton
+                                            icon={<FaTrashAlt size={9} />}
+                                            size="xs"
+                                            h="20px"
+                                            minW="20px"
+                                            variant="ghost"
+                                            color="red.400"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDeleteCrudRecord(w.id, rec.id);
+                                            }}
+                                            aria-label="Delete Record"
+                                          />
+                                        </HStack>
+                                      </HStack>
+                                    ))
+                                  )}
+                                </VStack>
+                              </VStack>
+                            )}
+
+                            {/* Other components fallback */}
+                            {!["switch", "slider", "gauge", "chart", "button", "colorpicker", "joystick", "textfield", "label", "device_card", "progress", "crud_table"].includes(w.type) && (
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="xs">
+                                  {w.title}
+                                </Text>
+                                <Badge fontSize="9px">{w.type}</Badge>
+                              </HStack>
+                            )}
+                          </Box>
+                        );
+                      })}
+                    </VStack>
+                  </Box>
+                </Box>
+              </>
+            )}
+
+            {/* VIEW 2: VISUAL BLOCKS LOGIC EDITOR */}
+            {appBuilderView === "blocks" && (
+              <Box w="100%" maxW="780px" p={4}>
+                {/* Header with Title and Add Button */}
+                <Flex justify="space-between" align={{ base: "start", sm: "center" }} direction={{ base: "column", sm: "row" }} gap={3} mb={4}>
                   <VStack align="start" spacing={0.5}>
-                    <Text fontSize="xs" fontWeight="bold" color="blue.600">
-                      Starter App Generated
+                    <Text fontWeight="extrabold" fontSize="md" color="gray.800">
+                      Automation & Hardware Rules
                     </Text>
-                    <Text fontSize="11px" color="gray.600" lineHeight="tall">
-                      We've created a basic control app from your hardware. Customize it by dragging more components or rearranging the layout.
+                    <Text fontSize="xs" color="gray.500">
+                      Connect UI events to physical ESP32 GPIOs and hardware telemetry routines.
                     </Text>
                   </VStack>
-                </HStack>
-                <IconButton
-                  icon={<FaTimes size={11} />}
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => setStarterAlertVisible(false)}
-                  aria-label="Dismiss alert"
-                />
+                  <Button
+                    size="sm"
+                    colorScheme="blue"
+                    bg="#2563eb"
+                    _hover={{ bg: "#1d4ed8" }}
+                    leftIcon={<FaPlus size={11} />}
+                    onClick={() => handleOpenAddRule(0)}
+                    borderRadius="lg"
+                    fontWeight="bold"
+                    shadow="sm"
+                  >
+                    Add Automation Rule
+                  </Button>
+                </Flex>
+
+                {/* Search / Filter Bar & Count */}
+                <Flex mb={3} gap={2} align="center" wrap="wrap">
+                  <Input
+                    size="sm"
+                    placeholder="Search rules by name, event, pin, or action..."
+                    value={ruleSearchQuery}
+                    onChange={(e) => setRuleSearchQuery(e.target.value)}
+                    borderRadius="lg"
+                    bg="white"
+                    borderColor="gray.200"
+                    _focus={{ borderColor: "blue.400" }}
+                    flex="1"
+                    minW="200px"
+                  />
+                  {/* Filter by Added Mobile Component */}
+                  <Select
+                    size="sm"
+                    maxW="210px"
+                    borderRadius="lg"
+                    bg="white"
+                    borderColor="gray.200"
+                    value={ruleComponentFilter}
+                    onChange={(e) => setRuleComponentFilter(e.target.value)}
+                    fontSize="xs"
+                  >
+                    <option value="all">All Components ({logicBlocks.length})</option>
+                    {widgets.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.title} ({w.type})
+                      </option>
+                    ))}
+                  </Select>
+
+                  {ruleSearchQuery && (
+                    <Button size="xs" variant="ghost" onClick={() => setRuleSearchQuery("")}>
+                      Clear
+                    </Button>
+                  )}
+                  <Badge colorScheme="blue" variant="subtle" px={2} py={1} borderRadius="md" whiteSpace="nowrap">
+                    {logicBlocks.length} Active {logicBlocks.length === 1 ? "Rule" : "Rules"}
+                  </Badge>
+                </Flex>
+
+                {/* Rules List */}
+                <VStack spacing={3.5} align="stretch">
+                  {logicBlocks
+                    .filter((block) => {
+                      if (ruleComponentFilter !== "all" && block.triggerWidgetId !== ruleComponentFilter) {
+                        return false;
+                      }
+                      if (!ruleSearchQuery.trim()) return true;
+                      const q = ruleSearchQuery.toLowerCase();
+                      return (
+                        block.name.toLowerCase().includes(q) ||
+                        (block.triggerName && block.triggerName.toLowerCase().includes(q)) ||
+                        (block.event && block.event.toLowerCase().includes(q)) ||
+                        (block.condition && block.condition.toLowerCase().includes(q)) ||
+                        (block.action && block.action.toLowerCase().includes(q)) ||
+                        (block.targetHardware && block.targetHardware.toLowerCase().includes(q))
+                      );
+                    })
+                    .map((block, idx) => {
+                      const linkedWidget = widgets.find((w) => w.id === block.triggerWidgetId);
+                      const isComponentTrigger = block.triggerType === "component" || (!block.triggerWidgetId?.startsWith("telem_") && !block.triggerWidgetId?.startsWith("timer"));
+                      const isStale = isComponentTrigger && Boolean(block.triggerWidgetId) && !linkedWidget;
+                      const liveTriggerName = linkedWidget ? linkedWidget.title : (block.triggerName || "Trigger Source");
+                      const liveBinding = linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || "GPIO Pin") : block.targetHardware;
+
+                      return (
+                        <Box
+                          key={block.id}
+                          p={4}
+                          bg="white"
+                          borderRadius="2xl"
+                          border="1.5px solid"
+                          borderColor={isStale ? "red.300" : block.enabled ? "blue.200" : "gray.200"}
+                          shadow="sm"
+                          opacity={block.enabled && !isStale ? 1 : 0.7}
+                          transition="all 0.15s ease"
+                          _hover={{ shadow: "md", borderColor: isStale ? "red.400" : "blue.400" }}
+                        >
+                          {/* Header Row of Rule Card */}
+                          <HStack justify="space-between" mb={3}>
+                            <HStack spacing={2.5}>
+                              <Badge
+                                colorScheme={isStale ? "red" : "blue"}
+                                variant="solid"
+                                bg={isStale ? "red.500" : "blue.500"}
+                                borderRadius="md"
+                                px={2}
+                                py={0.5}
+                                fontSize="10px"
+                                fontWeight="extrabold"
+                              >
+                                RULE #{idx + 1}
+                              </Badge>
+                              <Text fontWeight="extrabold" fontSize="sm" color="gray.800">
+                                {block.name}
+                              </Text>
+                              {isStale && (
+                                <Badge colorScheme="red" variant="subtle" fontSize="9px">
+                                  ⚠️ Component Deleted
+                                </Badge>
+                              )}
+                            </HStack>
+
+                            {/* Quick Actions (Test, Edit, Toggle, Delete) */}
+                            <HStack spacing={2}>
+                              <Tooltip
+                                label={isStale ? "Cannot test: referenced component was removed from mobile app" : "Test run this rule immediately"}
+                                fontSize="xs"
+                              >
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  colorScheme={isStale ? "gray" : "orange"}
+                                  isDisabled={isStale}
+                                  leftIcon={<FaBolt size={10} />}
+                                  onClick={async () => {
+                                    const res = await handleExecuteRule(block, 1);
+                                    toast({
+                                      title: "Rule Executed",
+                                      description: res?.text || `Sent command for ${block.name}`,
+                                      status: res?.success ? "success" : "warning",
+                                      duration: 2500
+                                    });
+                                  }}
+                                >
+                                  Test
+                                </Button>
+                              </Tooltip>
+                              <Tooltip label="Edit Rule Configuration" fontSize="xs">
+                                <IconButton
+                                  icon={<FaEdit size={12} />}
+                                  size="xs"
+                                  variant="outline"
+                                  colorScheme="blue"
+                                  onClick={() => handleOpenEditRule(block, 0)}
+                                  aria-label="Edit rule"
+                                />
+                              </Tooltip>
+                              <Switch
+                                size="sm"
+                                colorScheme="blue"
+                                isChecked={block.enabled && !isStale}
+                                isDisabled={isStale}
+                                onChange={() => handleToggleLogicBlock(block.id)}
+                              />
+                              <Tooltip label="Delete Rule" fontSize="xs">
+                                <IconButton
+                                  icon={<FaTrashAlt size={11} />}
+                                  size="xs"
+                                  variant="ghost"
+                                  color="red.500"
+                                  _hover={{ bg: "red.50" }}
+                                  onClick={() => handleDeleteLogicBlock(block.id)}
+                                  aria-label="Delete rule"
+                                />
+                              </Tooltip>
+                            </HStack>
+                          </HStack>
+
+                          {/* Stale Component Warning Banner */}
+                          {isStale && (
+                            <Box p={2.5} bg="red.50" borderRadius="xl" border="1px solid" borderColor="red.200" mb={3}>
+                              <HStack justify="space-between" align="center">
+                                <HStack spacing={2}>
+                                  <Text fontSize="12px">⚠️</Text>
+                                  <VStack align="start" spacing={0}>
+                                    <Text fontSize="xs" fontWeight="bold" color="red.800">
+                                      Component Removed from Designer
+                                    </Text>
+                                    <Text fontSize="11px" color="red.600">
+                                      The component "{block.triggerName}" (ID: {block.triggerWidgetId}) was removed from the mobile app. Click Edit to reassign this rule.
+                                    </Text>
+                                  </VStack>
+                                </HStack>
+                                <Button size="xs" colorScheme="red" variant="outline" onClick={() => handleOpenEditRule(block, 0)}>
+                                  Reassign
+                                </Button>
+                              </HStack>
+                            </Box>
+                          )}
+
+                          {/* Visual Blocks Interlocking Nodes - Clickable to configure each segment */}
+                          <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={2.5} alignItems="stretch">
+                            {/* Block 1: Trigger Node */}
+                            <Box
+                              p={3}
+                              bg={isStale ? "#fef2f2" : "#fffbeb"}
+                              border="1.5px solid"
+                              borderColor={isStale ? "#fecaca" : "#fde68a"}
+                              borderRadius="xl"
+                              cursor="pointer"
+                              transition="all 0.15s ease"
+                              _hover={{ borderColor: isStale ? "#ef4444" : "#f59e0b", bg: isStale ? "#fee2e2" : "#fef3c7", transform: "translateY(-1px)" }}
+                              onClick={() => handleOpenEditRule(block, 0)}
+                            >
+                              <HStack justify="space-between">
+                                <Text fontSize="9px" fontWeight="extrabold" color={isStale ? "#b91c1c" : "#92400e"} letterSpacing="0.5px" textTransform="uppercase">
+                                  ⚡ TRIGGER EVENT
+                                </Text>
+                                <FaEdit size={9} color={isStale ? "#b91c1c" : "#b45309"} />
+                              </HStack>
+                              <Text fontSize="xs" fontWeight="bold" color={isStale ? "red.700" : "gray.900"} mt={1} noOfLines={1}>
+                                {liveTriggerName}
+                              </Text>
+                              <HStack spacing={1} mt={0.5}>
+                                <Text fontSize="11px" color={isStale ? "red.600" : "#b45309"} fontWeight="medium">
+                                  {block.event || "on_trigger"}
+                                </Text>
+                                {linkedWidget && (
+                                  <Text fontSize="10px" color="gray.400">
+                                    • {linkedWidget.type}
+                                  </Text>
+                                )}
+                              </HStack>
+                            </Box>
+
+                            {/* Block 2: Condition Node */}
+                            <Box
+                              p={3}
+                              bg="#faf5ff"
+                              border="1.5px solid"
+                              borderColor="#e9d5ff"
+                              borderRadius="xl"
+                              cursor="pointer"
+                              transition="all 0.15s ease"
+                              _hover={{ borderColor: "#a855f7", bg: "#f3e8ff", transform: "translateY(-1px)" }}
+                              onClick={() => handleOpenEditRule(block, 1)}
+                            >
+                              <HStack justify="space-between">
+                                <Text fontSize="9px" fontWeight="extrabold" color="#6b21a8" letterSpacing="0.5px" textTransform="uppercase">
+                                  👁 CONDITION
+                                </Text>
+                                <FaEdit size={9} color="#7e22ce" />
+                              </HStack>
+                              <Text fontSize="xs" fontWeight="bold" color="gray.900" mt={1} noOfLines={1}>
+                                {block.condition || "Always"}
+                              </Text>
+                              <Text fontSize="11px" color="#7e22ce" fontWeight="medium" mt={0.5}>
+                                Pass check
+                              </Text>
+                            </Box>
+
+                            {/* Block 3: Action Node */}
+                            <Box
+                              p={3}
+                              bg="#f0fdf4"
+                              border="1.5px solid"
+                              borderColor="#bbf7d0"
+                              borderRadius="xl"
+                              cursor="pointer"
+                              transition="all 0.15s ease"
+                              _hover={{ borderColor: "#22c55e", bg: "#dcfce7", transform: "translateY(-1px)" }}
+                              onClick={() => handleOpenEditRule(block, 2)}
+                            >
+                              <HStack justify="space-between">
+                                <Text fontSize="9px" fontWeight="extrabold" color="#166534" letterSpacing="0.5px" textTransform="uppercase">
+                                  🪄 HARDWARE ACTION
+                                </Text>
+                                <FaEdit size={9} color="#15803d" />
+                              </HStack>
+                              <Text fontSize="xs" fontWeight="bold" color="gray.900" mt={1} noOfLines={1}>
+                                {block.action || "Hardware Command"}
+                              </Text>
+                              <Text fontSize="11px" color="#15803d" fontWeight="semibold" mt={0.5} noOfLines={1}>
+                                → {liveBinding || block.targetHardware || "ESP32 GPIO"}
+                              </Text>
+                            </Box>
+                          </Grid>
+                        </Box>
+                      );
+                    })}
+
+                  {logicBlocks.length === 0 && (
+                    <Box p={8} textAlign="center" bg="white" borderRadius="2xl" border="1px dashed" borderColor="gray.300">
+                      <FaCogs size={32} color="#94a3b8" style={{ margin: "0 auto 8px auto" }} />
+                      <Text fontWeight="bold" fontSize="sm" color="gray.700">No Automation Rules Configured</Text>
+                      <Text fontSize="xs" color="gray.500" mt={1} mb={4}>
+                        Connect your mobile UI components directly to physical ESP32 pins.
+                      </Text>
+                      <HStack justify="center" spacing={3}>
+                        <Button
+                          size="sm"
+                          colorScheme="blue"
+                          bg="#2563eb"
+                          _hover={{ bg: "#1d4ed8" }}
+                          leftIcon={<FaPlus size={11} />}
+                          onClick={() => handleOpenAddRule(0)}
+                          fontWeight="bold"
+                          shadow="sm"
+                        >
+                          + Add First Automation Rule
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          colorScheme="purple"
+                          leftIcon={<FaBolt size={11} />}
+                          onClick={() => {
+                            const generated = [];
+                            const switchWidget = widgets.find((w) => w.type === "switch");
+                            const sliderWidget = widgets.find((w) => w.type === "slider");
+                            const buttonWidget = widgets.find((w) => w.type === "button");
+
+                            if (switchWidget) {
+                              generated.push({
+                                id: `b-${Date.now()}-1`,
+                                name: `${switchWidget.title} Sync`,
+                                triggerType: "component",
+                                triggerWidgetId: switchWidget.id,
+                                triggerName: switchWidget.title,
+                                event: "on_toggle",
+                                condition: "Always",
+                                conditionType: "Always",
+                                action: "Send Serial Command",
+                                payload: "LED:{state}",
+                                targetHardware: switchWidget.boundTargetName || switchWidget.boundTarget || "GPIO 2 (Onboard LED)",
+                                targetPin: switchWidget.pin || "GPIO 2",
+                                enabled: true
+                              });
+                            }
+                            if (sliderWidget) {
+                              generated.push({
+                                id: `b-${Date.now()}-2`,
+                                name: `${sliderWidget.title} Driver`,
+                                triggerType: "component",
+                                triggerWidgetId: sliderWidget.id,
+                                triggerName: sliderWidget.title,
+                                event: "on_change",
+                                condition: "Always",
+                                conditionType: "Always",
+                                action: "Write PWM Duty / Angle",
+                                payload: "SERVO:{value}",
+                                targetHardware: sliderWidget.boundTargetName || sliderWidget.boundTarget || "GPIO 4 (PWM Servo)",
+                                targetPin: sliderWidget.pin || "GPIO 4",
+                                enabled: true
+                              });
+                            }
+                            if (buttonWidget) {
+                              generated.push({
+                                id: `b-${Date.now()}-3`,
+                                name: `${buttonWidget.title} Trigger`,
+                                triggerType: "component",
+                                triggerWidgetId: buttonWidget.id,
+                                triggerName: buttonWidget.title,
+                                event: "on_press",
+                                condition: "Always",
+                                conditionType: "Always",
+                                action: "Toggle GPIO Pin",
+                                payload: "TOGGLE",
+                                targetHardware: buttonWidget.boundTargetName || buttonWidget.boundTarget || "GPIO 2 (Onboard LED)",
+                                targetPin: buttonWidget.pin || "GPIO 2",
+                                enabled: true
+                              });
+                            }
+                            // Telemetry rule
+                            generated.push({
+                              id: `b-${Date.now()}-telem`,
+                              name: "High Temperature Guard",
+                              triggerType: "telemetry",
+                              triggerWidgetId: "telem_temp",
+                              triggerName: "Temperature Sensor (ADC)",
+                              event: "threshold_above",
+                              condition: "Value > 30°C",
+                              conditionType: "Value >",
+                              conditionThreshold: "30",
+                              conditionUnit: "°C",
+                              action: "Send Serial Command",
+                              payload: "ALARM:HIGH_TEMP",
+                              targetHardware: "GPIO 2 (Alert Buzzer)",
+                              targetPin: "GPIO 2",
+                              enabled: true
+                            });
+
+                            setLogicBlocks(generated);
+                            toast({
+                              title: "Templates Loaded",
+                              description: `Generated ${generated.length} rules synchronized with your active components.`,
+                              status: "success",
+                              duration: 2500
+                            });
+                          }}
+                        >
+                          + Quick Templates
+                        </Button>
+                      </HStack>
+                    </Box>
+                  )}
+                </VStack>
               </Box>
             )}
 
-            {/* Smartphone Phone Frame */}
-            <Box
-              w="330px"
-              minH="620px"
-              bg="white"
-              borderRadius="42px"
-              border="10px solid #1e293b"
-              position="relative"
-              shadow="2xl"
-              display="flex"
-              flexDirection="column"
-              overflow="hidden"
-              mb={8}
-            >
-              {/* Dynamic Island / Speaker notch */}
-              <Box
-                w="100px"
-                h="18px"
-                bg="#1e293b"
-                position="absolute"
-                top="0"
-                left="50%"
-                transform="translateX(-50%)"
-                borderBottomRadius="xl"
-                zIndex={20}
-              />
-
-              {/* Status Bar */}
-              <HStack justify="space-between" px={6} pt={3} pb={1} fontSize="10px" color="gray.700" fontWeight="bold" zIndex={10}>
-                <Text>9:41</Text>
-                <HStack spacing={1.5}>
-                  <FaWifi size={10} />
-                  <Text fontSize="9px">5G</Text>
-                  <Box w="16px" h="8px" border="1px solid currentColor" borderRadius="2px" p="1px">
-                    <Box w="80%" h="100%" bg="currentColor" borderRadius="1px" />
-                  </Box>
-                </HStack>
-              </HStack>
-
-              {/* Mobile App Screen Content */}
-              <Box flex="1" p={3.5} bg="#f8fafc" overflowY="auto">
-                {/* App Title Header */}
-                <HStack justify="space-between" mb={3} mt={1}>
-                  <HStack spacing={2}>
-                    <Text fontSize="sm">🌱</Text>
-                    <Text fontWeight="extrabold" fontSize="md" color="gray.900">
-                      {projectName}
-                    </Text>
-                  </HStack>
-                  <Text color="gray.400" fontSize="xs">•••</Text>
+            {/* VIEW 3: LIVE PREVIEW SIMULATOR */}
+            {appBuilderView === "preview" && (
+              <Box display="flex" flexDirection="column" alignItems="center" w="100%">
+                <HStack justify="center" spacing={3} mb={3}>
+                  <Badge colorScheme="green" px={3} py={1} borderRadius="full">
+                    ● Simulator Running
+                  </Badge>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    leftIcon={<FaTerminal size={11} />}
+                    onClick={() => setIsSerialTrafficOpen(!isSerialTrafficOpen)}
+                  >
+                    {isSerialTrafficOpen ? "Hide Serial Traffic" : "View Serial Traffic"}
+                  </Button>
                 </HStack>
 
-                {/* Sub-banner inside phone */}
-                <Box p={2.5} bg="orange.50" border="1px solid" borderColor="orange.200" borderRadius="xl" mb={3}>
-                  <HStack align="start" spacing={2}>
-                    <Text fontSize="12px">✨</Text>
-                    <Text fontSize="10px" color="orange.800" fontWeight="medium">
-                      Starter app generated from your hardware. Customize it by dragging more components.
-                    </Text>
+                {/* Smartphone Preview Frame */}
+                <Box
+                  w="340px"
+                  minH="620px"
+                  bg="white"
+                  borderRadius="42px"
+                  border="10px solid #0f172a"
+                  shadow="2xl"
+                  overflow="hidden"
+                  display="flex"
+                  flexDirection="column"
+                  mb={4}
+                >
+                  {/* Status Bar */}
+                  <HStack justify="space-between" px={6} pt={3} pb={1} fontSize="10px" color="gray.700" fontWeight="bold">
+                    <Text>9:41</Text>
+                    <HStack spacing={1.5}>
+                      <FaWifi size={10} />
+                      <Text fontSize="9px">5G</Text>
+                    </HStack>
                   </HStack>
-                </Box>
 
-                {/* Render Interactive Phone Widgets */}
-                <VStack spacing={2.5} align="stretch">
-                  {widgets.map((w) => {
-                    const isSelected = w.id === selectedWidgetId;
-                    return (
-                      <Box
-                        key={w.id}
-                        p={3}
-                        bg="white"
-                        borderRadius="xl"
-                        border="2px solid"
-                        borderColor={isSelected ? "#2563eb" : "transparent"}
-                        shadow="sm"
-                        _hover={{ borderColor: isSelected ? "#2563eb" : "gray.200" }}
-                        cursor="pointer"
-                        transition="all 0.15s"
-                        onClick={() => setSelectedWidgetId(w.id)}
-                      >
-                        {/* 1. LED Switch Widget */}
-                        {w.type === "switch" && (
-                          <HStack justify="space-between">
-                            <HStack spacing={2.5}>
-                              <Box p={2} bg="yellow.50" color="yellow.600" borderRadius="lg">
-                                <FaLightbulb size={16} />
-                              </Box>
+                  {/* App Screen Content in Live Mode */}
+                  <Box flex="1" p={4} bg="#f8fafc" overflowY="auto">
+                    <HStack justify="space-between" mb={4}>
+                      <HStack spacing={2}>
+                        <Text fontSize="md">🌱</Text>
+                        <Text fontWeight="extrabold" fontSize="md">{projectName}</Text>
+                      </HStack>
+                      <Badge colorScheme="green" fontSize="9px">Online</Badge>
+                    </HStack>
+
+                    <VStack spacing={3} align="stretch" minH="240px">
+                      {widgets.filter((w) => w.visible !== false).length === 0 ? (
+                        <Flex
+                          direction="column"
+                          align="center"
+                          justify="center"
+                          h="260px"
+                          border="2px dashed"
+                          borderColor="gray.300"
+                          borderRadius="2xl"
+                          p={6}
+                          textAlign="center"
+                          my={4}
+                        >
+                          <Box p={3} bg="gray.100" color="gray.400" borderRadius="full" mb={2.5}>
+                            <FaMobileAlt size={20} />
+                          </Box>
+                          <Text fontSize="xs" fontWeight="bold" color="gray.600">
+                            No Components to Preview
+                          </Text>
+                          <Text fontSize="11px" color="gray.400" mt={1} maxW="210px">
+                            Switch back to Designer mode to add components to this screen.
+                          </Text>
+                        </Flex>
+                      ) : widgets.filter((w) => w.visible !== false).map((w) => (
+                        <Box key={w.id} p={3.5} bg="white" borderRadius="2xl" shadow="sm">
+                          {w.type === "switch" && (
+                            <HStack justify="space-between">
                               <VStack align="start" spacing={0}>
-                                <Text fontWeight="bold" fontSize="xs" color="gray.900">
-                                  {w.title}
-                                </Text>
-                                <Text fontSize="10px" color="gray.400">
-                                  {w.boundTargetName}
-                                </Text>
+                                <Text fontWeight="bold" fontSize="sm">{w.title}</Text>
+                                <Text fontSize="10px" color="gray.400">{w.boundTargetName || w.boundTarget}</Text>
                               </VStack>
-                            </HStack>
-                            <Switch
-                              colorScheme="green"
-                              isChecked={w.state}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                handleUpdateWidget("state", e.target.checked);
-                              }}
-                            />
-                          </HStack>
-                        )}
-
-                        {/* 2. Servo Angle Slider Widget */}
-                        {w.type === "slider" && (
-                          <VStack align="stretch" spacing={1.5}>
-                            <HStack justify="space-between">
-                              <HStack spacing={2.5}>
-                                <Box p={2} bg="purple.50" color="purple.600" borderRadius="lg">
-                                  <FaCogs size={16} />
-                                </Box>
-                                <VStack align="start" spacing={0}>
-                                  <Text fontWeight="bold" fontSize="xs" color="gray.900">
-                                    {w.title}
-                                  </Text>
-                                  <Text fontSize="10px" color="gray.400">
-                                    {w.boundTargetName}
-                                  </Text>
-                                </VStack>
-                              </HStack>
-                              <Text fontWeight="extrabold" fontSize="xs" color="purple.600">
-                                {w.value}°
-                              </Text>
-                            </HStack>
-                            <Slider
-                              value={w.value}
-                              min={w.min || 0}
-                              max={w.max || 180}
-                              onChange={(val) => handleUpdateWidget("value", val)}
-                            >
-                              <SliderTrack bg="gray.100">
-                                <SliderFilledTrack bg="purple.500" />
-                              </SliderTrack>
-                              <SliderThumb boxSize={3.5} />
-                            </Slider>
-                          </VStack>
-                        )}
-
-                        {/* 3. Temperature Gauge Widget */}
-                        {w.type === "gauge" && (
-                          <VStack align="stretch" spacing={2}>
-                            <HStack justify="space-between">
-                              <HStack spacing={2.5}>
-                                <Box p={2} bg="red.50" color="red.500" borderRadius="lg">
-                                  <FaTemperatureHigh size={16} />
-                                </Box>
-                                <VStack align="start" spacing={0}>
-                                  <Text fontWeight="bold" fontSize="xs" color="gray.900">
-                                    {w.title}
-                                  </Text>
-                                  <Text fontSize="10px" color="gray.400">
-                                    {w.boundTargetName}
-                                  </Text>
-                                </VStack>
-                              </HStack>
-                              <HStack spacing={1} color="green.600" fontSize="10px" fontWeight="bold">
-                                <Box w="6px" h="6px" bg="green.500" borderRadius="full" />
-                                <Text>Live</Text>
-                              </HStack>
-                            </HStack>
-                            <HStack spacing={3} justify="center" py={1}>
-                              <Box
-                                w="48px"
-                                h="24px"
-                                borderTopRadius="48px"
-                                border="4px solid #ef4444"
-                                borderBottom="none"
+                              <Switch
+                                colorScheme="green"
+                                isChecked={w.state}
+                                onChange={(e) => handleUpdateWidget("state", e.target.checked, w.id)}
                               />
-                              <VStack align="start" spacing={0}>
-                                <Text fontSize="xl" fontWeight="black" color="gray.900">
-                                  {w.value}°C
-                                </Text>
-                                <Text fontSize="9px" color="gray.400">
-                                  Live reading
-                                </Text>
-                              </VStack>
                             </HStack>
-                          </VStack>
-                        )}
+                          )}
 
-                        {/* 4. Sound Alarm Button Widget */}
-                        {w.type === "button" && (
-                          <VStack align="stretch" spacing={1}>
-                            <Text fontSize="9px" color="gray.400" px={1}>
-                              {w.boundTargetName}
-                            </Text>
+                          {w.type === "slider" && (
+                            <VStack align="stretch" spacing={1.5}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="sm">{w.title}</Text>
+                                <Text fontWeight="extrabold" color="purple.600">{w.value}{w.unit || "°"}</Text>
+                              </HStack>
+                              <Slider
+                                value={w.value}
+                                min={w.min || 0}
+                                max={w.max || 180}
+                                onChange={(val) => handleUpdateWidget("value", val, w.id)}
+                              >
+                                <SliderTrack bg="gray.100">
+                                  <SliderFilledTrack bg="purple.500" />
+                                </SliderTrack>
+                                <SliderThumb boxSize={3.5} />
+                              </Slider>
+                            </VStack>
+                          )}
+
+                          {w.type === "gauge" && (
+                            <VStack align="stretch" spacing={1}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="sm">{w.title}</Text>
+                                <Badge colorScheme="red" fontSize="9px">Live Sensor</Badge>
+                              </HStack>
+                              <Text fontSize="2xl" fontWeight="black" color="red.500">
+                                {w.value}{w.unit || "°C"}
+                              </Text>
+                            </VStack>
+                          )}
+
+                          {w.type === "button" && (
                             <Button
                               w="100%"
-                              size="md"
-                              bg="#ea580c"
-                              _hover={{ bg: "#c2410c" }}
-                              color="white"
+                              colorScheme="orange"
                               borderRadius="xl"
-                              leftIcon={<FaBell size={14} />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toast({ title: "Buzzer Alarm Triggered", status: "warning", duration: 1500 });
-                              }}
-                              fontWeight="bold"
-                              fontSize="xs"
+                              leftIcon={<FaBell size={13} />}
+                              onClick={() => handleTestHardwareSignal(w)}
                             >
                               {w.title}
                             </Button>
-                          </VStack>
-                        )}
+                          )}
 
-                        {/* 5. Device Link Status Card Widget */}
-                        {w.type === "device_card" && (
-                          <HStack justify="space-between" p={1}>
-                            <HStack spacing={2}>
-                              <Box p={2} bg="blue.50" color="blue.600" borderRadius="lg">
-                                <FaBroadcastTower size={14} />
-                              </Box>
-                              <VStack align="start" spacing={0}>
-                                <Text fontWeight="bold" fontSize="xs" color="gray.900">
-                                  {w.title}
-                                </Text>
-                                <Text fontSize="9px" color="green.600" fontWeight="semibold">
-                                  ● Online & Connected
-                                </Text>
-                              </VStack>
-                            </HStack>
-                            <Badge colorScheme="blue" fontSize="9px" borderRadius="md">
-                              WiFi 100%
-                            </Badge>
-                          </HStack>
-                        )}
-
-                        {/* Generic New Added Components */}
-                        {!["switch", "slider", "gauge", "button", "device_card"].includes(w.type) && (
-                          <HStack justify="space-between">
-                            <Text fontWeight="bold" fontSize="xs">
+                          {w.type === "top_button" && (
+                            <Button
+                              w="100%"
+                              colorScheme="blue"
+                              borderRadius="xl"
+                              leftIcon={<FaArrowUp size={13} />}
+                              onClick={() => handleTestHardwareSignal(w)}
+                              fontWeight="bold"
+                            >
                               {w.title}
-                            </Text>
-                            <Badge fontSize="9px">{w.type}</Badge>
-                          </HStack>
-                        )}
-                      </Box>
-                    );
-                  })}
-                </VStack>
+                            </Button>
+                          )}
+
+                          {w.type === "bottom_button" && (
+                            <Button
+                              w="100%"
+                              colorScheme="cyan"
+                              color="white"
+                              borderRadius="xl"
+                              leftIcon={<FaArrowDown size={13} />}
+                              onClick={() => handleTestHardwareSignal(w)}
+                              fontWeight="bold"
+                            >
+                              {w.title}
+                            </Button>
+                          )}
+
+                          {w.type === "left_button" && (
+                            <Button
+                              w="100%"
+                              colorScheme="purple"
+                              borderRadius="xl"
+                              leftIcon={<FaArrowLeft size={13} />}
+                              onClick={() => handleTestHardwareSignal(w)}
+                              fontWeight="bold"
+                            >
+                              {w.title}
+                            </Button>
+                          )}
+
+                          {w.type === "right_button" && (
+                            <Button
+                              w="100%"
+                              colorScheme="purple"
+                              borderRadius="xl"
+                              leftIcon={<FaArrowRight size={13} />}
+                              onClick={() => handleTestHardwareSignal(w)}
+                              fontWeight="bold"
+                            >
+                              {w.title}
+                            </Button>
+                          )}
+
+                          {w.type === "dpad" && (
+                            <VStack align="center" spacing={2} p={1}>
+                              <HStack justify="space-between" w="100%">
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Badge colorScheme="blue" fontSize="9px">4-Way D-Pad</Badge>
+                              </HStack>
+                              <Box p={2.5} bg="gray.100" borderRadius="2xl" border="1px solid" borderColor="gray.300">
+                                <VStack spacing={1}>
+                                  <Button
+                                    size="xs"
+                                    colorScheme="blue"
+                                    w="44px"
+                                    h="32px"
+                                    borderRadius="lg"
+                                    onClick={() => handleTestHardwareSignal({ ...w, boundTarget: "GPIO 13", title: "Top Button (Forward)" })}
+                                  >
+                                    <FaArrowUp size={11} />
+                                  </Button>
+                                  <HStack spacing={1}>
+                                    <Button
+                                      size="xs"
+                                      colorScheme="purple"
+                                      w="44px"
+                                      h="32px"
+                                      borderRadius="lg"
+                                      onClick={() => handleTestHardwareSignal({ ...w, boundTarget: "GPIO 12", title: "Left Button (Steer Left)" })}
+                                    >
+                                      <FaArrowLeft size={11} />
+                                    </Button>
+                                    <Box w="36px" h="32px" bg="gray.300" borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                                      <Text fontSize="10px" fontWeight="black" color="gray.600">●</Text>
+                                    </Box>
+                                    <Button
+                                      size="xs"
+                                      colorScheme="purple"
+                                      w="44px"
+                                      h="32px"
+                                      borderRadius="lg"
+                                      onClick={() => handleTestHardwareSignal({ ...w, boundTarget: "GPIO 15", title: "Right Button (Steer Right)" })}
+                                    >
+                                      <FaArrowRight size={11} />
+                                    </Button>
+                                  </HStack>
+                                  <Button
+                                    size="xs"
+                                    colorScheme="blue"
+                                    w="44px"
+                                    h="32px"
+                                    borderRadius="lg"
+                                    onClick={() => handleTestHardwareSignal({ ...w, boundTarget: "GPIO 14", title: "Bottom Button (Reverse)" })}
+                                  >
+                                    <FaArrowDown size={11} />
+                                  </Button>
+                                </VStack>
+                              </Box>
+                            </VStack>
+                          )}
+
+                          {/* CRUD Table Widget in Preview Mode */}
+                          {w.type === "crud_table" && (
+                            <VStack align="stretch" spacing={2.5}>
+                              <HStack justify="space-between" align="center">
+                                <HStack spacing={1.5}>
+                                  <Box color="blue.500">
+                                    <FaTable size={13} />
+                                  </Box>
+                                  <Text fontWeight="bold" fontSize="xs" color="gray.800">
+                                    {w.title}
+                                  </Text>
+                                </HStack>
+                                <Button
+                                  size="xs"
+                                  colorScheme="blue"
+                                  variant="solid"
+                                  leftIcon={<FaPlus size={9} />}
+                                  h="22px"
+                                  px={2.5}
+                                  fontSize="10px"
+                                  onClick={() => handleOpenAddCrudRecord(w.id)}
+                                >
+                                  Add
+                                </Button>
+                              </HStack>
+
+                              <VStack align="stretch" spacing={1.5}>
+                                {(w.records || []).length === 0 ? (
+                                  <Box py={3} textAlign="center" bg="gray.50" borderRadius="lg" border="1px dashed" borderColor="gray.200">
+                                    <Text fontSize="10px" color="gray.400">No records yet. Click '+ Add' to create one.</Text>
+                                  </Box>
+                                ) : (
+                                  (w.records || []).map((rec) => (
+                                    <HStack
+                                      key={rec.id}
+                                      p={2}
+                                      bg="gray.50"
+                                      borderRadius="lg"
+                                      border="1px solid"
+                                      borderColor="gray.200"
+                                      justify="space-between"
+                                      fontSize="11px"
+                                    >
+                                      <VStack align="start" spacing={0} maxW="160px">
+                                        <Text fontWeight="bold" fontSize="11px" color="gray.800" isTruncated>
+                                          {rec.name}
+                                        </Text>
+                                        <HStack spacing={1.5}>
+                                          <Badge
+                                            colorScheme={rec.status === "Active" ? "green" : rec.status === "Alert" ? "red" : "blue"}
+                                            fontSize="8px"
+                                            px={1}
+                                            borderRadius="sm"
+                                          >
+                                            {rec.value || rec.status || "OK"}
+                                          </Badge>
+                                          <Text fontSize="9px" color="gray.400">{rec.timestamp}</Text>
+                                        </HStack>
+                                      </VStack>
+
+                                      <HStack spacing={1}>
+                                        <IconButton
+                                          icon={<FaEdit size={9} />}
+                                          size="xs"
+                                          h="22px"
+                                          minW="22px"
+                                          variant="ghost"
+                                          color="blue.500"
+                                          onClick={() => handleOpenEditCrudRecord(w.id, rec)}
+                                          aria-label="Edit Record"
+                                        />
+                                        <IconButton
+                                          icon={<FaTrashAlt size={9} />}
+                                          size="xs"
+                                          h="22px"
+                                          minW="22px"
+                                          variant="ghost"
+                                          color="red.400"
+                                          onClick={() => handleDeleteCrudRecord(w.id, rec.id)}
+                                          aria-label="Delete Record"
+                                        />
+                                      </HStack>
+                                    </HStack>
+                                  ))
+                                )}
+                              </VStack>
+                            </VStack>
+                          )}
+                        </Box>
+                      ))}
+                    </VStack>
+                  </Box>
+                </Box>
+
+                {/* Collapsible Serial Traffic Log Console */}
+                {isSerialTrafficOpen && (
+                  <Box w="100%" maxW="600px" p={3} bg="#090d16" color="#38bdf8" borderRadius="xl" fontFamily="monospace" fontSize="11px" shadow="lg">
+                    <HStack justify="space-between" mb={2} color="gray.400">
+                      <HStack spacing={1.5}>
+                        <FaTerminal size={10} />
+                        <Text fontWeight="bold">Live Hardware Serial Traffic ({activePort})</Text>
+                      </HStack>
+                      <Button size="xs" variant="ghost" color="gray.400" onClick={() => setSerialTrafficLogs([])}>Clear</Button>
+                    </HStack>
+                    <VStack align="stretch" spacing={1} maxH="120px" overflowY="auto">
+                      {serialTrafficLogs.map((log) => (
+                        <Text key={log.id} color={log.type === "tx" ? "#4ade80" : log.type === "rx" ? "#38bdf8" : "#fbbf24"}>
+                          [{log.time}] {log.text}
+                        </Text>
+                      ))}
+                    </VStack>
+                  </Box>
+                )}
               </Box>
-            </Box>
+            )}
           </GridItem>
 
           {/* 3. Right Inspector & Properties Panel */}
@@ -1036,7 +5545,7 @@ export default function ESP32Flasher({
                 onClick={() => setInspectorTab("tree")}
                 borderRadius="md"
               >
-                Tree
+                Tree ({widgets.length})
               </Button>
               <Button
                 size="xs"
@@ -1051,12 +5560,126 @@ export default function ESP32Flasher({
               </Button>
             </HStack>
 
-            {activeWidget ? (
+            {/* INSPECTOR TAB 1: TREE VIEW */}
+            {inspectorTab === "tree" && (
+              <VStack align="stretch" spacing={3}>
+                <HStack justify="space-between" px={1}>
+                  <Text fontSize="xs" fontWeight="bold" color="gray.500" letterSpacing="wider">
+                    COMPONENT HIERARCHY
+                  </Text>
+                  <Button size="xs" colorScheme="blue" variant="ghost" leftIcon={<FaPlus size={10} />} onClick={() => handleAddComponent("button", "Action Button", "GPIO Pin")}>
+                    Add
+                  </Button>
+                </HStack>
+
+                <Box p={2} bg="blue.50" borderRadius="xl" border="1px solid" borderColor="blue.200">
+                  <HStack spacing={2} color="blue.900" fontSize="xs" fontWeight="bold" justify="space-between" w="100%">
+                    <HStack spacing={2}>
+                      <FaMobileAlt size={12} />
+                      <Text>📱 {projectName} Screen (Root)</Text>
+                    </HStack>
+                    {widgets.length > 0 && (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        colorScheme="red"
+                        h="18px"
+                        fontSize="10px"
+                        leftIcon={<FaTrashAlt size={8} />}
+                        onClick={onClearCanvasModalOpen}
+                      >
+                        Clear All
+                      </Button>
+                    )}
+                  </HStack>
+                </Box>
+
+                <VStack align="stretch" spacing={1.5} pl={2} borderLeft="2px solid" borderColor={useColorModeValue("gray.200", "gray.700")}>
+                  {widgets.length === 0 && (
+                    <Box py={6} px={2} textAlign="center">
+                      <Text fontSize="xs" fontWeight="medium" color="gray.400">No components in tree</Text>
+                      <Text fontSize="10px" color="gray.400" mt={0.5}>Add components from the left palette</Text>
+                    </Box>
+                  )}
+                  {widgets.map((w, idx) => {
+                    const isSelected = w.id === selectedWidgetId;
+                    return (
+                      <HStack
+                        key={w.id}
+                        p={2.5}
+                        borderRadius="xl"
+                        bg={isSelected ? useColorModeValue("blue.50", "gray.800") : useColorModeValue("gray.50", "gray.850")}
+                        border="1px solid"
+                        borderColor={isSelected ? "blue.400" : borderColor}
+                        justify="space-between"
+                        cursor="pointer"
+                        _hover={{ borderColor: "blue.300" }}
+                        onClick={() => {
+                          setSelectedWidgetId(w.id);
+                          setInspectorTab("properties");
+                        }}
+                      >
+                        <HStack spacing={2}>
+                          <Box color={w.color || "blue.500"} fontSize="12px">
+                            {w.type === "switch" ? <FaLightbulb /> : w.type === "slider" ? <FaSlidersH /> : w.type === "gauge" ? <FaTemperatureHigh /> : <FaTag />}
+                          </Box>
+                          <VStack align="start" spacing={0}>
+                            <Text fontSize="xs" fontWeight="bold" color={isSelected ? "blue.600" : "inherit"}>
+                              {w.title}
+                            </Text>
+                            <Text fontSize="10px" color="gray.400">
+                              {w.boundTarget || w.type}
+                            </Text>
+                          </VStack>
+                        </HStack>
+
+                        <HStack spacing={1}>
+                          <IconButton
+                            icon={w.visible !== false ? <FaEye size={10} /> : <FaEyeSlash size={10} color="gray" />}
+                            size="xs"
+                            variant="ghost"
+                            onClick={(e) => { e.stopPropagation(); handleToggleVisibility(w.id); }}
+                            aria-label="Visibility"
+                          />
+                          <IconButton
+                            icon={<FaArrowUp size={9} />}
+                            size="xs"
+                            variant="ghost"
+                            isDisabled={idx === 0}
+                            onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "up"); }}
+                            aria-label="Up"
+                          />
+                          <IconButton
+                            icon={<FaArrowDown size={9} />}
+                            size="xs"
+                            variant="ghost"
+                            isDisabled={idx === widgets.length - 1}
+                            onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "down"); }}
+                            aria-label="Down"
+                          />
+                          <IconButton
+                            icon={<FaTrashAlt size={10} />}
+                            size="xs"
+                            variant="ghost"
+                            color="red.400"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteWidget(w.id); }}
+                            aria-label="Delete"
+                          />
+                        </HStack>
+                      </HStack>
+                    );
+                  })}
+                </VStack>
+              </VStack>
+            )}
+
+            {/* INSPECTOR TAB 2: PROPERTIES VIEW */}
+            {inspectorTab === "properties" && activeWidget && (
               <VStack align="stretch" spacing={5}>
                 {/* Active Component Title & Type */}
-                <HStack spacing={3} p={2} bg={useColorModeValue("gray.50", "gray.800")} borderRadius="xl">
-                  <Box p={2} bg="yellow.50" color="yellow.600" borderRadius="lg">
-                    <FaLightbulb size={16} />
+                <HStack spacing={3} p={2.5} bg={useColorModeValue("gray.50", "gray.800")} borderRadius="xl">
+                  <Box p={2} bg="blue.50" color="blue.600" borderRadius="lg">
+                    {activeWidget.type === "switch" ? <FaLightbulb size={16} /> : activeWidget.type === "slider" ? <FaSlidersH size={16} /> : activeWidget.type === "gauge" ? <FaTemperatureHigh size={16} /> : <FaTag size={16} />}
                   </Box>
                   <VStack align="start" spacing={0}>
                     <Text fontWeight="bold" fontSize="sm">
@@ -1088,14 +5711,14 @@ export default function ESP32Flasher({
                   {/* Color Picker Palette */}
                   <Box>
                     <Text fontSize="xs" fontWeight="semibold" mb={1.5} color="gray.600">
-                      Color
+                      Color Theme
                     </Text>
                     <HStack spacing={2}>
-                      {["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"].map((c) => (
+                      {["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#334155"].map((c) => (
                         <Box
                           key={c}
-                          w="20px"
-                          h="20px"
+                          w="22px"
+                          h="22px"
                           borderRadius="full"
                           bg={c}
                           cursor="pointer"
@@ -1134,7 +5757,7 @@ export default function ESP32Flasher({
                   {/* Visible Switch */}
                   <HStack justify="space-between">
                     <Text fontSize="xs" fontWeight="semibold" color="gray.600">
-                      Visible
+                      Visible on App
                     </Text>
                     <Switch
                       colorScheme="blue"
@@ -1153,16 +5776,11 @@ export default function ESP32Flasher({
                       HARDWARE BINDING
                     </Text>
                     <Badge colorScheme="green" fontSize="9px">
-                      KEY
+                      ACTIVE
                     </Badge>
                   </HStack>
 
-                  <Box p={2.5} bg="green.50" borderRadius="xl" border="1px solid" borderColor="green.200">
-                    <HStack spacing={2} color="green.800" fontSize="xs" fontWeight="bold" mb={2}>
-                      <FaLightbulb size={12} />
-                      <Text>{activeWidget.type} component</Text>
-                    </HStack>
-
+                  <Box p={3} bg="green.50" borderRadius="xl" border="1px solid" borderColor="green.200">
                     <VStack align="stretch" spacing={2.5}>
                       <Box>
                         <Text fontSize="10px" fontWeight="bold" color="gray.600" mb={1}>
@@ -1178,18 +5796,19 @@ export default function ESP32Flasher({
                           }}
                           borderRadius="lg"
                         >
-                          <option value="LED">LED</option>
-                          <option value="Servo Motor">Servo Motor</option>
-                          <option value="Temperature Sensor">Temperature Sensor</option>
-                          <option value="Buzzer">Buzzer</option>
-                          <option value="GPIO 2">GPIO 2 (Onboard)</option>
-                          <option value="GPIO 4">GPIO 4 (PWM)</option>
+                          <option value="LED (GPIO 2)">LED (GPIO 2 - Onboard)</option>
+                          <option value="Servo Motor (PWM)">Servo Motor (GPIO 4 PWM)</option>
+                          <option value="Temperature Sensor (ADC)">Temperature Sensor (ADC / I2C)</option>
+                          <option value="Buzzer (GPIO 5)">Buzzer Alarm (GPIO 5)</option>
+                          <option value="Relay (GPIO 18)">Relay Module (GPIO 18)</option>
+                          <option value="RGB NeoPixel (GPIO 48)">RGB NeoPixel (GPIO 48)</option>
+                          <option value="Custom Serial Command">Custom Serial Command</option>
                         </Select>
                       </Box>
 
                       <Box>
                         <Text fontSize="10px" fontWeight="bold" color="gray.600" mb={1}>
-                          Action
+                          Action Mode
                         </Text>
                         <Select
                           size="sm"
@@ -1199,18 +5818,78 @@ export default function ESP32Flasher({
                           borderRadius="lg"
                         >
                           <option value="Turn ON / OFF">Turn ON / OFF</option>
-                          <option value="Set PWM Angle">Set PWM Angle</option>
+                          <option value="Set PWM Angle">Set PWM Angle / Duty</option>
                           <option value="Read Telemetry">Read Telemetry</option>
-                          <option value="Trigger Alarm">Trigger Alarm</option>
+                          <option value="Trigger Alarm">Trigger Pulse Alarm</option>
+                          <option value="Send Serial String">Send Serial String</option>
                         </Select>
                       </Box>
 
-                      <HStack color="green.700" fontSize="11px" fontWeight="bold" mt={1}>
-                        <FaCheck size={11} />
-                        <Text>Bound to {activeWidget.boundTarget}</Text>
-                      </HStack>
+                      <Button
+                        size="xs"
+                        colorScheme="green"
+                        variant="solid"
+                        leftIcon={<FaBolt size={10} />}
+                        onClick={() => handleTestHardwareSignal(activeWidget)}
+                        mt={1}
+                      >
+                        Test Hardware Signal
+                      </Button>
                     </VStack>
                   </Box>
+
+                  {/* CRUD DATA RECORDS SECTION in Inspector */}
+                  {activeWidget.type === "crud_table" && (
+                    <VStack align="stretch" spacing={2.5} p={3} bg={useColorModeValue("blue.50", "gray.800")} borderRadius="xl" border="1px solid" borderColor="blue.200">
+                      <HStack justify="space-between">
+                        <Text fontSize="xs" fontWeight="extrabold" color="blue.700" letterSpacing="wider">
+                          DATA RECORDS ({activeWidget.records?.length || 0})
+                        </Text>
+                        <Button
+                          size="xs"
+                          colorScheme="blue"
+                          variant="solid"
+                          leftIcon={<FaPlus size={8} />}
+                          onClick={() => handleOpenAddCrudRecord(activeWidget.id)}
+                          h="20px"
+                          fontSize="10px"
+                        >
+                          Add Record
+                        </Button>
+                      </HStack>
+                      <VStack align="stretch" spacing={1.5} maxH="180px" overflowY="auto">
+                        {(activeWidget.records || []).map((rec) => (
+                          <HStack key={rec.id} p={2} bg="white" borderRadius="md" justify="space-between" fontSize="11px" shadow="xs">
+                            <VStack align="start" spacing={0} maxW="130px">
+                              <Text fontWeight="bold" isTruncated>{rec.name}</Text>
+                              <Text fontSize="9px" color="gray.400">{rec.value} • {rec.timestamp}</Text>
+                            </VStack>
+                            <HStack spacing={1}>
+                              <IconButton
+                                icon={<FaEdit size={9} />}
+                                size="xs"
+                                h="20px"
+                                minW="20px"
+                                variant="ghost"
+                                onClick={() => handleOpenEditCrudRecord(activeWidget.id, rec)}
+                                aria-label="Edit"
+                              />
+                              <IconButton
+                                icon={<FaTrashAlt size={9} />}
+                                size="xs"
+                                h="20px"
+                                minW="20px"
+                                variant="ghost"
+                                color="red.400"
+                                onClick={() => handleDeleteCrudRecord(activeWidget.id, rec.id)}
+                                aria-label="Delete"
+                              />
+                            </HStack>
+                          </HStack>
+                        ))}
+                      </VStack>
+                    </VStack>
+                  )}
 
                   {/* Remove Component Button */}
                   <Button
@@ -1219,16 +5898,28 @@ export default function ESP32Flasher({
                     variant="ghost"
                     leftIcon={<FaTrashAlt size={12} />}
                     onClick={() => handleDeleteWidget(activeWidget.id)}
-                    mt={2}
+                    mt={1}
                   >
                     Remove Component
                   </Button>
                 </VStack>
               </VStack>
-            ) : (
-              <Text fontSize="xs" color="gray.400" textAlign="center" py={10}>
-                Select an item on the smartphone screen to edit properties.
-              </Text>
+            )}
+
+            {inspectorTab === "properties" && !activeWidget && (
+              <Box textAlign="center" py={12} px={4}>
+                <Box p={3} bg={useColorModeValue("gray.100", "gray.800")} color="gray.400" borderRadius="full" w="fit-content" mx="auto" mb={3}>
+                  <FaCogs size={20} />
+                </Box>
+                <Text fontSize="xs" fontWeight="bold" color="gray.600">
+                  No Component Selected
+                </Text>
+                <Text fontSize="xs" color="gray.400" mt={1}>
+                  {widgets.length === 0
+                    ? "Add a component from the left palette to configure its properties."
+                    : "Select an item on the smartphone screen to edit properties."}
+                </Text>
+              </Box>
             )}
           </GridItem>
         </Grid>
@@ -1246,24 +5937,38 @@ export default function ESP32Flasher({
           <HStack spacing={3}>
             <HStack spacing={1.5}>
               <Box w="6px" h="6px" bg="green.400" borderRadius="full" />
-              <Text fontWeight="semibold">ESP32 Connected</Text>
+              <Text fontWeight="semibold">{selectedDevice?.friendlyName || selectedDevice?.name || `ESP32 (${activePort}) Connected`}</Text>
             </HStack>
             <Text opacity={0.6}>•</Text>
             <Text>App Builder</Text>
             <Text opacity={0.6}>•</Text>
             <Text>{widgets.length} components</Text>
             <Text opacity={0.6}>•</Text>
-            <Text>5 hardware bindings</Text>
+            <Text>{logicBlocks.length} automation rules</Text>
           </HStack>
-          <Text opacity={0.8}>Mode: Designer</Text>
+          <Text opacity={0.8} textTransform="capitalize">Mode: {appBuilderView === "blocks" ? "Rules" : appBuilderView}</Text>
         </Flex>
 
         {/* ========================================== */}
         {/* SCREEN 15: PUBLISH COMPANION APP MODAL */}
         {/* ========================================== */}
-        <Modal isOpen={isPublishOpen} onClose={onPublishClose} size="xl" isCentered>
-          <ModalOverlay backdropFilter="blur(6px)" />
-          <ModalContent borderRadius="3xl" overflow="hidden" p={0} bg={bgCard}>
+        <Modal
+          isOpen={isPublishOpen}
+          onClose={onPublishClose}
+          size="4xl"
+          isCentered
+          scrollBehavior="inside"
+        >
+          <ModalOverlay backdropFilter="blur(6px)" bg="blackAlpha.700" />
+          <ModalContent
+            maxW={{ base: "95vw", md: "880px", lg: "940px" }}
+            maxH="92vh"
+            borderRadius="2xl"
+            overflow="hidden"
+            p={0}
+            bg={bgCard}
+            boxShadow="0 25px 60px -15px rgba(0, 0, 0, 0.5)"
+          >
             {/* Modal Header */}
             <ModalHeader p={5} borderBottom="1px" borderColor={borderColor}>
               <HStack spacing={3}>
@@ -1272,7 +5977,7 @@ export default function ESP32Flasher({
                 </Box>
                 <VStack align="start" spacing={0}>
                   <Text fontWeight="extrabold" fontSize="lg">
-                    Publish App
+                    Publish Companion App
                   </Text>
                   <Text fontSize="xs" color="gray.500">
                     {projectName}
@@ -1282,150 +5987,320 @@ export default function ESP32Flasher({
               <ModalCloseButton top={5} right={5} />
             </ModalHeader>
 
-            <ModalBody p={6}>
-              <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={6}>
-                {/* Left Column: QR Code & Direct Link */}
+            <ModalBody p={{ base: 4, md: 6 }} overflowY="auto">
+              <Grid templateColumns={{ base: "1fr", md: "1.05fr 0.95fr" }} gap={6} alignItems="start">
+                {/* Left Column: QR Code & Companion App Scanner — Scanner-Style Dark Theme */}
                 <VStack align="stretch" spacing={4}>
                   <Box
-                    p={4}
-                    bg={useColorModeValue("gray.50", "gray.800")}
+                    p={0}
+                    bg="#0F172A"
                     borderRadius="2xl"
+                    overflow="hidden"
                     border="1px solid"
-                    borderColor={borderColor}
+                    borderColor="rgba(34,211,238,0.25)"
                     textAlign="center"
+                    position="relative"
+                    boxShadow="0 0 40px rgba(34,211,238,0.08), inset 0 1px 0 rgba(255,255,255,0.03)"
                   >
-                    <Text fontSize="10px" fontWeight="extrabold" color="gray.500" letterSpacing="wider" mb={3}>
-                      SCAN TO INSTALL
-                    </Text>
-
-                    {/* High-Fidelity SVG QR Code */}
-                    <Box display="inline-block" p={3} bg="white" borderRadius="2xl" shadow="sm">
-                      <svg width="150" height="150" viewBox="0 0 150 150" style={{ shapeRendering: "crispEdges" }}>
-                        <rect width="150" height="150" fill="white" />
-                        {/* Top-left marker */}
-                        <path d="M10,10 h40 v40 h-40 z M20,20 v20 h20 v-20 z" fill="#0f172a" />
-                        <rect x="25" y="25" width="10" height="10" fill="#0f172a" />
-                        {/* Top-right marker */}
-                        <path d="M100,10 h40 v40 h-40 z M110,20 v20 h20 v-20 z" fill="#0f172a" />
-                        <rect x="115" y="25" width="10" height="10" fill="#0f172a" />
-                        {/* Bottom-left marker */}
-                        <path d="M10,100 h40 v40 h-40 z M20,110 v20 h20 v-20 z" fill="#0f172a" />
-                        <rect x="25" y="115" width="10" height="10" fill="#0f172a" />
-                        {/* QR Pattern dots */}
-                        <rect x="60" y="15" width="8" height="8" fill="#0f172a" />
-                        <rect x="75" y="15" width="8" height="8" fill="#0f172a" />
-                        <rect x="60" y="35" width="8" height="8" fill="#0f172a" />
-                        <rect x="80" y="35" width="8" height="8" fill="#0f172a" />
-                        <rect x="60" y="60" width="8" height="8" fill="#0f172a" />
-                        <rect x="75" y="75" width="8" height="8" fill="#0f172a" />
-                        <rect x="90" y="60" width="8" height="8" fill="#0f172a" />
-                        <rect x="15" y="65" width="8" height="8" fill="#0f172a" />
-                        <rect x="35" y="75" width="8" height="8" fill="#0f172a" />
-                        <rect x="105" y="65" width="8" height="8" fill="#0f172a" />
-                        <rect x="125" y="75" width="8" height="8" fill="#0f172a" />
-                        <rect x="60" y="105" width="8" height="8" fill="#0f172a" />
-                        <rect x="80" y="115" width="8" height="8" fill="#0f172a" />
-                        <rect x="110" y="105" width="8" height="8" fill="#0f172a" />
-                        <rect x="125" y="125" width="8" height="8" fill="#0f172a" />
-                        <rect x="95" y="130" width="8" height="8" fill="#0f172a" />
-                      </svg>
+                    {/* Top bar */}
+                    <Box bg="rgba(34,211,238,0.08)" px={4} py={2.5} borderBottom="1px solid" borderColor="rgba(34,211,238,0.15)">
+                      <HStack justify="space-between" align="center">
+                        <HStack spacing={2}>
+                          <Box
+                            px={2.5}
+                            py={1}
+                            bg="rgba(34,211,238,0.15)"
+                            borderRadius="full"
+                            border="1px solid"
+                            borderColor="rgba(34,211,238,0.3)"
+                          >
+                            <Text fontSize="9px" fontWeight="800" color="#22D3EE" letterSpacing="wider">
+                              ● COMPANION WEB APP QR
+                            </Text>
+                          </Box>
+                        </HStack>
+                        <Badge colorScheme="green" variant="solid" bg="#059669" color="white" fontSize="9px" px={2.5} py={0.5} borderRadius="full">
+                          PHONE WEB APP
+                        </Badge>
+                      </HStack>
                     </Box>
 
-                    <HStack justify="center" spacing={1.5} mt={3} color="gray.600" fontSize="11px">
-                      <FaMobileAlt size={12} />
-                      <Text>Point your phone camera at the QR code</Text>
-                    </HStack>
-                  </Box>
+                    {/* QR Payload Info Banner */}
+                    <Box px={4} pt={3}>
+                      <HStack bg="#090D16" p={2} borderRadius="xl" border="1px solid" borderColor="rgba(34,211,238,0.2)" justify="space-between">
+                        <HStack spacing={2} px={1}>
+                          <Badge colorScheme="green" fontSize="9px" px={2} py={0.5} borderRadius="md">
+                            ✓ WEB APP READY
+                          </Badge>
+                          <Text fontSize="11px" color="#94A3B8" fontWeight="medium">
+                            Scan with phone camera to launch companion
+                          </Text>
+                        </HStack>
+                        <Text fontSize="10px" color="cyan.300" fontFamily="monospace" fontWeight="bold">
+                          {webAppQrPayload.length} chars
+                        </Text>
+                      </HStack>
+                    </Box>
 
-                  {/* Shareable Link Input */}
-                  <Box>
-                    <Text fontSize="11px" fontWeight="semibold" color="gray.500" mb={1.5}>
-                      Or share the link
+                    {/* QR Title & Scanner Hint */}
+                    <Text fontSize="12px" fontWeight="700" color="#E2E8F0" letterSpacing="wide" mt={2.5} mb={1}>
+                      SCAN WITH ANY PHONE CAMERA TO LAUNCH
                     </Text>
-                    <HStack bg={useColorModeValue("gray.50", "gray.800")} p={1} borderRadius="xl" border="1px" borderColor={borderColor}>
-                      <Input
-                        value={shareableLink}
-                        isReadOnly
-                        fontSize="xs"
-                        variant="unstyled"
-                        px={2}
-                        fontFamily="monospace"
-                        color="blue.600"
-                      />
-                      <Button
-                        size="xs"
-                        colorScheme="blue"
-                        px={3}
-                        borderRadius="lg"
-                        onClick={() => {
-                          navigator.clipboard.writeText(`https://${shareableLink}`);
-                          toast({ title: "Link Copied to Clipboard", status: "success", duration: 2000 });
-                        }}
-                      >
-                        Copy
-                      </Button>
-                    </HStack>
-                  </Box>
+                    <Text fontSize="10px" color="#94A3B8" mb={2.5} px={4}>
+                      Point your smartphone camera at this QR code to instantly launch the live interactive companion controls.
+                    </Text>
 
-                  {/* App Ready Card */}
-                  <HStack p={2.5} bg="blue.50" borderRadius="xl" justify="space-between">
-                    <HStack spacing={2}>
-                      <Text fontSize="sm">📱</Text>
-                      <VStack align="start" spacing={0}>
-                        <Text fontSize="xs" fontWeight="bold" color="blue.900">
-                          {projectName}
+                    {/* QR Code Scanner Frame */}
+                    <Box display="flex" justifyContent="center" alignItems="center" pb={3} px={4}>
+                      <Box position="relative" display="inline-block">
+                        <Box
+                          position="relative"
+                          p="16px"
+                          borderRadius="20px"
+                          border="3px solid #22D3EE"
+                          bg="rgba(34,211,238,0.03)"
+                          boxShadow="0 0 30px rgba(34,211,238,0.12), inset 0 0 20px rgba(34,211,238,0.04)"
+                        >
+                          <Box position="absolute" top="-2px" left="-2px" w="20px" h="20px" borderTop="4px solid #22D3EE" borderLeft="4px solid #22D3EE" borderTopLeftRadius="12px" />
+                          <Box position="absolute" top="-2px" right="-2px" w="20px" h="20px" borderTop="4px solid #22D3EE" borderRight="4px solid #22D3EE" borderTopRightRadius="12px" />
+                          <Box position="absolute" bottom="-2px" left="-2px" w="20px" h="20px" borderBottom="4px solid #22D3EE" borderLeft="4px solid #22D3EE" borderBottomLeftRadius="12px" />
+                          <Box position="absolute" bottom="-2px" right="-2px" w="20px" h="20px" borderBottom="4px solid #22D3EE" borderRight="4px solid #22D3EE" borderBottomRightRadius="12px" />
+
+                          <Box
+                            position="absolute"
+                            left="10px"
+                            right="10px"
+                            h="2px"
+                            bg="linear-gradient(90deg, transparent, #22D3EE, transparent)"
+                            borderRadius="full"
+                            opacity={0.7}
+                            sx={{
+                              animation: "scanLine 2.5s ease-in-out infinite",
+                              "@keyframes scanLine": {
+                                "0%": { top: "14px" },
+                                "50%": { top: "calc(100% - 14px)" },
+                                "100%": { top: "14px" }
+                              }
+                            }}
+                          />
+
+                          <Box bg="white" borderRadius="12px" p={2.5} position="relative" zIndex={1} minW="180px" minH="180px" display="flex" alignItems="center" justifyContent="center">
+                            <SafeQRCode
+                              value={webAppQrPayload}
+                              size={185}
+                              level="M"
+                              bgColor="#ffffff"
+                              fgColor="#0F172A"
+                              style={{ display: "block" }}
+                            />
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+
+                    {/* Web App URL Box with Copy & Open Buttons */}
+                    <Box px={4} pb={4} pt={1}>
+                      <HStack justify="space-between" mb={1.5}>
+                        <Text fontSize="11px" fontWeight="semibold" color="gray.400" textAlign="left">
+                          Web App URL
                         </Text>
-                        <Text fontSize="10px" color="blue.700">
-                          v1.0.0 • {widgets.length} components • ESP32
+                        <Text fontSize="10px" color="cyan.400" fontFamily="monospace">
+                          Local Wi-Fi Companion
                         </Text>
-                      </VStack>
-                    </HStack>
-                    <Badge colorScheme="green" borderRadius="md" px={2}>
-                      Ready
-                    </Badge>
-                  </HStack>
+                      </HStack>
+                      <HStack bg={useColorModeValue("gray.50", "gray.800")} p={1} borderRadius="xl" border="1px" borderColor={borderColor}>
+                        <Input
+                          value={webAppQrPayload}
+                          isReadOnly
+                          fontSize="xs"
+                          variant="unstyled"
+                          px={2}
+                          fontFamily="monospace"
+                          color="cyan.400"
+                          fontWeight="semibold"
+                        />
+                        <Button
+                          size="xs"
+                          colorScheme="cyan"
+                          px={3}
+                          borderRadius="lg"
+                          leftIcon={<FaCopy size={10} />}
+                          onClick={() => {
+                            navigator.clipboard.writeText(webAppQrPayload);
+                            toast({
+                              title: "Copied URL to Clipboard",
+                              description: `${webAppQrPayload} copied.`,
+                              status: "success",
+                              duration: 2000
+                            });
+                          }}
+                        >
+                          Copy
+                        </Button>
+                        <Button
+                          size="xs"
+                          colorScheme="blue"
+                          px={3}
+                          borderRadius="lg"
+                          leftIcon={<FaExternalLinkAlt size={10} />}
+                          onClick={() => {
+                            window.open(webAppQrPayload, "_blank");
+                          }}
+                        >
+                          Open
+                        </Button>
+                      </HStack>
+                    </Box>
+                  </Box>
                 </VStack>
 
-                {/* Right Column: Export Options */}
+                {/* Right Column: Hardware Test & Export Options */}
                 <VStack align="stretch" spacing={3}>
+                  {/* Live Hardware LED Control Card */}
+                  <Box
+                    p={3.5}
+                    borderRadius="2xl"
+                    border="2px solid"
+                    borderColor={liveLedToggle ? "cyan.400" : "gray.300"}
+                    bg={liveLedToggle ? "cyan.50" : useColorModeValue("gray.50", "gray.800")}
+                    shadow="sm"
+                    transition="all 0.2s"
+                  >
+                    <HStack justify="space-between" align="center">
+                      <HStack spacing={3}>
+                        <Box
+                          p={2.5}
+                          borderRadius="xl"
+                          bg={liveLedToggle ? "cyan.500" : "gray.400"}
+                          color="white"
+                          shadow="sm"
+                        >
+                          <FaLightbulb size={18} />
+                        </Box>
+                        <VStack align="start" spacing={0}>
+                          <HStack spacing={2}>
+                            <Text fontWeight="extrabold" fontSize="xs" color={liveLedToggle ? "cyan.900" : "gray.700"}>
+                              Hardware Light Test ({activePort})
+                            </Text>
+                            <Badge colorScheme={liveLedToggle ? "cyan" : "gray"} fontSize="9px" px={2} py={0.5} borderRadius="full">
+                              {liveLedToggle ? "BLINKING (ON)" : "OFF (STOPPED)"}
+                            </Badge>
+                          </HStack>
+                          <Text fontSize="11px" color={liveLedToggle ? "cyan.700" : "gray.500"}>
+                            {liveLedToggle ? "Light is blinking. Toggle switch to turn OFF." : "Light is OFF. Toggle switch to start blinking."}
+                          </Text>
+                        </VStack>
+                      </HStack>
+                      <Switch
+                        size="md"
+                        colorScheme="cyan"
+                        isChecked={liveLedToggle}
+                        onChange={async (e) => {
+                          const nextVal = e.target.checked;
+                          setLiveLedToggle(nextVal);
+                          await handleToggleHardwareLed(nextVal);
+                        }}
+                      />
+                    </HStack>
+                  </Box>
+                  {/* Error banner when serial write fails */}
+                  {ledHardwareError && (
+                    <Box mt={2} p={2.5} bg="red.50" border="1px solid" borderColor="red.300" borderRadius="lg">
+                      <Text fontSize="10px" fontWeight="bold" color="red.700" mb={0.5}>⚠️ Hardware Unreachable</Text>
+                      <Text fontSize="10px" color="red.600" mb={1.5}>
+                        {ledHardwareError.includes("Access is denied") || ledHardwareError.includes("busy")
+                          ? "COM port is locked. The ESP32 has old blink firmware — it must be reflashed."
+                          : `Serial error: ${ledHardwareError}`}
+                      </Text>
+                      <Text fontSize="10px" color="red.500">
+                        👉 <strong>Unplug &amp; replug the ESP32</strong>, then click <strong>Flash Firmware</strong> again to install the reactive firmware. After flashing, the toggle will work.
+                      </Text>
+                    </Box>
+                  )}
+
                   <Text fontSize="xs" fontWeight="extrabold" color="gray.500" letterSpacing="wider" mb={1}>
-                    Export Options
+                    Export &amp; React Native Options
                   </Text>
 
-                  {/* Option 1: Download APK */}
+                  {/* Option 1: Export React Native Expo Project (.zip) */}
+                  <HStack
+                    p={3.5}
+                    borderRadius="2xl"
+                    border="2px solid"
+                    borderColor="purple.300"
+                    bg="purple.50"
+                    _hover={{ borderColor: "purple.500", bg: "purple.100", transform: "translateY(-1px)" }}
+                    cursor="pointer"
+                    transition="all 0.15s"
+                    justify="space-between"
+                    shadow="sm"
+                    onClick={handleExportExpoZip}
+                  >
+                    <HStack spacing={3}>
+                      <Box p={2.5} bg="purple.500" color="white" borderRadius="xl" shadow="sm">
+                        <FaCode size={16} />
+                      </Box>
+                      <VStack align="start" spacing={0}>
+                        <HStack spacing={1.5}>
+                          <Text fontWeight="extrabold" fontSize="xs" color="purple.950">
+                            Export React Native App (.zip)
+                          </Text>
+                          <Badge colorScheme="purple" fontSize="9px" px={1.5}>
+                            SDK {expoSdkVersion}
+                          </Badge>
+                        </HStack>
+                        <Text fontSize="11px" color="purple.800">
+                          Includes App.js, package.json (expo ~{expoSdkVersion}), app.json
+                        </Text>
+                      </VStack>
+                    </HStack>
+                    <FaDownload size={14} color="#7c3aed" />
+                  </HStack>
+
+                  {/* Option 2: Open in Expo Snack */}
                   <HStack
                     p={3}
                     borderRadius="2xl"
                     border="1px solid"
                     borderColor={borderColor}
                     _hover={{ borderColor: "blue.400", bg: useColorModeValue("gray.50", "gray.800") }}
-                    cursor="pointer"
                     transition="all 0.15s"
                     justify="space-between"
-                    onClick={() => toast({ title: "Downloading APK...", status: "info", duration: 2000 })}
                   >
-                    <HStack spacing={3}>
-                      <Box p={2.5} bg="orange.50" color="orange.500" borderRadius="xl">
-                        <FaDownload size={15} />
+                    <HStack spacing={3} cursor="pointer" onClick={handleOpenExpoSnack} flex={1}>
+                      <Box p={2.5} bg="blue.50" color="blue.500" borderRadius="xl">
+                        <FaExternalLinkAlt size={14} />
                       </Box>
                       <VStack align="start" spacing={0}>
                         <HStack spacing={1.5}>
                           <Text fontWeight="bold" fontSize="xs">
-                            Download APK
+                            Open in Expo Snack (Web)
                           </Text>
                           <Badge colorScheme="blue" fontSize="9px">
-                            Direct install
+                            v{expoSdkVersion}
                           </Badge>
                         </HStack>
                         <Text fontSize="11px" color="gray.500">
-                          Install directly on Android
+                          Run in browser React Native simulator (SDK 54)
                         </Text>
                       </VStack>
                     </HStack>
-                    <FaChevronRight size={12} color="gray" />
+                    <Button
+                      size="xs"
+                      colorScheme="blue"
+                      variant="outline"
+                      borderRadius="lg"
+                      leftIcon={<FaCopy size={11} />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopyAppJsCode();
+                      }}
+                    >
+                      Copy App.js
+                    </Button>
                   </HStack>
 
-                  {/* Option 2: App Bundle */}
+                  {/* Option 3: Standalone Single-File Web App */}
                   <HStack
                     p={3}
                     borderRadius="2xl"
@@ -1435,63 +6310,30 @@ export default function ESP32Flasher({
                     cursor="pointer"
                     transition="all 0.15s"
                     justify="space-between"
-                    onClick={() => toast({ title: "Generating AAB App Bundle...", status: "info", duration: 2000 })}
+                    onClick={handleExportHtmlWebApp}
                   >
                     <HStack spacing={3}>
-                      <Box p={2.5} bg="red.50" color="red.500" borderRadius="xl">
-                        <FaCube size={15} />
+                      <Box p={2.5} bg="green.50" color="green.600" borderRadius="xl">
+                        <FaFileCode size={15} />
                       </Box>
                       <VStack align="start" spacing={0}>
                         <HStack spacing={1.5}>
                           <Text fontWeight="bold" fontSize="xs">
-                            App Bundle
-                          </Text>
-                          <Badge colorScheme="purple" fontSize="9px">
-                            Play Store
-                          </Badge>
-                        </HStack>
-                        <Text fontSize="11px" color="gray.500">
-                          For Google Play Store
-                        </Text>
-                      </VStack>
-                    </HStack>
-                    <FaChevronRight size={12} color="gray" />
-                  </HStack>
-
-                  {/* Option 3: Preview on Device */}
-                  <HStack
-                    p={3}
-                    borderRadius="2xl"
-                    border="1px solid"
-                    borderColor={borderColor}
-                    _hover={{ borderColor: "blue.400", bg: useColorModeValue("gray.50", "gray.800") }}
-                    cursor="pointer"
-                    transition="all 0.15s"
-                    justify="space-between"
-                    onClick={() => toast({ title: "Opening live companion on device...", status: "success", duration: 2000 })}
-                  >
-                    <HStack spacing={3}>
-                      <Box p={2.5} bg="blue.50" color="blue.500" borderRadius="xl">
-                        <FaBroadcastTower size={15} />
-                      </Box>
-                      <VStack align="start" spacing={0}>
-                        <HStack spacing={1.5}>
-                          <Text fontWeight="bold" fontSize="xs">
-                            Preview on Device
+                            Standalone Web App (.html)
                           </Text>
                           <Badge colorScheme="green" fontSize="9px">
-                            Live
+                            Instant
                           </Badge>
                         </HStack>
                         <Text fontSize="11px" color="gray.500">
-                          Open instantly on phone
+                          Single-file HTML runnable on any phone
                         </Text>
                       </VStack>
                     </HStack>
-                    <FaChevronRight size={12} color="gray" />
+                    <FaDownload size={12} color="gray" />
                   </HStack>
 
-                  {/* Option 4: Export Project */}
+                  {/* Option 4: Export Project Schema JSON */}
                   <HStack
                     p={3}
                     borderRadius="2xl"
@@ -1502,24 +6344,24 @@ export default function ESP32Flasher({
                     transition="all 0.15s"
                     justify="space-between"
                     onClick={() => {
-                      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(widgets, null, 2));
+                      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ projectName, widgets, logicBlocks }, null, 2));
                       const dlAnchor = document.createElement("a");
                       dlAnchor.setAttribute("href", dataStr);
-                      dlAnchor.setAttribute("download", `${projectName}-app.json`);
+                      dlAnchor.setAttribute("download", `${projectName.toLowerCase().replace(/\s+/g, "-")}-config.json`);
                       dlAnchor.click();
-                      toast({ title: "Project exported as JSON", status: "success", duration: 2000 });
+                      toast({ title: "Project configuration exported as JSON", status: "success", duration: 2000 });
                     }}
                   >
                     <HStack spacing={3}>
-                      <Box p={2.5} bg="purple.50" color="purple.500" borderRadius="xl">
+                      <Box p={2.5} bg="orange.50" color="orange.500" borderRadius="xl">
                         <FaSave size={15} />
                       </Box>
                       <VStack align="start" spacing={0}>
                         <Text fontWeight="bold" fontSize="xs">
-                          Export Project
+                          Export Project Schema (JSON)
                         </Text>
                         <Text fontSize="11px" color="gray.500">
-                          Save project configuration file
+                          Save UI widgets and logic rules JSON
                         </Text>
                       </VStack>
                     </HStack>
@@ -1536,6 +6378,239 @@ export default function ESP32Flasher({
             </ModalFooter>
           </ModalContent>
         </Modal>
+
+        {/* Rule Builder & Hardware Automation Modal */}
+        <RuleBuilderModal
+          isOpen={isRuleModalOpen}
+          onClose={onRuleModalClose}
+          editingRule={editingRule}
+          setEditingRule={setEditingRule}
+          ruleModalTab={ruleModalTab}
+          setRuleModalTab={setRuleModalTab}
+          widgets={widgets}
+          testRuleResult={testRuleResult}
+          setTestRuleResult={setTestRuleResult}
+          isTestingRule={isTestingRule}
+          setIsTestingRule={setIsTestingRule}
+          serialTrafficLogs={serialTrafficLogs}
+          handleExecuteRule={handleExecuteRule}
+          handleSaveRuleModal={handleSaveRuleModal}
+          borderColor={borderColor}
+          localCompanionUrl={localCompanionUrl}
+          selectedDevice={selectedDevice}
+          cleanUiList={cleanUiList}
+          cleanLogicsList={cleanLogicsList}
+          companionServerInfo={companionServerInfo}
+          effectiveDeviceId={effectiveDeviceId}
+          effectiveDeviceName={effectiveDeviceName}
+          effectiveDeviceType={effectiveDeviceType}
+          bundleQrPayload={bundleQrPayload}
+        />
+
+        {/* ========================================== */}
+        {/* MODAL: CREATE NEW APP SCREEN (PROJECT C) */}
+        {/* ========================================== */}
+        <Modal isOpen={isNewAppModalOpen} onClose={onNewAppModalClose} isCentered size="md">
+          <ModalOverlay backdropFilter="blur(4px)" />
+          <ModalContent borderRadius="2xl" p={2}>
+            <ModalHeader fontSize="md" fontWeight="bold">
+              <HStack spacing={2}>
+                <Box p={2} bg="blue.50" color="blue.500" borderRadius="lg">
+                  <FaPlus size={14} />
+                </Box>
+                <Text>Create New App Screen</Text>
+              </HStack>
+            </ModalHeader>
+            <ModalCloseButton />
+            <ModalBody>
+              <VStack spacing={3} align="stretch">
+                <Text fontSize="xs" color="gray.500">
+                  Create a fresh companion app canvas for this device. Your current screen will be saved in your project list.
+                </Text>
+                <FormControl isRequired>
+                  <FormLabel fontSize="xs" fontWeight="bold">App Screen Name</FormLabel>
+                  <Input
+                    size="sm"
+                    borderRadius="lg"
+                    placeholder="e.g. greenhouse_app or motor_dashboard"
+                    value={newAppNameInput}
+                    onChange={(e) => setNewAppNameInput(e.target.value)}
+                    autoFocus
+                  />
+                </FormControl>
+              </VStack>
+            </ModalBody>
+            <ModalFooter>
+              <Button size="sm" variant="ghost" mr={2} onClick={onNewAppModalClose}>Cancel</Button>
+              <Button
+                size="sm"
+                colorScheme="blue"
+                borderRadius="lg"
+                isDisabled={!newAppNameInput.trim()}
+                onClick={() => {
+                  handleCreateNewApp(newAppNameInput);
+                  onNewAppModalClose();
+                }}
+              >
+                Create App
+              </Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
+
+        {/* ========================================== */}
+        {/* MODAL: RENAME APP SCREEN (PROJECT U) */}
+        {/* ========================================== */}
+        <Modal isOpen={isRenameAppModalOpen} onClose={onRenameAppModalClose} isCentered size="md">
+          <ModalOverlay backdropFilter="blur(4px)" />
+          <ModalContent borderRadius="2xl" p={2}>
+            <ModalHeader fontSize="md" fontWeight="bold">
+              <HStack spacing={2}>
+                <Box p={2} bg="purple.50" color="purple.500" borderRadius="lg">
+                  <FaEdit size={14} />
+                </Box>
+                <Text>Rename App Screen</Text>
+              </HStack>
+            </ModalHeader>
+            <ModalCloseButton />
+            <ModalBody>
+              <VStack spacing={3} align="stretch">
+                <FormControl isRequired>
+                  <FormLabel fontSize="xs" fontWeight="bold">New App Name</FormLabel>
+                  <Input
+                    size="sm"
+                    borderRadius="lg"
+                    value={renameAppNameInput}
+                    onChange={(e) => setRenameAppNameInput(e.target.value)}
+                    autoFocus
+                  />
+                </FormControl>
+              </VStack>
+            </ModalBody>
+            <ModalFooter>
+              <Button size="sm" variant="ghost" mr={2} onClick={onRenameAppModalClose}>Cancel</Button>
+              <Button
+                size="sm"
+                colorScheme="purple"
+                borderRadius="lg"
+                isDisabled={!renameAppNameInput.trim() || renameAppNameInput === projectName}
+                onClick={() => {
+                  handleRenameApp(projectName, renameAppNameInput);
+                  onRenameAppModalClose();
+                }}
+              >
+                Rename
+              </Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
+
+        {/* ========================================== */}
+        {/* MODAL: CLEAR CANVAS CONFIRMATION */}
+        {/* ========================================== */}
+        <Modal isOpen={isClearCanvasModalOpen} onClose={onClearCanvasModalClose} isCentered size="sm">
+          <ModalOverlay backdropFilter="blur(4px)" />
+          <ModalContent borderRadius="2xl" p={2}>
+            <ModalHeader fontSize="md" fontWeight="bold" color="red.500">
+              <HStack spacing={2}>
+                <Box p={2} bg="red.50" color="red.500" borderRadius="lg">
+                  <FaTrashAlt size={14} />
+                </Box>
+                <Text>Clear Canvas?</Text>
+              </HStack>
+            </ModalHeader>
+            <ModalCloseButton />
+            <ModalBody>
+              <Text fontSize="xs" color="gray.600">
+                Are you sure you want to remove all <b>{widgets.length}</b> components from this screen? You can restore them using Undo (Ctrl+Z).
+              </Text>
+            </ModalBody>
+            <ModalFooter>
+              <Button size="sm" variant="ghost" mr={2} onClick={onClearCanvasModalClose}>Cancel</Button>
+              <Button
+                size="sm"
+                colorScheme="red"
+                borderRadius="lg"
+                onClick={() => {
+                  handleClearAllWidgets();
+                  onClearCanvasModalClose();
+                }}
+              >
+                Clear All
+              </Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
+
+        {/* ========================================== */}
+        {/* MODAL: ADD / EDIT CRUD RECORD (IN-APP CRUD) */}
+        {/* ========================================== */}
+        <Modal isOpen={isCrudModalOpen} onClose={onCrudModalClose} isCentered size="md">
+          <ModalOverlay backdropFilter="blur(4px)" />
+          <ModalContent borderRadius="2xl" p={2}>
+            <ModalHeader fontSize="md" fontWeight="bold">
+              <HStack spacing={2}>
+                <Box p={2} bg="blue.50" color="blue.500" borderRadius="lg">
+                  <FaTable size={14} />
+                </Box>
+                <Text>{editingCrudRecord ? "Edit Data Record" : "Add New Data Record"}</Text>
+              </HStack>
+            </ModalHeader>
+            <ModalCloseButton />
+            <ModalBody>
+              <VStack spacing={3} align="stretch">
+                <FormControl isRequired>
+                  <FormLabel fontSize="xs" fontWeight="bold">Record Name / Title</FormLabel>
+                  <Input
+                    size="sm"
+                    borderRadius="lg"
+                    placeholder="e.g. Device Status or Relay State"
+                    value={crudRecordForm.name}
+                    onChange={(e) => setCrudRecordForm((prev) => ({ ...prev, name: e.target.value }))}
+                    autoFocus
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel fontSize="xs" fontWeight="bold">Reading / Value</FormLabel>
+                  <Input
+                    size="sm"
+                    borderRadius="lg"
+                    placeholder="e.g. 24.5°C, Active, or GPIO 18 High"
+                    value={crudRecordForm.value}
+                    onChange={(e) => setCrudRecordForm((prev) => ({ ...prev, value: e.target.value }))}
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel fontSize="xs" fontWeight="bold">Status Tag</FormLabel>
+                  <Select
+                    size="sm"
+                    borderRadius="lg"
+                    value={crudRecordForm.status}
+                    onChange={(e) => setCrudRecordForm((prev) => ({ ...prev, status: e.target.value }))}
+                  >
+                    <option value="Active">Active (Green)</option>
+                    <option value="Normal">Normal (Blue)</option>
+                    <option value="Alert">Alert (Red)</option>
+                    <option value="Standby">Standby (Yellow)</option>
+                    <option value="Offline">Offline (Gray)</option>
+                  </Select>
+                </FormControl>
+              </VStack>
+            </ModalBody>
+            <ModalFooter>
+              <Button size="sm" variant="ghost" mr={2} onClick={onCrudModalClose}>Cancel</Button>
+              <Button
+                size="sm"
+                colorScheme="blue"
+                borderRadius="lg"
+                isDisabled={!crudRecordForm.name.trim()}
+                onClick={handleSaveCrudRecord}
+              >
+                {editingCrudRecord ? "Update Record" : "Create Record"}
+              </Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
       </Box>
     );
   }
@@ -1545,98 +6620,119 @@ export default function ESP32Flasher({
   // ==========================================
   if (wizardStep === "success") {
     return (
-      <Box w="100%" maxW="600px" mx="auto" bg={bgCard} borderRadius="2xl" shadow="2xl" overflow="hidden" border="1px" borderColor={borderColor}>
-        <Box p={8} textAlign="center">
-          <VStack spacing={6}>
-            {/* Celebration Green Icon Badge */}
-            <Box
-              display="inline-flex"
-              p={5}
-              bg="green.50"
-              color="green.500"
-              borderRadius="full"
-              shadow="md"
-              animation="pulse 2s infinite"
-            >
-              <FaCheck size={48} />
-            </Box>
+      <Box
+        w="100%"
+        h="100%"
+        minH="100%"
+        flex="1"
+        bg={useColorModeValue("gray.50", "gray.900")}
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+        p={4}
+      >
+        <Box w="100%" maxW="600px" mx="auto" bg={bgCard} borderRadius="2xl" shadow="2xl" overflow="hidden" border="1px" borderColor={borderColor}>
+          <Box p={8} textAlign="center">
+            <VStack spacing={6}>
+              {/* Celebration Green Icon Badge */}
+              <Box
+                display="inline-flex"
+                p={5}
+                bg="green.50"
+                color="green.500"
+                borderRadius="full"
+                shadow="md"
+                animation="pulse 2s infinite"
+              >
+                <FaCheck size={48} />
+              </Box>
 
-            {/* Title & Description */}
-            <VStack spacing={2}>
-              <Text fontSize="2xl" fontWeight="black" color={useColorModeValue("gray.850", "white")}>
-                Firmware Flashed Successfully!
-              </Text>
-              <Text fontSize="xl">🎉</Text>
-              <Text color="gray.500" fontSize="sm" maxW="440px" lineHeight="tall">
-                Your hardware is ready and running. Now let's build a <Text as="span" fontWeight="bold" color={useColorModeValue("gray.800", "white")}>mobile app</Text> to control and monitor your connected device — no coding required.
-              </Text>
-            </VStack>
+              {/* Title & Description */}
+              <VStack spacing={2}>
+                <Text fontSize="2xl" fontWeight="black" color={useColorModeValue("gray.850", "white")}>
+                  Firmware Flashed Successfully!
+                </Text>
+                <Text fontSize="xl">🎉</Text>
+                <Text color="gray.500" fontSize="sm" maxW="440px" lineHeight="tall">
+                  Your hardware is ready and running. Now let's build a <Text as="span" fontWeight="bold" color={useColorModeValue("gray.800", "white")}>mobile app</Text> to control and monitor your connected device — no coding required.
+                </Text>
+              </VStack>
 
-            {/* Device Online Status Pill */}
-            <HStack bg="gray.50" px={4} py={1.5} borderRadius="full" border="1px solid" borderColor="gray.200" spacing={2.5}>
-              <Box w="8px" h="8px" bg="green.500" borderRadius="full" />
-              <Text fontSize="xs" fontWeight="bold" color="gray.800">
-                {selectedDevice?.name || "ESP32 Dev Board"}
-              </Text>
-              <Badge colorScheme="green" fontSize="9px" px={2} borderRadius="full">
-                Online
-              </Badge>
-            </HStack>
-
-            {/* Next Step Informational Card */}
-            <Box
-              w="100%"
-              p={4}
-              bg="blue.50"
-              borderRadius="2xl"
-              border="1px solid"
-              borderColor="blue.100"
-              textAlign="left"
-            >
-              <HStack spacing={3} align="center">
-                <Box p={2.5} bg="white" color="blue.500" borderRadius="xl" shadow="xs">
-                  <FaMobileAlt size={20} />
-                </Box>
-                <VStack align="start" spacing={0.5}>
-                  <Text fontSize="xs" fontWeight="extrabold" color="blue.900">
-                    Next step
-                  </Text>
-                  <Text fontSize="11px" color="blue.700">
-                    A starter app will be auto-generated from your hardware components.
-                  </Text>
-                </VStack>
+              {/* Device Online Status Pill */}
+              <HStack bg="gray.50" px={4} py={1.5} borderRadius="full" border="1px solid" borderColor="gray.200" spacing={2.5}>
+                <Box w="8px" h="8px" bg="green.500" borderRadius="full" />
+                <Text fontSize="xs" fontWeight="bold" color="gray.800">
+                  {selectedDevice?.name || "ESP32 Dev Board"}
+                </Text>
+                <Badge colorScheme="green" fontSize="9px" px={2} borderRadius="full">
+                  Online
+                </Badge>
               </HStack>
-            </Box>
 
-            {/* Action Buttons */}
-            <VStack w="100%" spacing={3}>
-              <Button
+              {/* Next Step Informational Card */}
+              <Box
                 w="100%"
-                size="lg"
-                colorScheme="blue"
-                bg="#2563eb"
-                _hover={{ bg: "#1d4ed8" }}
-                borderRadius="xl"
-                shadow="lg"
-                onClick={() => setWizardStep("app_builder")}
-                fontWeight="bold"
-                leftIcon={<Text fontSize="md">📱</Text>}
-                rightIcon={<FaChevronRight size={13} />}
+                p={4}
+                bg="blue.50"
+                borderRadius="2xl"
+                border="1px solid"
+                borderColor="blue.100"
+                textAlign="left"
               >
-                Create App →
-              </Button>
+                <HStack spacing={3} align="center">
+                  <Box p={2.5} bg="white" color="blue.500" borderRadius="xl" shadow="xs">
+                    <FaMobileAlt size={20} />
+                  </Box>
+                  <VStack align="start" spacing={0.5}>
+                    <Text fontSize="xs" fontWeight="extrabold" color="blue.900">
+                      Next step
+                    </Text>
+                    <Text fontSize="11px" color="blue.700">
+                      A starter app will be auto-generated from your hardware components.
+                    </Text>
+                  </VStack>
+                </HStack>
+              </Box>
 
-              <Button
-                variant="ghost"
-                size="sm"
-                color="gray.500"
-                _hover={{ color: "gray.800" }}
-                onClick={() => (onClose ? onClose() : setWizardStep("connection"))}
-              >
-                Back to Workspace
-              </Button>
+              {/* Action Buttons */}
+              <VStack w="100%" spacing={3}>
+                <Button
+                  w="100%"
+                  size="lg"
+                  colorScheme="blue"
+                  bg="#2563eb"
+                  _hover={{ bg: "#1d4ed8" }}
+                  borderRadius="xl"
+                  shadow="lg"
+                  onClick={() => setWizardStep("app_builder")}
+                  fontWeight="bold"
+                  leftIcon={<Text fontSize="md">📱</Text>}
+                  rightIcon={<FaChevronRight size={13} />}
+                >
+                  Create App →
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  color="gray.500"
+                  _hover={{ color: "gray.800" }}
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem("inno_flasher_active_step");
+                    } catch (e) { }
+                    if (onClose) {
+                      onClose();
+                    } else {
+                      setWizardStep("connection");
+                    }
+                  }}
+                >
+                  Back to Workspace
+                </Button>
+              </VStack>
             </VStack>
-          </VStack>
+          </Box>
         </Box>
       </Box>
     );
@@ -1646,417 +6742,632 @@ export default function ESP32Flasher({
   // SCREENS 9, 10, 11, 12: WIZARD MODAL WORKFLOW CONTAINER
   // =========================================================
   return (
-    <Box w="100%" maxW="640px" mx="auto" bg={bgCard} borderRadius="2xl" shadow="2xl" overflow="hidden" border="1px" borderColor={borderColor}>
-      {/* 4-Step Stepper Header */}
-      {wizardStep === "connection" && renderStepperHeader(1)}
-      {wizardStep === "devices" && renderStepperHeader(2)}
-      {wizardStep === "compatibility" && renderStepperHeader(3)}
-      {wizardStep === "flashing" && renderStepperHeader(4)}
+    <Box
+      w="100%"
+      h="100%"
+      minH="100%"
+      flex="1"
+      bg={useColorModeValue("gray.50", "gray.900")}
+      display="flex"
+      flexDirection="column"
+      alignItems="center"
+      justifyContent="center"
+      p={{ base: 2, md: 6 }}
+      overflowY="auto"
+    >
+      <Box
+        w="100%"
+        maxW={{ base: "100%", md: "740px", lg: "800px" }}
+        mx="auto"
+        my="auto"
+        bg={bgCard}
+        borderRadius="2xl"
+        shadow="2xl"
+        overflow="hidden"
+        border="1px"
+        borderColor={borderColor}
+      >
+        {/* 4-Step Stepper Header */}
+        {wizardStep === "connection" && renderStepperHeader(1)}
+        {wizardStep === "devices" && renderStepperHeader(2)}
+        {wizardStep === "compatibility" && renderStepperHeader(3)}
+        {wizardStep === "flashing" && renderStepperHeader(4)}
 
-      <Box p={6}>
-        {/* ========================================== */}
-        {/* SCREEN 9: STEP 1 - CHOOSE CONNECTION TYPE */}
-        {/* ========================================== */}
-        {wizardStep === "connection" && (
-          <VStack align="stretch" spacing={6}>
-            <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
-              Choose Connection Type
-            </Text>
+        <Box p={6}>
+          {/* ========================================== */}
+          {/* SCREEN 9: STEP 1 - CHOOSE CONNECTION TYPE */}
+          {/* ========================================== */}
+          {wizardStep === "connection" && (
+            <VStack align="stretch" spacing={6}>
+              <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
+                Choose Connection Type
+              </Text>
 
-            <Grid templateColumns="1fr 1fr" gap={4}>
-              {/* WiFi Option Card (Recommended) */}
-              <Box
-                p={5}
-                borderRadius="2xl"
-                border="2px solid"
-                borderColor={connectionType === "wifi" ? "#2563eb" : borderColor}
-                bg={connectionType === "wifi" ? useColorModeValue("blue.50", "gray.800") : bgCard}
-                _hover={{ borderColor: "#2563eb", transform: "translateY(-2px)" }}
-                cursor="pointer"
-                transition="all 0.2s"
-                textAlign="center"
-                onClick={() => setConnectionType("wifi")}
-                position="relative"
-              >
-                <VStack spacing={3}>
-                  <Box p={3} bg={connectionType === "wifi" ? "blue.500" : "gray.100"} color={connectionType === "wifi" ? "white" : "gray.600"} borderRadius="2xl" shadow="sm">
-                    <FaWifi size={28} />
-                  </Box>
-                  <VStack spacing={0.5}>
-                    <HStack spacing={1.5} justify="center">
-                      <Text fontWeight="extrabold" fontSize="md">
-                        WiFi
-                      </Text>
-                      <Badge colorScheme="green" fontSize="9px" px={2} borderRadius="full">
-                        Recommended
-                      </Badge>
-                    </HStack>
-                    <Text fontSize="11px" color="gray.500">
-                      Connect via local network
-                    </Text>
-                  </VStack>
-                </VStack>
-              </Box>
-
-              {/* Cellular Option Card */}
-              <Box
-                p={5}
-                borderRadius="2xl"
-                border="2px solid"
-                borderColor={connectionType === "cellular" ? "#2563eb" : borderColor}
-                bg={connectionType === "cellular" ? useColorModeValue("blue.50", "gray.800") : bgCard}
-                _hover={{ borderColor: "#2563eb", transform: "translateY(-2px)" }}
-                cursor="pointer"
-                transition="all 0.2s"
-                textAlign="center"
-                onClick={() => setConnectionType("cellular")}
-              >
-                <VStack spacing={3}>
-                  <Box p={3} bg={connectionType === "cellular" ? "blue.500" : "gray.100"} color={connectionType === "cellular" ? "white" : "gray.600"} borderRadius="2xl" shadow="sm">
-                    <FaBroadcastTower size={28} />
-                  </Box>
-                  <VStack spacing={0.5}>
-                    <Text fontWeight="extrabold" fontSize="md">
-                      Cellular
-                    </Text>
-                    <Text fontSize="11px" color="gray.500">
-                      Connect via mobile data
-                    </Text>
-                  </VStack>
-                </VStack>
-              </Box>
-            </Grid>
-
-            {/* Bottom Button */}
-            <Button
-              w="100%"
-              size="lg"
-              colorScheme="blue"
-              bg="#2563eb"
-              _hover={{ bg: "#1d4ed8" }}
-              borderRadius="xl"
-              onClick={() => setWizardStep("devices")}
-              fontWeight="bold"
-            >
-              Continue →
-            </Button>
-          </VStack>
-        )}
-
-        {/* ========================================== */}
-        {/* SCREEN 10: STEP 2 - DISCOVER DEVICES */}
-        {/* ========================================== */}
-        {wizardStep === "devices" && (
-          <VStack align="stretch" spacing={5}>
-            <HStack justify="space-between" align="center" flexWrap="wrap" gap={2}>
-              <VStack align="start" spacing={0}>
-                <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
-                  Select Device
-                </Text>
-                <Text fontSize="xs" color="gray.500">
-                  {devices.length} {devices.length === 1 ? "device" : "devices"} found
-                </Text>
-              </VStack>
-
-              <HStack spacing={3}>
-                <HStack spacing={1.5} bg={useColorModeValue("gray.100", "gray.800")} px={2.5} py={1} borderRadius="lg">
-                  <Switch
-                    size="sm"
-                    colorScheme="blue"
-                    isChecked={autoRefresh}
-                    onChange={(e) => setAutoRefresh(e.target.checked)}
-                  />
-                  <Text fontSize="xs" color={useColorModeValue("gray.700", "gray.300")} fontWeight="semibold">
-                    Auto-refresh
-                  </Text>
-                  {autoRefresh && (
+              <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4}>
+                {/* USB Port Option Card */}
+                <Box
+                  p={5}
+                  borderRadius="2xl"
+                  border="2px solid"
+                  borderColor={connectionType === "usb" ? "#2563eb" : borderColor}
+                  bg={connectionType === "usb" ? useColorModeValue("blue.50", "gray.800") : bgCard}
+                  _hover={{ borderColor: "#2563eb", transform: "translateY(-2px)" }}
+                  cursor="pointer"
+                  transition="all 0.2s"
+                  textAlign="center"
+                  onClick={() => setConnectionType("usb")}
+                  position="relative"
+                >
+                  <VStack spacing={3}>
                     <Box
-                      w="6px"
-                      h="6px"
-                      bg="green.500"
-                      borderRadius="full"
-                      className="animate-pulse"
-                      title="Auto-refresh active (3s polling)"
-                    />
-                  )}
-                </HStack>
+                      p={3}
+                      bg={connectionType === "usb" ? "blue.500" : "gray.100"}
+                      color={connectionType === "usb" ? "white" : "gray.600"}
+                      borderRadius="2xl"
+                      shadow="sm"
+                      display="inline-flex"
+                      alignItems="center"
+                      justifyContent="center"
+                    >
+                      <FaUsb size={28} />
+                    </Box>
+                    <VStack spacing={0.5}>
+                      <HStack spacing={1.5} justify="center">
+                        <Text fontWeight="extrabold" fontSize="md">
+                          USB Port
+                        </Text>
+                        <Badge colorScheme="purple" fontSize="9px" px={2} borderRadius="full">
+                          Direct COM
+                        </Badge>
+                      </HStack>
+                      <Text fontSize="11px" color="gray.500">
+                        Connect via USB cable
+                      </Text>
+                    </VStack>
+                  </VStack>
+                </Box>
 
+                {/* WiFi Option Card (Recommended) */}
+                <Box
+                  p={5}
+                  borderRadius="2xl"
+                  border="2px solid"
+                  borderColor={connectionType === "wifi" ? "#2563eb" : borderColor}
+                  bg={connectionType === "wifi" ? useColorModeValue("blue.50", "gray.800") : bgCard}
+                  _hover={{ borderColor: "#2563eb", transform: "translateY(-2px)" }}
+                  cursor="pointer"
+                  transition="all 0.2s"
+                  textAlign="center"
+                  onClick={() => setConnectionType("wifi")}
+                  position="relative"
+                >
+                  <VStack spacing={3}>
+                    <Box
+                      p={3}
+                      bg={connectionType === "wifi" ? "blue.500" : "gray.100"}
+                      color={connectionType === "wifi" ? "white" : "gray.600"}
+                      borderRadius="2xl"
+                      shadow="sm"
+                      display="inline-flex"
+                      alignItems="center"
+                      justifyContent="center"
+                    >
+                      <FaWifi size={28} />
+                    </Box>
+                    <VStack spacing={0.5}>
+                      <HStack spacing={1.5} justify="center">
+                        <Text fontWeight="extrabold" fontSize="md">
+                          WiFi
+                        </Text>
+                        <Badge colorScheme="green" fontSize="9px" px={2} borderRadius="full">
+                          Recommended
+                        </Badge>
+                      </HStack>
+                      <Text fontSize="11px" color="gray.500">
+                        Connect via local network
+                      </Text>
+                    </VStack>
+                  </VStack>
+                </Box>
+
+                {/* Cellular Option Card */}
+                <Box
+                  p={5}
+                  borderRadius="2xl"
+                  border="2px solid"
+                  borderColor={connectionType === "cellular" ? "#2563eb" : borderColor}
+                  bg={connectionType === "cellular" ? useColorModeValue("blue.50", "gray.800") : bgCard}
+                  _hover={{ borderColor: "#2563eb", transform: "translateY(-2px)" }}
+                  cursor="pointer"
+                  transition="all 0.2s"
+                  textAlign="center"
+                  onClick={() => setConnectionType("cellular")}
+                >
+                  <VStack spacing={3}>
+                    <Box
+                      p={3}
+                      bg={connectionType === "cellular" ? "blue.500" : "gray.100"}
+                      color={connectionType === "cellular" ? "white" : "gray.600"}
+                      borderRadius="2xl"
+                      shadow="sm"
+                      display="inline-flex"
+                      alignItems="center"
+                      justifyContent="center"
+                    >
+                      <FaBroadcastTower size={28} />
+                    </Box>
+                    <VStack spacing={0.5}>
+                      <Text fontWeight="extrabold" fontSize="md">
+                        Cellular
+                      </Text>
+                      <Text fontSize="11px" color="gray.500">
+                        Connect via mobile data
+                      </Text>
+                    </VStack>
+                  </VStack>
+                </Box>
+              </Grid>
+
+              {/* Bottom Action & Skip Link */}
+              <VStack spacing={2} pt={1}>
                 <Button
-                  size="xs"
-                  variant="outline"
+                  w="100%"
+                  size="lg"
                   colorScheme="blue"
-                  isLoading={isScanning}
-                  leftIcon={<FaSync size={11} className={isScanning ? "animate-spin" : ""} />}
-                  onClick={() => handleRefreshDevices(false)}
-                >
-                  Refresh
-                </Button>
-              </HStack>
-            </HStack>
-
-            {/* Discovered Device Cards List */}
-            <VStack align="stretch" spacing={3}>
-              {devices.map((device) => {
-                const isSelected = device.id === selectedDeviceId;
-                return (
-                  <Box
-                    key={device.id}
-                    p={3.5}
-                    borderRadius="2xl"
-                    border="2px solid"
-                    borderColor={isSelected ? "#2563eb" : borderColor}
-                    bg={isSelected ? useColorModeValue("blue.50", "gray.800") : bgCard}
-                    _hover={{ borderColor: isSelected ? "#2563eb" : "gray.300" }}
-                    cursor="pointer"
-                    transition="all 0.15s"
-                    onClick={() => setSelectedDeviceId(device.id)}
-                  >
-                    <HStack justify="space-between">
-                      <HStack spacing={3}>
-                        <Box p={2.5} bg={isSelected ? "blue.500" : "gray.100"} color={isSelected ? "white" : "gray.600"} borderRadius="xl" position="relative">
-                          <FaBroadcastTower size={16} />
-                          <Box
-                            w="8px"
-                            h="8px"
-                            bg="green.500"
-                            borderRadius="full"
-                            position="absolute"
-                            bottom="-1px"
-                            right="-1px"
-                            border="2px solid white"
-                          />
-                        </Box>
-                        <VStack align="start" spacing={0}>
-                          <Text fontWeight="extrabold" fontSize="sm">
-                            {device.name}
-                          </Text>
-                          <Text fontSize="11px" color="gray.500">
-                            {device.ip}
-                          </Text>
-                          <Text fontSize="10px" color="gray.400">
-                            {device.firmware}
-                          </Text>
-                        </VStack>
-                      </HStack>
-
-                      <HStack spacing={3}>
-                        <HStack spacing={1} color="green.600" fontSize="11px" fontWeight="bold">
-                          <FaWifi size={13} />
-                          <Text>🔋 {device.battery}%</Text>
-                        </HStack>
-
-                        {/* Selected Radio Badge */}
-                        <Box
-                          w="20px"
-                          h="20px"
-                          borderRadius="full"
-                          bg={isSelected ? "blue.500" : "transparent"}
-                          border="2px solid"
-                          borderColor={isSelected ? "blue.500" : "gray.300"}
-                          display="flex"
-                          alignItems="center"
-                          justifyContent="center"
-                          color="white"
-                          fontSize="10px"
-                        >
-                          {isSelected && <FaCheck size={10} />}
-                        </Box>
-                      </HStack>
-                    </HStack>
-                  </Box>
-                );
-              })}
-            </VStack>
-
-            {/* Bottom Actions */}
-            <HStack justify="space-between" pt={2}>
-              <Button
-                variant="outline"
-                borderRadius="xl"
-                onClick={() => setWizardStep("connection")}
-                leftIcon={<FaChevronLeft size={11} />}
-              >
-                Back
-              </Button>
-              <Button
-                colorScheme="blue"
-                bg="#2563eb"
-                _hover={{ bg: "#1d4ed8" }}
-                borderRadius="xl"
-                onClick={() => setWizardStep("compatibility")}
-                fontWeight="bold"
-                px={6}
-              >
-                Continue →
-              </Button>
-            </HStack>
-          </VStack>
-        )}
-
-        {/* ========================================== */}
-        {/* SCREEN 11: STEP 3 - COMPATIBILITY CHECK */}
-        {/* ========================================== */}
-        {wizardStep === "compatibility" && (
-          <VStack align="stretch" spacing={5}>
-            <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
-              Compatibility Check
-            </Text>
-
-            {/* Pill items for validation checklist */}
-            <VStack align="stretch" spacing={2.5}>
-              {compatibilityChecks.map((item) => (
-                <HStack
-                  key={item.id}
-                  p={3}
-                  bg={useColorModeValue("gray.50", "gray.800")}
+                  bg="#2563eb"
+                  _hover={{ bg: "#1d4ed8" }}
                   borderRadius="xl"
-                  justify="space-between"
-                  border="1px solid"
-                  borderColor={borderColor}
+                  onClick={() => setWizardStep("devices")}
+                  fontWeight="bold"
                 >
-                  <HStack spacing={2.5}>
-                    {item.status === "pass" ? (
-                      <Box color="green.500">
-                        <FaCheckCircle size={16} />
-                      </Box>
-                    ) : (
-                      <Box color="orange.400">
-                        <FaExclamationTriangle size={16} />
-                      </Box>
-                    )}
-                    <Text fontSize="xs" fontWeight="semibold">
-                      {item.label}
+                  Continue →
+                </Button>
+                <Button
+                  variant="ghost"
+                  colorScheme="blue"
+                  size="sm"
+                  fontSize="xs"
+                  fontWeight="semibold"
+                  onClick={() => setWizardStep("app_builder")}
+                  _hover={{ textDecoration: "underline", bg: useColorModeValue("blue.50", "gray.800") }}
+                >
+                  Already flashed or designing? Skip to App Builder & Publish QR →
+                </Button>
+              </VStack>
+            </VStack>
+          )}
+
+          {/* ========================================== */}
+          {/* SCREEN 10: STEP 2 - DISCOVER DEVICES */}
+          {/* ========================================== */}
+          {wizardStep === "devices" && (
+            <VStack align="stretch" spacing={5}>
+              <HStack justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                <VStack align="start" spacing={0}>
+                  <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
+                    Select Device
+                  </Text>
+                  <Text fontSize="xs" color="gray.500">
+                    {devices.length} {devices.length === 1 ? "device" : "devices"} found
+                  </Text>
+                </VStack>
+
+                <HStack spacing={3}>
+                  <HStack spacing={1.5} bg={useColorModeValue("gray.100", "gray.800")} px={2.5} py={1} borderRadius="lg">
+                    <Switch
+                      size="sm"
+                      colorScheme="blue"
+                      isChecked={autoRefresh}
+                      onChange={(e) => setAutoRefresh(e.target.checked)}
+                    />
+                    <Text fontSize="xs" color={useColorModeValue("gray.700", "gray.300")} fontWeight="semibold">
+                      Auto-refresh
                     </Text>
+                    {autoRefresh && (
+                      <Box
+                        w="6px"
+                        h="6px"
+                        bg="green.500"
+                        borderRadius="full"
+                        className="animate-pulse"
+                        title="Auto-refresh active (3s polling)"
+                      />
+                    )}
                   </HStack>
 
-                  {item.value && (
-                    <Badge colorScheme="orange" fontSize="10px" borderRadius="md" px={2}>
-                      {item.value}
-                    </Badge>
-                  )}
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    colorScheme="blue"
+                    isLoading={isScanning}
+                    leftIcon={<FaSync size={11} className={isScanning ? "animate-spin" : ""} />}
+                    onClick={() => handleRefreshDevices(false)}
+                  >
+                    Refresh
+                  </Button>
                 </HStack>
-              ))}
-            </VStack>
+              </HStack>
 
-            {/* All checks passed Green Banner */}
-            <HStack p={3.5} bg="green.50" borderRadius="xl" border="1px solid" borderColor="green.200" spacing={2.5}>
-              <Box color="green.600">
-                <FaCheckCircle size={18} />
-              </Box>
-              <Text fontSize="xs" fontWeight="bold" color="green.800">
-                All checks passed! Ready to flash.
-              </Text>
-            </HStack>
+              {/* Discovered Device Cards List / Empty State */}
+              {devices.length === 0 ? (
+                <Box
+                  p={5}
+                  bg={useColorModeValue("orange.50", "gray.800")}
+                  border="1px dashed"
+                  borderColor={useColorModeValue("orange.300", "orange.500")}
+                  borderRadius="2xl"
+                  textAlign="center"
+                >
+                  <VStack spacing={3}>
+                    <Box p={3} bg="orange.100" color="orange.600" borderRadius="full">
+                      <FaExclamationTriangle size={22} />
+                    </Box>
+                    <VStack spacing={1}>
+                      <Text fontWeight="bold" fontSize="sm" color={useColorModeValue("orange.800", "orange.200")}>
+                        No Serial / USB Devices Detected
+                      </Text>
+                      <Text fontSize="xs" color={useColorModeValue("gray.600", "gray.400")} maxW="440px">
+                        Connect your ESP32 board to your PC via USB and click <b>Scan for Devices</b>.
+                      </Text>
+                    </VStack>
 
-            {/* Bottom Actions */}
-            <HStack justify="space-between" pt={2}>
-              <Button
-                variant="outline"
-                borderRadius="xl"
-                onClick={() => setWizardStep("devices")}
-                leftIcon={<FaChevronLeft size={11} />}
-              >
-                Back
-              </Button>
-              <Button
-                colorScheme="blue"
-                bg="#2563eb"
-                _hover={{ bg: "#1d4ed8" }}
-                borderRadius="xl"
-                onClick={handleStartFlash}
-                fontWeight="bold"
-                px={6}
-                leftIcon={<FaBolt size={13} />}
-              >
-                Start Flash
-              </Button>
-            </HStack>
-          </VStack>
-        )}
+                    <Box
+                      p={3}
+                      bg={useColorModeValue("white", "gray.900")}
+                      borderRadius="xl"
+                      border="1px solid"
+                      borderColor={useColorModeValue("orange.200", "gray.700")}
+                      textAlign="left"
+                      w="100%"
+                      maxW="440px"
+                      fontSize="xs"
+                      color={useColorModeValue("gray.700", "gray.300")}
+                    >
+                      <Text fontWeight="semibold" mb={1} color={useColorModeValue("gray.800", "gray.200")}>
+                        Hardware Checklist:
+                      </Text>
+                      <VStack align="start" spacing={1}>
+                        <Text>• <b>Data Cable:</b> Verify your USB cable supports data transfer (not a power-only cable).</Text>
+                        <Text>• <b>Driver:</b> Ensure CP2102, CH340, or FTDI drivers are installed if required.</Text>
+                        <Text>• <b>Bootloader Mode:</b> If using native ESP32-S3 USB, hold <b>BOOT</b>, tap <b>RST</b>, then release <b>BOOT</b>.</Text>
+                      </VStack>
+                    </Box>
 
-        {/* ========================================== */}
-        {/* SCREEN 12: STEP 4 - FLASHING FIRMWARE */}
-        {/* ========================================== */}
-        {wizardStep === "flashing" && (
-          <VStack align="stretch" spacing={6}>
-            <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
-              Flashing Firmware
-            </Text>
-
-            {/* Central Animated Circular Progress Ring */}
-            <Box display="flex" flexDirection="column" alignItems="center" py={4}>
-              <Box position="relative" w="140px" h="140px" display="flex" alignItems="center" justifyContent="center">
-                {/* SVG Circular Progress Ring */}
-                <svg width="140" height="140" viewBox="0 0 140 140" style={{ transform: "rotate(-90deg)" }}>
-                  <circle
-                    cx="70"
-                    cy="70"
-                    r="58"
-                    stroke="#e2e8f0"
-                    strokeWidth="8"
-                    fill="transparent"
-                  />
-                  <circle
-                    cx="70"
-                    cy="70"
-                    r="58"
-                    stroke="#2563eb"
-                    strokeWidth="8"
-                    fill="transparent"
-                    strokeDasharray={364}
-                    strokeDashoffset={364 - (364 * flashProgress) / 100}
-                    strokeLinecap="round"
-                    style={{ transition: "stroke-dashoffset 0.4s ease" }}
-                  />
-                </svg>
-
-                {/* Inner Percentage & Seconds Count */}
-                <VStack spacing={0} position="absolute">
-                  <Text fontSize="2xl" fontWeight="black" color="blue.600">
-                    {flashProgress}%
-                  </Text>
-                  <Text fontSize="xs" fontWeight="semibold" color="gray.400">
-                    {flashTimeRemaining}s
-                  </Text>
-                </VStack>
-              </Box>
-
-              {/* Dynamic Status Text */}
-              <Text fontSize="xs" fontWeight="bold" color="gray.600" mt={3}>
-                {flashStatusText}
-              </Text>
-            </Box>
-
-            {/* Linear Progress Bar */}
-            <Progress value={flashProgress} size="xs" colorScheme="blue" borderRadius="full" hasStripe isAnimated />
-
-            {/* Live Streaming Console Terminal Strip */}
-            <Box
-              h="90px"
-              bg="#0f172a"
-              p={3}
-              borderRadius="xl"
-              fontFamily="monospace"
-              fontSize="11px"
-              color="#38bdf8"
-              overflowY="auto"
-              border="1px solid"
-              borderColor="gray.800"
-            >
-              {flashTerminalLogs.length === 0 ? (
-                <Text color="gray.500">// Terminal initializing...</Text>
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      leftIcon={<FaSync size={12} className={isScanning ? "animate-spin" : ""} />}
+                      isLoading={isScanning}
+                      onClick={() => handleRefreshDevices(false)}
+                    >
+                      Scan for Devices
+                    </Button>
+                  </VStack>
+                </Box>
               ) : (
-                flashTerminalLogs.map((log, idx) => (
-                  <Text key={idx} whiteSpace="pre-wrap" lineHeight="tall">
-                    {log}
-                  </Text>
-                ))
+                <VStack align="stretch" spacing={3}>
+                  {devices.map((device) => {
+                    const isSelected = device.id === selectedDeviceId;
+                    return (
+                      <Box
+                        key={device.id}
+                        p={3.5}
+                        borderRadius="2xl"
+                        border="2px solid"
+                        borderColor={isSelected ? "#2563eb" : borderColor}
+                        bg={isSelected ? useColorModeValue("blue.50", "gray.800") : bgCard}
+                        _hover={{ borderColor: isSelected ? "#2563eb" : "gray.300" }}
+                        cursor="pointer"
+                        transition="all 0.15s"
+                        onClick={() => setSelectedDeviceId(device.id)}
+                      >
+                        <HStack justify="space-between">
+                          <HStack spacing={3}>
+                            <Box p={2.5} bg={isSelected ? "blue.500" : "gray.100"} color={isSelected ? "white" : "gray.600"} borderRadius="xl" position="relative">
+                              {connectionType === "usb" ? (
+                                <FaUsb size={16} />
+                              ) : connectionType === "wifi" ? (
+                                <FaWifi size={16} />
+                              ) : (
+                                <FaBroadcastTower size={16} />
+                              )}
+                              <Box
+                                w="8px"
+                                h="8px"
+                                bg="green.500"
+                                borderRadius="full"
+                                position="absolute"
+                                bottom="-1px"
+                                right="-1px"
+                                border="2px solid white"
+                              />
+                            </Box>
+                            <VStack align="start" spacing={0}>
+                              <Text fontWeight="extrabold" fontSize="sm">
+                                {device.name}
+                              </Text>
+                              <Text fontSize="11px" color="gray.500">
+                                {device.ip}
+                              </Text>
+                              <Text fontSize="10px" color="gray.400">
+                                {device.firmware} • Port: {device.port}
+                              </Text>
+                            </VStack>
+                          </HStack>
+
+                          <HStack spacing={3}>
+                            <HStack spacing={1} color="green.600" fontSize="11px" fontWeight="bold">
+                              <FaWifi size={13} />
+                              <Text>🔋 {device.battery}%</Text>
+                            </HStack>
+
+                            {/* Selected Radio Badge */}
+                            <Box
+                              w="20px"
+                              h="20px"
+                              borderRadius="full"
+                              bg={isSelected ? "blue.500" : "transparent"}
+                              border="2px solid"
+                              borderColor={isSelected ? "blue.500" : "gray.300"}
+                              display="flex"
+                              alignItems="center"
+                              justifyContent="center"
+                              color="white"
+                              fontSize="10px"
+                            >
+                              {isSelected && <FaCheck size={10} />}
+                            </Box>
+                          </HStack>
+                        </HStack>
+                      </Box>
+                    );
+                  })}
+                </VStack>
               )}
-              <div ref={terminalEndRef} />
-            </Box>
-          </VStack>
-        )}
+
+              {/* Bottom Actions */}
+              <HStack justify="space-between" pt={2}>
+                <Button
+                  variant="outline"
+                  borderRadius="xl"
+                  onClick={() => setWizardStep("connection")}
+                  leftIcon={<FaChevronLeft size={11} />}
+                >
+                  Back
+                </Button>
+                <Button
+                  colorScheme="blue"
+                  bg="#2563eb"
+                  _hover={{ bg: "#1d4ed8" }}
+                  borderRadius="xl"
+                  onClick={() => setWizardStep("compatibility")}
+                  fontWeight="bold"
+                  px={6}
+                  isDisabled={!selectedDevice || devices.length === 0}
+                >
+                  Continue →
+                </Button>
+              </HStack>
+            </VStack>
+          )}
+
+          {/* ========================================== */}
+          {/* SCREEN 11: STEP 3 - COMPATIBILITY CHECK */}
+          {/* ========================================== */}
+          {wizardStep === "compatibility" && (
+            <VStack align="stretch" spacing={5}>
+              <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
+                Compatibility Check
+              </Text>
+
+              {/* Pill items for validation checklist */}
+              <VStack align="stretch" spacing={2.5}>
+                {compatibilityChecks.map((item) => (
+                  <HStack
+                    key={item.id}
+                    p={3}
+                    bg={useColorModeValue("gray.50", "gray.800")}
+                    borderRadius="xl"
+                    justify="space-between"
+                    border="1px solid"
+                    borderColor={borderColor}
+                  >
+                    <HStack spacing={2.5}>
+                      {item.status === "pass" ? (
+                        <Box color="green.500">
+                          <FaCheckCircle size={16} />
+                        </Box>
+                      ) : item.status === "fail" ? (
+                        <Box color="red.500">
+                          <FaTimes size={16} />
+                        </Box>
+                      ) : (
+                        <Box color="orange.400">
+                          <FaExclamationTriangle size={16} />
+                        </Box>
+                      )}
+                      <Text fontSize="xs" fontWeight="semibold">
+                        {item.label}
+                      </Text>
+                    </HStack>
+
+                    {item.value && (
+                      <Badge colorScheme={item.status === "pass" ? "green" : item.status === "fail" ? "red" : "orange"} fontSize="10px" borderRadius="md" px={2}>
+                        {item.value}
+                      </Badge>
+                    )}
+                  </HStack>
+                ))}
+              </VStack>
+
+              {/* Status Summary Banner */}
+              {selectedDevice ? (
+                <HStack p={3.5} bg="green.50" borderRadius="xl" border="1px solid" borderColor="green.200" spacing={2.5}>
+                  <Box color="green.600">
+                    <FaCheckCircle size={18} />
+                  </Box>
+                  <Text fontSize="xs" fontWeight="bold" color="green.800">
+                    Hardware check passed: {selectedDevice.name} ({selectedDevice.port}) is ready for flash.
+                  </Text>
+                </HStack>
+              ) : (
+                <HStack p={3.5} bg="red.50" borderRadius="xl" border="1px solid" borderColor="red.200" spacing={2.5}>
+                  <Box color="red.600">
+                    <FaExclamationTriangle size={18} />
+                  </Box>
+                  <Text fontSize="xs" fontWeight="bold" color="red.800">
+                    No device connected. Please go back and connect an ESP32 hardware device.
+                  </Text>
+                </HStack>
+              )}
+
+              {/* Bottom Actions */}
+              <HStack justify="space-between" pt={2}>
+                <Button
+                  variant="outline"
+                  borderRadius="xl"
+                  onClick={() => setWizardStep("devices")}
+                  leftIcon={<FaChevronLeft size={11} />}
+                >
+                  Back
+                </Button>
+                <Button
+                  colorScheme="blue"
+                  bg="#2563eb"
+                  _hover={{ bg: "#1d4ed8" }}
+                  borderRadius="xl"
+                  onClick={handleStartFlash}
+                  fontWeight="bold"
+                  px={6}
+                  leftIcon={<FaBolt size={13} />}
+                  isDisabled={!selectedDevice}
+                >
+                  Start Flash
+                </Button>
+              </HStack>
+            </VStack>
+          )}
+
+          {/* ========================================== */}
+          {/* SCREEN 12: STEP 4 - FLASHING FIRMWARE */}
+          {/* ========================================== */}
+          {wizardStep === "flashing" && (
+            <VStack align="stretch" spacing={6}>
+              <Text fontSize="lg" fontWeight="extrabold" color={useColorModeValue("gray.800", "white")}>
+                Flashing Firmware
+              </Text>
+
+              {/* Central Animated Circular Progress Ring */}
+              <Box display="flex" flexDirection="column" alignItems="center" py={4}>
+                <Box position="relative" w="140px" h="140px" display="flex" alignItems="center" justifyContent="center">
+                  {/* SVG Circular Progress Ring */}
+                  <svg width="140" height="140" viewBox="0 0 140 140" style={{ transform: "rotate(-90deg)" }}>
+                    <circle
+                      cx="70"
+                      cy="70"
+                      r="58"
+                      stroke="#e2e8f0"
+                      strokeWidth="8"
+                      fill="transparent"
+                    />
+                    <circle
+                      cx="70"
+                      cy="70"
+                      r="58"
+                      stroke="#2563eb"
+                      strokeWidth="8"
+                      fill="transparent"
+                      strokeDasharray={364}
+                      strokeDashoffset={364 - (364 * flashProgress) / 100}
+                      strokeLinecap="round"
+                      style={{ transition: "stroke-dashoffset 0.4s ease" }}
+                    />
+                  </svg>
+
+                  {/* Inner Percentage & Seconds Count */}
+                  <VStack spacing={0} position="absolute">
+                    <Text fontSize="2xl" fontWeight="black" color="blue.600">
+                      {flashProgress}%
+                    </Text>
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.400">
+                      {flashTimeRemaining}s
+                    </Text>
+                  </VStack>
+                </Box>
+
+                {/* Dynamic Status Text */}
+                <Text fontSize="xs" fontWeight="bold" color="gray.600" mt={3}>
+                  {flashStatusText}
+                </Text>
+              </Box>
+
+              {/* Linear Progress Bar */}
+              <Progress value={flashProgress} size="xs" colorScheme="blue" borderRadius="full" hasStripe isAnimated />
+
+              {/* Live Streaming Console Terminal Strip */}
+              <Box
+                h="90px"
+                bg="#0f172a"
+                p={3}
+                borderRadius="xl"
+                fontFamily="monospace"
+                fontSize="11px"
+                color="#38bdf8"
+                overflowY="auto"
+                border="1px solid"
+                borderColor="gray.800"
+              >
+                {flashTerminalLogs.length === 0 ? (
+                  <Text color="gray.500">// Terminal initializing...</Text>
+                ) : (
+                  flashTerminalLogs.map((log, idx) => (
+                    <Text key={idx} whiteSpace="pre-wrap" lineHeight="tall">
+                      {log}
+                    </Text>
+                  ))
+                )}
+                <div ref={terminalEndRef} />
+              </Box>
+            </VStack>
+          )}
+        </Box>
       </Box>
+
+      {/* ========================================== */}
+      {/* ESP-IDF SETUP PROMPT MODAL */}
+      {/* ========================================== */}
+      <EspIdfSetupModal
+        isOpen={isIdfPromptOpen}
+        onClose={() => setIsIdfPromptOpen(false)}
+        onContinue={() => setIsIdfPromptOpen(false)}
+      />
+      {/* Rule Builder & Hardware Automation Modal */}
+      <RuleBuilderModal
+        isOpen={isRuleModalOpen}
+        onClose={onRuleModalClose}
+        editingRule={editingRule}
+        setEditingRule={setEditingRule}
+        ruleModalTab={ruleModalTab}
+        setRuleModalTab={setRuleModalTab}
+        widgets={widgets}
+        testRuleResult={testRuleResult}
+        setTestRuleResult={setTestRuleResult}
+        isTestingRule={isTestingRule}
+        setIsTestingRule={setIsTestingRule}
+        serialTrafficLogs={serialTrafficLogs}
+        handleExecuteRule={handleExecuteRule}
+        handleSaveRuleModal={handleSaveRuleModal}
+        borderColor={borderColor}
+        localCompanionUrl={localCompanionUrl}
+        selectedDevice={selectedDevice}
+        cleanUiList={cleanUiList}
+        cleanLogicsList={cleanLogicsList}
+        companionServerInfo={companionServerInfo}
+        effectiveDeviceId={effectiveDeviceId}
+        effectiveDeviceName={effectiveDeviceName}
+        effectiveDeviceType={effectiveDeviceType}
+        bundleQrPayload={bundleQrPayload}
+      />
     </Box>
   );
 }

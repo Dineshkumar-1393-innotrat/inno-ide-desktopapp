@@ -1,6 +1,8 @@
 import path from 'path';
 import fs from 'fs';
-import { app } from 'electron';
+import electronPkg from 'electron';
+
+const app = electronPkg?.app || electronPkg?.default?.app;
 
 class Logger {
   constructor() {
@@ -10,11 +12,13 @@ class Logger {
 
   init() {
     try {
-      this.logDir = path.join(app.getPath('userData'), 'logs');
-      if (!fs.existsSync(this.logDir)) {
-        fs.mkdirSync(this.logDir, { recursive: true });
+      if (app && typeof app.getPath === 'function') {
+        this.logDir = path.join(app.getPath('userData'), 'logs');
+        if (!fs.existsSync(this.logDir)) {
+          fs.mkdirSync(this.logDir, { recursive: true });
+        }
+        this.logFile = path.join(this.logDir, `app-${new Date().toISOString().split('T')[0]}.log`);
       }
-      this.logFile = path.join(this.logDir, `app-${new Date().toISOString().split('T')[0]}.log`);
     } catch (e) {
       console.error('[Logger Init Error]:', e);
     }

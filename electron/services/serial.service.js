@@ -1,130 +1,251 @@
-import { execSync } from 'child_process';
+import { execSync, exec } from 'child_process';
+import { promisify } from 'util';
+const execPromise = promisify(exec);
+import fs from 'fs';
 import { logger } from '../utils/logger.js';
+
+// Common Microcontroller & USB-to-UART Chipset Signatures
+const KNOWN_CHIPSETS = [
+  { match: /303A/i, name: 'Espressif ESP32 (Native USB CDC / JTAG)', manufacturer: 'Espressif Systems', isUsb: true },
+  { match: /10C4/i, name: 'Silicon Labs CP210x USB-to-UART', manufacturer: 'Silicon Labs', isUsb: true },
+  { match: /1A86/i, name: 'WCH CH340 / CH341 USB-to-Serial', manufacturer: 'WCH', isUsb: true },
+  { match: /0403/i, name: 'FTDI USB-to-Serial UART', manufacturer: 'FTDI', isUsb: true },
+  { match: /067B/i, name: 'Prolific PL2303 USB-to-Serial', manufacturer: 'Prolific', isUsb: true },
+  { match: /2341|2A03/i, name: 'Arduino Microcontroller', manufacturer: 'Arduino LLC', isUsb: true },
+  { match: /2E8A/i, name: 'Raspberry Pi RP2040 (Pico)', manufacturer: 'Raspberry Pi', isUsb: true },
+  { match: /0483/i, name: 'STMicroelectronics ST-Link / STM32', manufacturer: 'STMicroelectronics', isUsb: true }
+];
 
 export class SerialService {
   constructor() {
     this.activePorts = new Map();
+    this.pendingConnects = new Map();
+    this.writeQueues = new Map();
+    this.lockedPorts = new Set(); // Ports locked during flash (prevents auto-reconnect)
     this.SerialPort = null;
-    this.initNativeSerial();
+    this.initPromise = this.initNativeSerial();
   }
 
   async initNativeSerial() {
     try {
       const module = await import('serialport');
       this.SerialPort = module.SerialPort;
+      logger.info('Native serialport module successfully loaded.');
     } catch {
-      logger.warn('Native serialport module not available. Will use Windows WMI / PowerShell fallback.');
+      logger.warn('Native serialport module not available. Will use multi-tier OS fallback.');
     }
+  }
+
+  identifyDevice(pnpId = '', friendlyName = '', manufacturer = '', vendorId = '', productId = '') {
+    const raw = `${vendorId} ${productId} ${pnpId} ${friendlyName} ${manufacturer}`.toUpperCase();
+
+    for (const chip of KNOWN_CHIPSETS) {
+      if (chip.match.test(raw)) {
+        return {
+          chipName: chip.name,
+          manufacturer: chip.manufacturer || manufacturer,
+          isUsb: true,
+          recognized: true
+        };
+      }
+    }
+
+    const isBluetooth = /BTH|BTHENUM|BLUETOOTH/i.test(raw);
+    const isUsb = (/USB|USBSER|FTDIBUS|SILABSER|CH34/i.test(raw) || /COM\d+/i.test(raw)) && !isBluetooth;
+
+    return {
+      chipName: isBluetooth ? 'Bluetooth Serial Link' : (isUsb ? 'USB Serial Device' : 'Standard Serial Port'),
+      manufacturer: manufacturer || (isUsb ? 'USB-UART Bridge' : 'Generic Serial'),
+      isUsb,
+      recognized: false
+    };
   }
 
   async listPorts() {
-    try {
-      if (this.SerialPort && typeof this.SerialPort.list === 'function') {
-        const ports = await this.SerialPort.list();
-        if (ports && ports.length > 0) {
-          return ports.map(port => ({
-            path: port.path,
-            manufacturer: port.manufacturer || undefined,
-            serialNumber: port.serialNumber || undefined,
-            vendorId: port.vendorId || undefined,
-            productId: port.productId || undefined,
-            friendlyName: port.friendlyName || port.pnpId || undefined
-          }));
-        }
-      }
-
-      // Windows WMI / PowerShell serial port discovery fallback
-      if (process.platform === 'win32') {
-        try {
-          const psCommand = 'powershell -NoProfile -Command "Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name, Description, PNPDeviceID | ConvertTo-Json"';
-          const stdout = execSync(psCommand, { encoding: 'utf-8', timeout: 4000 });
-          if (stdout && stdout.trim()) {
-            const raw = JSON.parse(stdout.trim());
-            const items = Array.isArray(raw) ? raw : [raw];
-            
-            // Sort so real USB ports (VID_303A, etc.) come before Bluetooth ports
-            items.sort((a, b) => {
-              const aIsUsb = (a.PNPDeviceID || '').toUpperCase().includes('USB') || !(a.PNPDeviceID || '').toUpperCase().includes('BTH');
-              const bIsUsb = (b.PNPDeviceID || '').toUpperCase().includes('USB') || !(b.PNPDeviceID || '').toUpperCase().includes('BTH');
-              if (aIsUsb && !bIsUsb) return -1;
-              if (!aIsUsb && bIsUsb) return 1;
-              return 0;
-            });
-
-            return items.map(item => ({
-              path: item.DeviceID,
-              friendlyName: item.Name || item.Description || `Serial Device (${item.DeviceID})`,
-              manufacturer: (item.PNPDeviceID || '').includes('303A') ? 'Espressif' : undefined,
-              isUsb: (item.PNPDeviceID || '').toUpperCase().includes('USB') && !(item.PNPDeviceID || '').toUpperCase().includes('BTH')
-            }));
-          }
-        } catch (psErr) {
-          logger.warn('PowerShell serial port query failed:', psErr.message);
-        }
-      }
-
-      return [];
-    } catch (error) {
-      logger.error('Error listing serial ports:', error.message);
-      return [];
+    // Ensure native serial module is initialized
+    if (this.initPromise) {
+      await this.initPromise.catch(() => {});
     }
+
+    const discovered = new Map();
+
+    const addPort = (p) => {
+      if (!p || !p.path) return;
+      const key = p.path.toUpperCase();
+      if (!discovered.has(key)) {
+        discovered.set(key, {
+          path: p.path,
+          friendlyName: p.friendlyName || p.name || `Serial Port (${p.path})`,
+          manufacturer: p.manufacturer || (p.isUsb ? 'USB Serial Device' : undefined),
+          isUsb: p.isUsb !== false,
+          pnpId: p.pnpId
+        });
+      } else {
+        const existing = discovered.get(key);
+        if (p.friendlyName && (!existing.friendlyName || existing.friendlyName === `Serial Port (${p.path})`)) {
+          existing.friendlyName = p.friendlyName;
+        }
+        if (p.manufacturer && !existing.manufacturer) {
+          existing.manufacturer = p.manufacturer;
+        }
+        if (p.isUsb !== undefined) {
+          existing.isUsb = existing.isUsb || p.isUsb;
+        }
+      }
+    };
+
+    // Tier 1: Node-serialport native listing
+    if (this.SerialPort && typeof this.SerialPort.list === 'function') {
+      try {
+        const nativePorts = await this.SerialPort.list();
+        if (Array.isArray(nativePorts)) {
+          for (const np of nativePorts) {
+            addPort({
+              path: np.path,
+              vendorId: np.vendorId,
+              productId: np.productId,
+              pnpId: np.pnpId,
+              friendlyName: np.friendlyName || (np.pnpId ? `${np.pnpId} (${np.path})` : undefined),
+              isUsb: Boolean(np.vendorId || np.productId || (np.pnpId && !np.pnpId.includes('BTH')))
+            });
+          }
+        }
+      } catch (err) {
+        logger.warn('Native SerialPort.list() error:', err.message);
+      }
+    }
+
+    // Tier 2: Windows Registry SERIALCOMM & PnPEntity (run if no ports found via native)
+    if (process.platform === 'win32' && discovered.size === 0) {
+      try {
+        const psScript = `
+$res = @()
+try {
+  if (Test-Path 'HKLM:\\HARDWARE\\DEVICEMAP\\SERIALCOMM') {
+    $reg = Get-ItemProperty -Path 'HKLM:\\HARDWARE\\DEVICEMAP\\SERIALCOMM'
+    $reg.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
+      $res += [PSCustomObject]@{
+        Path = [string]$_.Value
+        Name = ('Serial Port (' + $_.Value + ')')
+        PNPDeviceID = [string]$_.Name
+        Manufacturer = ''
+      }
+    }
+  }
+} catch {}
+try {
+  $pnp = Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -eq 'Ports' -or $_.Caption -match '\\(COM\\d+\\)' }
+  foreach ($dev in $pnp) {
+    if ($dev.Caption -match '\\((COM\\d+)\\)') {
+      $res += [PSCustomObject]@{ Path = $Matches[1]; Name = $dev.Name; PNPDeviceID = $dev.PNPDeviceID; Manufacturer = $dev.Manufacturer }
+    }
+  }
+} catch {}
+$res | ConvertTo-Json -Compress
+`;
+        const { stdout } = await execPromise(`powershell -NoProfile -NonInteractive -Command "${psScript.replace(/"/g, '\\"')}"`, { timeout: 4000 });
+        if (stdout && stdout.trim()) {
+          const raw = stdout.trim();
+          const list = raw.startsWith('[') ? JSON.parse(raw) : [JSON.parse(raw)];
+          for (const item of list) {
+            if (item && item.Path) {
+              addPort({ path: item.Path, friendlyName: item.Name, pnpId: item.PNPDeviceID, manufacturer: item.Manufacturer });
+            }
+          }
+        }
+      } catch (psErr) {
+        logger.warn('Windows PowerShell serial port scan warning:', psErr.message);
+      }
+    }
+
+    // Tier 3: Unix / Linux / macOS device scanning
+    if (process.platform === 'linux' || process.platform === 'darwin') {
+      try {
+        const devDir = '/dev';
+        if (fs.existsSync(devDir)) {
+          const files = fs.readdirSync(devDir);
+          for (const file of files) {
+            if (/^(ttyUSB|ttyACM|tty\.usbserial|tty\.usbmodem|cu\.usbserial|cu\.usbmodem)/.test(file)) {
+              addPort({ path: `${devDir}/${file}`, friendlyName: `USB Serial (${file})`, isUsb: true });
+            }
+          }
+        }
+      } catch (unixErr) {
+        logger.warn('Unix /dev port scan warning:', unixErr.message);
+      }
+    }
+
+    return Array.from(discovered.values());
   }
 
   async testPortOpen(portPath) {
-    if (!portPath || typeof portPath !== 'string') {
-      return { openable: false, port: portPath, error: 'Invalid port path' };
-    }
-
-    if (this.activePorts.has(portPath)) {
-      return { openable: true, port: portPath, message: 'Port is active in application session' };
-    }
+    if (!portPath || typeof portPath !== 'string') return { openable: false, error: 'Invalid port' };
+    await this.disconnectPort(portPath);
 
     if (this.SerialPort) {
       return new Promise(resolve => {
-        try {
-          const testPort = new this.SerialPort({ path: portPath, baudRate: 115200, autoOpen: false });
-          testPort.open(err => {
-            if (err) {
-              resolve({ openable: false, port: portPath, error: err.message });
-            } else {
-              testPort.close(() => {
-                resolve({ openable: true, port: portPath });
-              });
-            }
-          });
-        } catch (err) {
-          resolve({ openable: false, port: portPath, error: err.message });
-        }
+        const testPort = new this.SerialPort({ path: portPath, baudRate: 115200, autoOpen: false });
+        testPort.open(err => {
+          if (err) {
+            resolve({ openable: false, error: err.message });
+          } else {
+            testPort.close(() => {
+              setTimeout(() => resolve({ openable: true }), 150);
+            });
+          }
+        });
       });
     }
-
-    // Fallback assumption: if regex matches valid port pattern, treat as accessible
-    if (/^COM\d+$/i.test(portPath) || /^\/dev\/tty/i.test(portPath)) {
-      return { openable: true, port: portPath, virtual: true };
-    }
-
-    return { openable: false, port: portPath, error: 'Port unavailable' };
+    return { openable: true, port: portPath, virtual: true };
   }
 
   async connectPort(portPath, options = {}, dataCallback) {
     try {
+      if (this.initPromise) await this.initPromise.catch(() => {});
+      if (!portPath || typeof portPath !== 'string') throw new Error('Invalid port path specified');
+
+      if (this.pendingConnects.has(portPath)) {
+        await this.pendingConnects.get(portPath);
+        const existing = this.activePorts.get(portPath);
+        if (existing && (existing.virtual || existing.isOpen)) return { success: true, port: portPath, virtual: Boolean(existing.virtual) };
+      }
+
       if (this.activePorts.has(portPath)) {
-        return { success: true, message: 'Already connected', port: portPath };
+        const existing = this.activePorts.get(portPath);
+        if (existing && !existing.virtual && existing.isOpen) return { success: true, message: 'Already connected', port: portPath };
+        if (existing && !existing.virtual && existing.opening) {
+          await new Promise((resolve, reject) => {
+            const to = setTimeout(() => reject(new Error(`Timeout waiting for port ${portPath} to open`)), 4000);
+            existing.once('open', () => { clearTimeout(to); resolve(); });
+            existing.once('error', (err) => { clearTimeout(to); reject(err); });
+          });
+          return { success: true, port: portPath };
+        }
+        this.activePorts.delete(portPath);
       }
 
       if (this.SerialPort) {
         const baudRate = options.baudRate || 115200;
-        const port = new this.SerialPort({ path: portPath, baudRate });
+        const connectPromise = new Promise((resolve, reject) => {
+          try {
+            const port = new this.SerialPort({ path: portPath, baudRate, autoOpen: false });
+            port.on('error', (err) => logger.warn(`Serial port ${portPath} error:`, err?.message || err));
+            if (dataCallback) port.on('data', data => dataCallback(data.toString('utf8')));
+            port.open((openErr) => {
+              if (openErr) {
+                this.activePorts.delete(portPath);
+                return reject(openErr);
+              }
+              this.activePorts.set(portPath, port);
+              resolve({ success: true, port: portPath, baudRate });
+            });
+          } catch (createErr) { reject(createErr); }
+        });
 
-        if (dataCallback) {
-          port.on('data', data => dataCallback(data.toString('utf8')));
-        }
-
-        this.activePorts.set(portPath, port);
-        return { success: true, port: portPath, baudRate };
+        this.pendingConnects.set(portPath, connectPromise);
+        try { return await connectPromise; } finally { this.pendingConnects.delete(portPath); }
       }
 
-      // Fallback virtual connection
       this.activePorts.set(portPath, { virtual: true, baudRate: options.baudRate || 115200 });
       return { success: true, port: portPath, virtual: true };
     } catch (error) {
@@ -133,15 +254,60 @@ export class SerialService {
     }
   }
 
+  // Lock a port so writePort will not auto-reconnect during flashing
+  lockPort(portPath) {
+    if (!portPath) return;
+    const key = portPath.trim().toUpperCase();
+    this.lockedPorts.add(key);
+    logger.info(`[SerialService] Port ${portPath} LOCKED for flash — auto-reconnect disabled`);
+  }
+
+  // Unlock a port after flashing is done
+  unlockPort(portPath) {
+    if (!portPath) return;
+    const key = portPath.trim().toUpperCase();
+    this.lockedPorts.delete(key);
+    logger.info(`[SerialService] Port ${portPath} UNLOCKED — auto-reconnect re-enabled`);
+  }
+
+  isPortLocked(portPath) {
+    if (!portPath) return false;
+    return this.lockedPorts.has(portPath.trim().toUpperCase());
+  }
+
   async disconnectPort(portPath) {
     try {
-      const port = this.activePorts.get(portPath);
-      if (port) {
-        if (!port.virtual && typeof port.close === 'function') {
-          port.close();
+      if (!portPath) return { success: true };
+      const normalized = portPath.trim().toUpperCase();
+
+      for (const [key, pending] of this.pendingConnects.entries()) {
+        if (key.trim().toUpperCase() === normalized) {
+          try { await pending; } catch {}
+          this.pendingConnects.delete(key);
         }
-        this.activePorts.delete(portPath);
       }
+
+      for (const [key, port] of this.activePorts.entries()) {
+        if (key.trim().toUpperCase() === normalized) {
+          this.activePorts.delete(key);
+          if (!port.virtual && typeof port.close === 'function') {
+            if (port.isOpen) {
+              await new Promise((resolve) => {
+                port.close(() => resolve());
+              });
+            } else if (port.opening) {
+              await new Promise((resolve) => {
+                port.once('open', () => {
+                  try { port.close(() => resolve()); } catch { resolve(); }
+                });
+                port.once('error', () => resolve());
+                setTimeout(resolve, 2000);
+              });
+            }
+          }
+        }
+      }
+      await new Promise(r => setTimeout(r, 100));
       return { success: true, port: portPath };
     } catch (error) {
       logger.error(`Error disconnecting serial port ${portPath}:`, error.message);
@@ -151,15 +317,69 @@ export class SerialService {
 
   async writePort(portPath, data) {
     try {
-      const port = this.activePorts.get(portPath);
-      if (!port) {
-        throw new Error(`Port ${portPath} is not connected.`);
+      if (this.initPromise) await this.initPromise.catch(() => {});
+      if (!portPath) throw new Error('Port path is required to write data');
+
+      // Refuse writes when port is locked for flashing
+      if (this.isPortLocked(portPath)) {
+        logger.warn(`[SerialService] Write to ${portPath} skipped — port is locked for flash`);
+        return { success: false, port: portPath, skipped: true, reason: 'Port locked for flash' };
       }
 
-      if (!port.virtual && typeof port.write === 'function') {
-        port.write(data);
+      let port = this.activePorts.get(portPath);
+      if (!port || port.virtual || (!port.isOpen && !port.opening)) {
+        // Do not reconnect if locked
+        if (this.isPortLocked(portPath)) {
+          return { success: false, port: portPath, skipped: true, reason: 'Port locked for flash' };
+        }
+        await this.connectPort(portPath, { baudRate: 115200 });
+        port = this.activePorts.get(portPath);
+      } else if (port.opening) {
+        await new Promise((resolve, reject) => {
+          const to = setTimeout(() => reject(new Error(`Timeout waiting for port ${portPath} to open`)), 4000);
+          port.once('open', () => { clearTimeout(to); resolve(); });
+          port.once('error', (err) => { clearTimeout(to); reject(err); });
+        });
       }
-      return { success: true, port: portPath, bytesWritten: data.length };
+
+      if (!port) throw new Error(`Port ${portPath} is not available and could not be connected.`);
+
+      if (!port.virtual && typeof port.write === 'function') {
+        if (!this.writeQueues.has(portPath)) this.writeQueues.set(portPath, Promise.resolve());
+        const queue = this.writeQueues.get(portPath);
+        const writeOperation = queue.then(() => {
+          return new Promise((resolve, reject) => {
+            if (!port.isOpen) return reject(new Error(`Cannot write: port ${portPath} is closed`));
+            let finished = false;
+            const safetyTimer = setTimeout(() => {
+              if (!finished) {
+                finished = true;
+                resolve();
+              }
+            }, 600);
+
+            try {
+              port.write(data, (writeErr) => {
+                if (finished) return;
+                finished = true;
+                clearTimeout(safetyTimer);
+                if (writeErr) return reject(writeErr);
+                resolve();
+              });
+            } catch (syncErr) {
+              if (!finished) {
+                finished = true;
+                clearTimeout(safetyTimer);
+                reject(syncErr);
+              }
+            }
+          });
+        });
+        this.writeQueues.set(portPath, writeOperation.catch(() => {}));
+        await writeOperation;
+        return { success: true, port: portPath, bytesWritten: data.length, virtual: false };
+      }
+      return { success: true, port: portPath, bytesWritten: data.length, virtual: true };
     } catch (error) {
       logger.error(`Error writing to serial port ${portPath}:`, error.message);
       throw error;

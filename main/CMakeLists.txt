@@ -1,3 +1,3 @@
 idf_component_register(SRCS "main.c"
                     INCLUDE_DIRS "."
-                    REQUIRES led_strip esp_driver_rmt esp_driver_gpio driver)
+                    REQUIRES led_strip esp_driver_rmt esp_driver_gpio driver esp_driver_usb_serial_jtag esp_driver_uart vfs)

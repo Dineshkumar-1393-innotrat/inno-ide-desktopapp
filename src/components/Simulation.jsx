@@ -261,6 +261,557 @@ import {
 } from "../store/slices/simulationSlice";
 import { useResizableSidebar } from '../hooks/useResizableSidebar';
 
+// In-memory dragged symbol fallback for cross-platform Electron/browser DnD
+let globalDraggedSymbol = null;
+
+// SymbolItem must be defined OUTSIDE of BlockDiagram to prevent react-dnd hooks
+// from being destroyed on every parent re-render.
+const SymbolItem = React.memo(({ symbol, onAddClick }) => {
+  const [, drag] = useDrag(() => ({
+    type: "symbol",
+    item: () => {
+      globalDraggedSymbol = symbol;
+      return { symbol };
+    },
+    end: () => {
+      setTimeout(() => {
+        globalDraggedSymbol = null;
+      }, 300);
+    }
+  }), [symbol]);
+
+  const handleDragStart = (e) => {
+    globalDraggedSymbol = symbol;
+    try {
+      e.dataTransfer.setData("application/json", JSON.stringify({ symbol }));
+      e.dataTransfer.setData("text/plain", JSON.stringify({ symbol }));
+      e.dataTransfer.effectAllowed = "copyMove";
+    } catch (err) {
+      console.error("Drag start error:", err);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setTimeout(() => {
+      globalDraggedSymbol = null;
+    }, 300);
+  };
+
+  return (
+    <div
+      ref={drag}
+      draggable="true"
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onClick={() => onAddClick && onAddClick(symbol)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "40px",
+        height: "40px",
+        borderRadius: "6px",
+        backgroundColor: "#ffffff",
+        border: "1px solid #e2e8f0",
+        cursor: "grab",
+        userSelect: "none",
+        WebkitUserDrag: "element",
+        boxSizing: "border-box",
+        transition: "all 0.15s ease",
+      }}
+      className="symbol-item-draggable"
+      title={`Drag to canvas or click to add ${symbol.name}`}
+    >
+      <Tooltip
+        label={`${symbol.name} (Drag or Click)`}
+        placement="right"
+        hasArrow
+        bg="#1e293b"
+        color="#ffffff"
+        fontSize="xs"
+      >
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <img
+            src={symbol.src}
+            alt={symbol.name}
+            draggable={false}
+            style={{ width: "28px", height: "28px", pointerEvents: "none", userSelect: "none" }}
+          />
+        </div>
+      </Tooltip>
+    </div>
+  );
+});
+
+// Canvas must be defined OUTSIDE of BlockDiagram to prevent the useDrop hook
+// from being destroyed on every parent re-render.
+const SimulationCanvas = React.memo(({
+  droppedItems,
+  connections,
+  activeTabId,
+  activeSymbol,
+  setActiveSymbol,
+  rotatingItem,
+  setRotatingItem,
+  sparkEffects,
+  isSwitchingProject,
+  isHydrated,
+  hasFetchedOnce,
+  contextMenu,
+  contextMenuRef,
+  handleDelete,
+  handleContextMenu,
+  handleConnectionDetection,
+  calculateSnapPosition,
+  dispatch,
+}) => {
+  const [dragPositions, setDragPositions] = useState({});
+  const canvasRef = useRef(null);
+  const lastDropTimeRef = useRef(0);
+
+  const handleAddDroppedSymbol = useCallback((symbolData, clientX, clientY) => {
+    const now = Date.now();
+    if (now - lastDropTimeRef.current < 250) {
+      return; // prevent duplicate drop handling between react-dnd and native HTML5
+    }
+    lastDropTimeRef.current = now;
+
+    if (!symbolData || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const componentWidth = 100;
+    const componentHeight = 100;
+    const x = clientX - rect.left - (componentWidth / 2);
+    const y = clientY - rect.top - (componentHeight / 2);
+    const scrollLeft = canvasRef.current.scrollLeft || 0;
+    const scrollTop = canvasRef.current.scrollTop || 0;
+
+    const newSymbol = {
+      symbol: symbolData,
+      x: Math.max(10, x + scrollLeft),
+      y: Math.max(10, y + scrollTop),
+      width: componentWidth,
+      height: componentHeight,
+      rotation: 0,
+      id: Date.now() + Math.random(),
+    };
+    dispatch(addSymbolToTab({ tabId: activeTabId, symbol: newSymbol }));
+    setActiveSymbol(droppedItems.length);
+  }, [activeTabId, dispatch, droppedItems.length, setActiveSymbol]);
+
+  const [, drop] = useDrop(
+    () => ({
+      accept: "symbol",
+      drop: (item, monitor) => {
+        const offset = monitor.getClientOffset();
+        const symbolData = item?.symbol || globalDraggedSymbol;
+        if (symbolData && offset) {
+          handleAddDroppedSymbol(symbolData, offset.x, offset.y);
+        }
+      },
+    }),
+    [handleAddDroppedSymbol],
+  );
+
+  const dropRef = useCallback((node) => {
+    canvasRef.current = node;
+    drop(node);
+  }, [drop]);
+
+  const handleNativeDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
+  }, []);
+
+  const handleNativeDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let symbolData = globalDraggedSymbol;
+    if (!symbolData && e.dataTransfer) {
+      const rawData = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
+      if (rawData) {
+        try {
+          const parsed = JSON.parse(rawData);
+          symbolData = parsed.symbol || parsed;
+        } catch (err) {
+          console.error("Error parsing native drop data:", err);
+        }
+      }
+    }
+    if (symbolData) {
+      handleAddDroppedSymbol(symbolData, e.clientX, e.clientY);
+    }
+  }, [handleAddDroppedSymbol]);
+
+  const handleRotateStart = (index, event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const symbol = droppedItems[index];
+    const centerX = symbol.x + symbol.width / 2;
+    const centerY = symbol.y + symbol.height / 2;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startRotation = symbol.rotation || 0;
+
+    let startAngle =
+      Math.atan2(startY - centerY, startX - centerX) * (180 / Math.PI);
+
+    const handleMouseMove = (e) => {
+      const currentX = e.clientX;
+      const currentY = e.clientY;
+      const newAngle =
+        Math.atan2(currentY - centerY, currentX - centerX) * (180 / Math.PI);
+
+      const angleChange = newAngle - startAngle;
+      const newRotation = startRotation + angleChange;
+
+      setRotatingItem({ index, rotation: newRotation });
+    };
+
+    const handleMouseUp = (e) => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+
+      const currentX = e.clientX;
+      const currentY = e.clientY;
+      const newAngle =
+        Math.atan2(currentY - centerY, currentX - centerX) * (180 / Math.PI);
+      const angleChange = newAngle - startAngle;
+
+      dispatch(
+        updateSymbolInTab({
+          tabId: activeTabId,
+          symbolId: symbol.id,
+          updates: { rotation: startRotation + angleChange },
+        }),
+      );
+      setRotatingItem(null);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleResizeStop = (index, _dir, ref, delta, position) => {
+    const item = droppedItems[index];
+    if (item) {
+      dispatch(
+        updateSymbolInTab({
+          tabId: activeTabId,
+          symbolId: item.id,
+          updates: {
+            width: ref.offsetWidth,
+            height: ref.offsetHeight,
+            x: position.x,
+            y: position.y,
+          },
+        }),
+      );
+    }
+  };
+
+  const handleSelect = (index) => {
+    setActiveSymbol(index);
+  };
+
+  const hasConnection = (itemId) => {
+    return connections.some(conn => conn.includes(String(itemId)));
+  };
+
+  const getOccupiedZones = (mcItemId) => {
+    const mcConns = connections.filter(conn => conn.includes(String(mcItemId)));
+    const mcItem = droppedItems.find(i => String(i.id) === String(mcItemId));
+    if (!mcItem || mcConns.length === 0) return [];
+
+    const occupied = [];
+    mcConns.forEach(conn => {
+      const otherId = conn.split('-').find(id => id !== String(mcItemId));
+      const otherItem = droppedItems.find(i => String(i.id) === otherId);
+      if (!otherItem) return;
+
+      const ox = otherItem.x + otherItem.width / 2;
+      const oy = otherItem.y + otherItem.height / 2;
+
+      const zones = [
+        { id: "Z1", x: mcItem.x + mcItem.width / 2, y: mcItem.y },
+        { id: "Z2", x: mcItem.x + mcItem.width, y: mcItem.y + mcItem.height * 0.25 },
+        { id: "Z3", x: mcItem.x + mcItem.width, y: mcItem.y + mcItem.height * 0.75 },
+        { id: "Z4", x: mcItem.x + mcItem.width / 2, y: mcItem.y + mcItem.height },
+        { id: "Z5", x: mcItem.x, y: mcItem.y + mcItem.height * 0.75 },
+        { id: "Z6", x: mcItem.x, y: mcItem.y + mcItem.height * 0.25 },
+      ];
+
+      let closestZone = zones[0];
+      let minDistance = Infinity;
+      zones.forEach(z => {
+        const dist = Math.sqrt(Math.pow(z.x - ox, 2) + Math.pow(z.y - oy, 2));
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestZone = z;
+        }
+      });
+      occupied.push(closestZone.id);
+    });
+    return occupied;
+  };
+
+  return (
+    <>
+      <style>
+        {`
+        @keyframes spark-scale {
+          0% { transform: scale(0); opacity: 1; }
+          100% { transform: scale(1.5); opacity: 0; }
+        }
+        @keyframes sparkPulse {
+          0% { transform: scale(0); opacity: 1; }
+          50% { opacity: 1; }
+          100% { transform: scale(1.5); opacity: 0; }
+        }
+        @keyframes sparkExpand {
+          0% { transform: scale(0); opacity: 1; }
+          100% { transform: scale(2); opacity: 0; }
+        }
+        @keyframes sparkRotate {
+          0% { transform: translate(-50%, -50%) rotate(0deg) scale(0); opacity: 0; }
+          50% { opacity: 1; transform: translate(-50%, -50%) rotate(180deg) scale(1.2); }
+          100% { transform: translate(-50%, -50%) rotate(360deg) scale(0); opacity: 0; }
+        }
+      `}
+      </style>
+      <div
+        ref={dropRef}
+        onDragOver={handleNativeDragOver}
+        onDrop={handleNativeDrop}
+        className="canvas-placeholder"
+        style={{
+          width: "100%",
+          flex: 1,
+          minHeight: 0,
+          position: "relative",
+          backgroundColor: "white",
+          opacity: isSwitchingProject ? 0.3 : 1,
+          pointerEvents: isSwitchingProject ? 'none' : 'all',
+          transition: 'opacity 0.2s ease'
+        }}
+        onClick={() => setActiveSymbol(null)}
+      >
+        {isSwitchingProject && <DiagramLoader />}
+
+        {hasFetchedOnce && !isSwitchingProject && droppedItems.length === 0 && (
+          <DiagramEmptyState />
+        )}
+        {/* Connection Lines Layer */}
+        <svg
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            pointerEvents: "none",
+            zIndex: 0,
+          }}
+        >
+          {connections.map((connKey) => {
+            const [id1, id2] = connKey.split("-");
+            const item1 = droppedItems.find((i) => String(i.id) === id1);
+            const item2 = droppedItems.find((i) => String(i.id) === id2);
+
+            if (item1 && item2) {
+              const pos1 = dragPositions[id1] ? dragPositions[id1] : { x: item1.x, y: item1.y };
+              const pos2 = dragPositions[id2] ? dragPositions[id2] : { x: item2.x, y: item2.y };
+              
+              return (
+                <line
+                  key={connKey}
+                  x1={pos1.x + item1.width / 2}
+                  y1={pos1.y + item1.height / 2}
+                  x2={pos2.x + item2.width / 2}
+                  y2={pos2.y + item2.height / 2}
+                  stroke="black"
+                  strokeWidth="2"
+                  strokeDasharray="5,5"
+                  style={{ pointerEvents: "none" }}
+                />
+              );
+            }
+            return null;
+          })}
+        </svg>
+
+        {/* Spark Effects Layer */}
+        {sparkEffects.map((spark) => (
+          <div
+            key={spark.id}
+            style={{
+              position: "absolute",
+              left: spark.x,
+              top: spark.y,
+              transform: "translate(-50%, -50%)",
+              pointerEvents: "none",
+              zIndex: 1000,
+            }}
+          >
+            <div
+              className="spark-animation"
+              style={{
+                width: "40px",
+                height: "40px",
+                background:
+                  "radial-gradient(circle, rgba(255,255,0,1) 0%, rgba(255,165,0,0) 70%)",
+                borderRadius: "50%",
+                animation: "spark-scale 0.5s ease-out forwards",
+              }}
+            />
+          </div>
+        ))}
+
+        {droppedItems.map((item, index) => {
+          const dragPos = dragPositions[item.id];
+          const isActive = activeSymbol === index;
+          const rotation = rotatingItem?.index === index ? rotatingItem.rotation : item.rotation;
+          const hasConn = hasConnection(item.id);
+
+          return (
+            <SimulationNode
+              key={item.id}
+              item={item}
+              index={index}
+              dragPos={dragPos}
+              isActive={isActive}
+              rotation={rotation}
+              hasConn={hasConn}
+              onSelect={handleSelect}
+              onDrag={(e, d) => {
+                setDragPositions(prev => ({
+                  ...prev,
+                  [item.id]: { x: d.x, y: d.y }
+                }));
+              }}
+              onResizeStop={(e, dir, ref, delta, position) =>
+                handleResizeStop(index, dir, ref, delta, position)
+              }
+              onDragStop={(e, d) => {
+                const currentItem = droppedItems[index];
+                if (currentItem) {
+                  const rawItem = { ...currentItem, x: d.x, y: d.y };
+                  const { x: snapX, y: snapY, snapped } = calculateSnapPosition(rawItem, droppedItems);
+                  const finalX = snapped ? snapX : d.x;
+                  const finalY = snapped ? snapY : d.y;
+                  const updatedItem = { ...currentItem, x: finalX, y: finalY };
+
+                  setDragPositions(prev => {
+                    const newState = { ...prev };
+                    delete newState[currentItem.id];
+                    return newState;
+                  });
+
+                  dispatch(
+                    updateSymbolInTab({
+                      tabId: activeTabId,
+                      symbolId: currentItem.id,
+                      updates: { x: finalX, y: finalY },
+                    }),
+                  );
+
+                  handleConnectionDetection(updatedItem);
+                }
+              }}
+              onRotateStart={handleRotateStart}
+              onContextMenu={handleContextMenu}
+            />
+          );
+        })}
+
+        {/* Spark effects */}
+        {sparkEffects.map((spark) => (
+          <div
+            key={spark.id}
+            style={{
+              position: "absolute",
+              left: spark.x,
+              top: spark.y,
+              width: "60px",
+              height: "60px",
+              transform: "translate(-50%, -50%)",
+              pointerEvents: "none",
+              zIndex: 9999,
+            }}
+          >
+            {/* Spark animation */}
+            <div
+              style={{
+                position: "absolute",
+                width: "100%",
+                height: "100%",
+                borderRadius: "50%",
+                background:
+                  "radial-gradient(circle, #FFD700 0%, #FFA500 30%, transparent 70%)",
+                animation: "sparkPulse 0.5s ease-out",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                width: "100%",
+                height: "100%",
+                borderRadius: "50%",
+                background:
+                  "radial-gradient(circle, rgba(255,255,255,0.8) 0%, rgba(255,215,0,0.5) 40%, transparent 70%)",
+                animation: "sparkExpand 0.5s ease-out",
+              }}
+            />
+            {/* Lightning bolt emoji */}
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                fontSize: "32px",
+                animation: "sparkRotate 0.5s ease-out",
+              }}
+            >
+              ⚡
+            </div>
+          </div>
+        ))}
+
+        {contextMenu && (
+          <div
+            ref={contextMenuRef}
+            className="context-menu"
+            style={{
+              position: "fixed",
+              top: contextMenu.y,
+              left: contextMenu.x,
+            }}
+          >
+            <button onClick={handleDelete} className="delete-button">
+              <FiTrash size={16} /> Delete
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+});
+
+
 const SimulationNode = React.memo(({
   item,
   index,
@@ -404,6 +955,22 @@ const BlockDiagram = () => {
   const activeTab = useMemo(() => tabs.find(t => t.id === activeTabId) || tabs[0], [tabs, activeTabId]);
   const droppedItems = activeTab?.symbols || [];
   const connections = activeTab?.connections || [];
+
+  const handleSidebarAddSymbol = useCallback((symbol) => {
+    const componentWidth = 100;
+    const componentHeight = 100;
+    const offsetStep = ((droppedItems.length % 6) + 1) * 35;
+    const newSymbol = {
+      symbol: symbol,
+      x: 180 + offsetStep,
+      y: 120 + offsetStep,
+      width: componentWidth,
+      height: componentHeight,
+      rotation: 0,
+      id: Date.now() + Math.random(),
+    };
+    dispatch(addSymbolToTab({ tabId: activeTabId, symbol: newSymbol }));
+  }, [activeTabId, dispatch, droppedItems.length]);
 
   // Internal simulation tab switching
   const handleSimulationTabClick = useCallback((id) => {
@@ -648,11 +1215,13 @@ const BlockDiagram = () => {
 
   useEffect(() => {
     try {
-      fetchFileSystem(user.userId, setFileSystem, buildTree);
+      if (user?.userId) {
+        fetchFileSystem(user.userId, setFileSystem, buildTree);
+      }
     } catch (error) {
       console.log(error);
     }
-  }, []);
+  }, [user?.userId]);
 
   useEffect(() => {
     checkProductDefinition(activeProductId, setIsProductDefined);
@@ -1051,449 +1620,8 @@ const BlockDiagram = () => {
     }
   };
 
-  const SymbolItem = ({ symbol }) => {
-    const [, drag] = useDrag(() => ({
-      type: "symbol",
-      item: { symbol },
-    }));
-    return (
-      <Tooltip
-        label={symbol.name}
-        placement="right"
-        hasArrow
-        bg="#1e293b"
-        color="#ffffff"
-        fontSize="xs"
-      >
-        <chakra.button
-          ref={drag}
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          w="40px" // Fixed width for grid
-          h="40px" // Fixed height for grid
-          borderRadius="md"
-          bg="#ffffff"
-          border="1px solid #e2e8f0"
-          _hover={{ bg: "#f1f5f9", transform: "scale(1.05)" }}
-          transition="all 0.15s ease"
-          cursor="grab"
-        >
-          <img
-            src={symbol.src}
-            alt={symbol.name}
-            style={{ width: "28px", height: "28px" }} // Slightly smaller icon
-          />
-        </chakra.button>
-      </Tooltip>
-    );
-  };
-
-  const Canvas = () => {
-    const [dragPositions, setDragPositions] = useState({});
-    const canvasRef = useRef(null);
-
-    const [, drop] = useDrop(
-      () => ({
-        accept: "symbol",
-        drop: (item, monitor) => {
-          const offset = monitor.getClientOffset();
-          if (item && item.symbol && offset && canvasRef.current) {
-            const rect = canvasRef.current.getBoundingClientRect();
-            // Calculate precise drop coordinate based on cursor offset and canvas bounding box
-            const componentWidth = 100;
-            const componentHeight = 100;
-            const x = offset.x - rect.left - (componentWidth / 2);
-            const y = offset.y - rect.top - (componentHeight / 2);
-            
-            // Add scroll offsets if the canvas is scrollable
-            const scrollLeft = canvasRef.current.scrollLeft || 0;
-            const scrollTop = canvasRef.current.scrollTop || 0;
-            const newSymbol = {
-              symbol: item.symbol,
-              x: x + scrollLeft,
-              y: y + scrollTop,
-              width: componentWidth,
-              height: componentHeight,
-              rotation: 0,
-              id: Date.now() + Math.random(),
-            };
-            dispatch(addSymbolToTab({ tabId: activeTabId, symbol: newSymbol }));
-            setActiveSymbol(droppedItems.length);
-          }
-        },
-      }),
-      [droppedItems, activeTabId],
-    );
-
-    // Merge refs for the drop target
-    const dropRef = useCallback((node) => {
-      canvasRef.current = node;
-      drop(node);
-    }, [drop]);
-
-    const handleRotateStart = (index, event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const symbol = droppedItems[index];
-      const centerX = symbol.x + symbol.width / 2;
-      const centerY = symbol.y + symbol.height / 2;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const startRotation = symbol.rotation || 0;
-
-      let startAngle =
-        Math.atan2(startY - centerY, startX - centerX) * (180 / Math.PI);
-
-      const handleMouseMove = (e) => {
-        const currentX = e.clientX;
-        const currentY = e.clientY;
-        const newAngle =
-          Math.atan2(currentY - centerY, currentX - centerX) * (180 / Math.PI);
-
-        const angleChange = newAngle - startAngle;
-        const newRotation = startRotation + angleChange;
-
-        setRotatingItem({ index, rotation: newRotation });
-      };
-
-      const handleMouseUp = (e) => {
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-
-        // Dispatch final rotation
-        // We need to calculate the final rotation again or use the last state?
-        // Better to recalculate or just use the last known if we had a ref.
-        // But since we are in a closure, we can just recalculate one last time or use the setRotatingItem value?
-        // Actually, let's just recalculate to be safe and clean.
-
-        const currentX = e.clientX;
-        const currentY = e.clientY;
-        const newAngle =
-          Math.atan2(currentY - centerY, currentX - centerX) * (180 / Math.PI);
-        const angleChange = newAngle - startAngle;
-
-        dispatch(
-          updateSymbolInTab({
-            tabId: activeTabId,
-            symbolId: symbol.id,
-            updates: { rotation: startRotation + angleChange },
-          }),
-        );
-        setRotatingItem(null);
-      };
-
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-    };
-
-    const handleResizeStop = (index, _dir, ref, delta, position) => {
-      const item = droppedItems[index];
-      if (item) {
-        dispatch(
-          updateSymbolInTab({
-            tabId: activeTabId,
-            symbolId: item.id,
-            updates: {
-              width: ref.offsetWidth,
-              height: ref.offsetHeight,
-              x: position.x,
-              y: position.y,
-            },
-          }),
-        );
-      }
-    };
-
-    const handleSelect = (index) => {
-      setActiveSymbol(index);
-    };
-
-    const hasConnection = (itemId) => {
-      return connections.some(conn => conn.includes(String(itemId)));
-    };
-
-    const getOccupiedZones = (mcItemId) => {
-      const mcConns = connections.filter(conn => conn.includes(String(mcItemId)));
-      const mcItem = droppedItems.find(i => String(i.id) === String(mcItemId));
-      if (!mcItem || mcConns.length === 0) return [];
-
-      const occupied = [];
-      mcConns.forEach(conn => {
-        const otherId = conn.split('-').find(id => id !== String(mcItemId));
-        const otherItem = droppedItems.find(i => String(i.id) === otherId);
-        if (!otherItem) return;
-
-        const ox = otherItem.x + otherItem.width / 2;
-        const oy = otherItem.y + otherItem.height / 2;
-
-        const zones = [
-          { id: "Z1", x: mcItem.x + mcItem.width / 2, y: mcItem.y },
-          { id: "Z2", x: mcItem.x + mcItem.width, y: mcItem.y + mcItem.height * 0.25 },
-          { id: "Z3", x: mcItem.x + mcItem.width, y: mcItem.y + mcItem.height * 0.75 },
-          { id: "Z4", x: mcItem.x + mcItem.width / 2, y: mcItem.y + mcItem.height },
-          { id: "Z5", x: mcItem.x, y: mcItem.y + mcItem.height * 0.75 },
-          { id: "Z6", x: mcItem.x, y: mcItem.y + mcItem.height * 0.25 },
-        ];
-
-        let closestZone = zones[0];
-        let minDistance = Infinity;
-        zones.forEach(z => {
-          const dist = Math.sqrt(Math.pow(z.x - ox, 2) + Math.pow(z.y - oy, 2));
-          if (dist < minDistance) {
-            minDistance = dist;
-            closestZone = z;
-          }
-        });
-        occupied.push(closestZone.id);
-      });
-      return occupied;
-    };
-
-    return (
-      <>
-        <style>
-          {`
-          @keyframes spark-scale {
-            0% { transform: scale(0); opacity: 1; }
-            100% { transform: scale(1.5); opacity: 0; }
-          }
-          @keyframes sparkPulse {
-            0% { transform: scale(0); opacity: 1; }
-            50% { opacity: 1; }
-            100% { transform: scale(1.5); opacity: 0; }
-          }
-          @keyframes sparkExpand {
-            0% { transform: scale(0); opacity: 1; }
-            100% { transform: scale(2); opacity: 0; }
-          }
-          @keyframes sparkRotate {
-            0% { transform: translate(-50%, -50%) rotate(0deg) scale(0); opacity: 0; }
-            50% { opacity: 1; transform: translate(-50%, -50%) rotate(180deg) scale(1.2); }
-            100% { transform: translate(-50%, -50%) rotate(360deg) scale(0); opacity: 0; }
-          }
-        `}
-        </style>
-        <div
-          ref={dropRef}
-          className="canvas-placeholder"
-          style={{
-            width: "100%",
-            flex: 1,
-            minHeight: 0,
-            position: "relative",
-            backgroundColor: "white",
-            opacity: (isSwitchingProject || !isHydrated) ? 0.3 : 1,
-            pointerEvents: (isSwitchingProject || !isHydrated) ? 'none' : 'all',
-            transition: 'opacity 0.2s ease'
-          }}
-          onClick={() => setActiveSymbol(null)} // Deselects when clicking outside
-        >
-          {isSwitchingProject && <DiagramLoader />}
-
-          {hasFetchedOnce && !isSwitchingProject && droppedItems.length === 0 && (
-            <DiagramEmptyState />
-          )}
-          {/* Connection Lines Layer */}
-          <svg
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              height: "100%",
-              pointerEvents: "none", // Allow clicks to pass through to canvas/items
-              zIndex: 0,
-            }}
-          >
-            {connections.map((connKey) => {
-              const [id1, id2] = connKey.split("-");
-              // IDs are stored as strings in connection key, but might be numbers in items
-              // Convert to string for comparison or just use loose equality if safe, but explicit is better.
-              const item1 = droppedItems.find((i) => String(i.id) === id1);
-              const item2 = droppedItems.find((i) => String(i.id) === id2);
-
-              if (item1 && item2) {
-                // Use intermediate drag coordinates if active, otherwise use Redux state coords
-                const pos1 = dragPositions[id1] ? dragPositions[id1] : { x: item1.x, y: item1.y };
-                const pos2 = dragPositions[id2] ? dragPositions[id2] : { x: item2.x, y: item2.y };
-                
-                return (
-                  <line
-                    key={connKey}
-                    x1={pos1.x + item1.width / 2}
-                    y1={pos1.y + item1.height / 2}
-                    x2={pos2.x + item2.width / 2}
-                    y2={pos2.y + item2.height / 2}
-                    stroke="black"
-                    strokeWidth="2"
-                    strokeDasharray="5,5" // Optional: dashed line
-                    style={{ pointerEvents: "none" }} // Ensure SVG lines do not block drag events
-                  />
-                );
-              }
-              return null;
-            })}
-          </svg>
-
-          {/* Spark Effects Layer */}
-          {sparkEffects.map((spark) => (
-            <div
-              key={spark.id}
-              style={{
-                position: "absolute",
-                left: spark.x,
-                top: spark.y,
-                transform: "translate(-50%, -50%)",
-                pointerEvents: "none",
-                zIndex: 1000,
-              }}
-            >
-              <div
-                className="spark-animation"
-                style={{
-                  width: "40px",
-                  height: "40px",
-                  background:
-                    "radial-gradient(circle, rgba(255,255,0,1) 0%, rgba(255,165,0,0) 70%)",
-                  borderRadius: "50%",
-                  animation: "spark-scale 0.5s ease-out forwards",
-                }}
-              />
-            </div>
-          ))}
-
-          {droppedItems.map((item, index) => {
-            const dragPos = dragPositions[item.id];
-            const isActive = activeSymbol === index;
-            const rotation = rotatingItem?.index === index ? rotatingItem.rotation : item.rotation;
-            const hasConn = hasConnection(item.id);
-
-            return (
-              <SimulationNode
-                key={item.id}
-                item={item}
-                index={index}
-                dragPos={dragPos}
-                isActive={isActive}
-                rotation={rotation}
-                hasConn={hasConn}
-                onSelect={handleSelect}
-                onDrag={(e, d) => {
-                  setDragPositions(prev => ({
-                    ...prev,
-                    [item.id]: { x: d.x, y: d.y }
-                  }));
-                }}
-                onResizeStop={(e, dir, ref, delta, position) =>
-                  handleResizeStop(index, dir, ref, delta, position)
-                }
-                onDragStop={(e, d) => {
-                  const currentItem = droppedItems[index];
-                  if (currentItem) {
-                    const rawItem = { ...currentItem, x: d.x, y: d.y };
-                    const { x: snapX, y: snapY, snapped } = calculateSnapPosition(rawItem, droppedItems);
-                    const finalX = snapped ? snapX : d.x;
-                    const finalY = snapped ? snapY : d.y;
-                    const updatedItem = { ...currentItem, x: finalX, y: finalY };
-
-                    setDragPositions(prev => {
-                      const newState = { ...prev };
-                      delete newState[currentItem.id];
-                      return newState;
-                    });
-
-                    dispatch(
-                      updateSymbolInTab({
-                        tabId: activeTabId,
-                        symbolId: currentItem.id,
-                        updates: { x: finalX, y: finalY },
-                      }),
-                    );
-
-                    handleConnectionDetection(updatedItem);
-                  }
-                }}
-                onRotateStart={handleRotateStart}
-                onContextMenu={handleContextMenu}
-              />
-            );
-          })}
-
-          {/* Spark effects */}
-          {sparkEffects.map((spark) => (
-            <div
-              key={spark.id}
-              style={{
-                position: "absolute",
-                left: spark.x,
-                top: spark.y,
-                width: "60px",
-                height: "60px",
-                transform: "translate(-50%, -50%)",
-                pointerEvents: "none",
-                zIndex: 9999,
-              }}
-            >
-              {/* Spark animation */}
-              <div
-                style={{
-                  position: "absolute",
-                  width: "100%",
-                  height: "100%",
-                  borderRadius: "50%",
-                  background:
-                    "radial-gradient(circle, #FFD700 0%, #FFA500 30%, transparent 70%)",
-                  animation: "sparkPulse 0.5s ease-out",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  width: "100%",
-                  height: "100%",
-                  borderRadius: "50%",
-                  background:
-                    "radial-gradient(circle, rgba(255,255,255,0.8) 0%, rgba(255,215,0,0.5) 40%, transparent 70%)",
-                  animation: "sparkExpand 0.5s ease-out",
-                }}
-              />
-              {/* Lightning bolt emoji */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: "50%",
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  fontSize: "32px",
-                  animation: "sparkRotate 0.5s ease-out",
-                }}
-              >
-                ⚡
-              </div>
-            </div>
-          ))}
-
-          {contextMenu && (
-            <div
-              ref={contextMenuRef}
-              className="context-menu"
-              style={{
-                position: "fixed",
-                top: contextMenu.y,
-                left: contextMenu.x,
-              }}
-            >
-              <button onClick={handleDelete} className="delete-button">
-                <FiTrash size={16} /> Delete
-              </button>
-            </div>
-          )}
-        </div>
-      </>
-    );
-  };
+  // SymbolItem and Canvas (SimulationCanvas) are now defined outside BlockDiagram
+  // to prevent react-dnd hooks from being destroyed on re-render.
 
   const SidebarContent = (
   <>
@@ -1648,7 +1776,11 @@ const BlockDiagram = () => {
                               className="symbol-items"
                             >
                               {section.items.map((symbol, symbolIndex) => (
-                                <SymbolItem key={symbolIndex} symbol={symbol} />
+                                <SymbolItem
+                                  key={symbolIndex}
+                                  symbol={symbol}
+                                  onAddClick={handleSidebarAddSymbol}
+                                />
                               ))}
                             </SimpleGrid>
                           )}
@@ -1908,7 +2040,26 @@ const BlockDiagram = () => {
               />
             )} */}
 
-            <Canvas />
+            <SimulationCanvas
+              droppedItems={droppedItems}
+              connections={connections}
+              activeTabId={activeTabId}
+              activeSymbol={activeSymbol}
+              setActiveSymbol={setActiveSymbol}
+              rotatingItem={rotatingItem}
+              setRotatingItem={setRotatingItem}
+              sparkEffects={sparkEffects}
+              isSwitchingProject={isSwitchingProject}
+              isHydrated={isHydrated}
+              hasFetchedOnce={hasFetchedOnce}
+              contextMenu={contextMenu}
+              contextMenuRef={contextMenuRef}
+              handleDelete={handleDelete}
+              handleContextMenu={handleContextMenu}
+              handleConnectionDetection={handleConnectionDetection}
+              calculateSnapPosition={calculateSnapPosition}
+              dispatch={dispatch}
+            />
           </div>
         </div>
       </div>

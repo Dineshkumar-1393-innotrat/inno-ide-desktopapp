@@ -48,7 +48,12 @@ const Embedded = () => {
                 if (window.electronAPI?.flash?.detectPorts) {
                     ports = await window.electronAPI.flash.detectPorts();
                 }
-                const selectedPort = (ports && ports.length > 0) ? ports[0].path : 'COM7';
+                if (!ports || ports.length === 0) {
+                    setResponse((prev) => `${prev}\n❌ No ESP32 device detected! Please connect your ESP32 board via USB data cable and try again.`);
+                    setIsFlashing(false);
+                    return;
+                }
+                const selectedPort = ports[0].path;
 
                 setResponse((prev) => `${prev}\nDetected Port: ${selectedPort}. Flashing ESP32 device...`);
 
@@ -67,7 +72,7 @@ const Embedded = () => {
 
                 await window.electronAPI.flash.runPipeline({
                     port: selectedPort,
-                    target: 'esp32s3',
+                    target: 'auto',
                     apiUrl: `${API.ADMIN}/check-code`
                 });
 

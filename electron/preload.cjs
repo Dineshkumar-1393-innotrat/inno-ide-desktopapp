@@ -2,7 +2,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const electronAPI = {
   app: {
-    getInfo: () => ipcRenderer.invoke('app:get-info')
+    getInfo: () => ipcRenderer.invoke('app:get-info'),
+    openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+    createExpoSnack: (params) => ipcRenderer.invoke('app:create-expo-snack', params),
+    startCompanionServer: (params) => ipcRenderer.invoke('app:start-companion-server', params),
+    getCompanionInfo: () => ipcRenderer.invoke('app:get-companion-info'),
+    stopCompanionServer: () => ipcRenderer.invoke('app:stop-companion-server'),
+    onCompanionAction: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on('companion:action', listener);
+      return () => ipcRenderer.removeListener('companion:action', listener);
+    }
   },
 
   project: {
