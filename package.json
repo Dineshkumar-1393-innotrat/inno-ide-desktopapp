@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "author": "Innotrat Labs",
-  "description": "InnoView IDE Desktop Application",
+  "description": "InnoIDE Desktop Application",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {

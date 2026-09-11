@@ -1,5 +1,5 @@
-appId: com.innotrat.innoviewide
-productName: InnoView IDE
+appId: com.innotrat.innoide
+productName: InnoIDE
 copyright: Copyright © 2026 Innotrat Labs
 electronDist: node_modules/electron/dist
 npmRebuild: false
@@ -20,9 +20,17 @@ files:
 
 win:
   target:
+    - target: nsis
+      arch:
+        - x64
     - target: portable
       arch:
         - x64
 
 portable:
-  artifactName: InnoViewIDE-Portable-${version}.exe
+  artifactName: InnoIDE-Portable-${version}.exe
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: InnoIDE-Setup-${version}.exe

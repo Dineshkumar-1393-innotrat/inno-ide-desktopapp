@@ -18,6 +18,8 @@ This document covers building and packaging InnoView IDE into standalone Windows
 ---
 
 ## Production Packaging Deliverables
-When running `npm run dist:win`, output files generated inside `dist-desktop/`:
-- `InnoView IDE Setup 1.0.0.exe` (NSIS Installer with desktop/start menu shortcuts)
-- `InnoViewIDE-Portable-1.0.0.exe` (Standalone portable application)
+When running `npm run dist:win`, output files generated inside `release/`:
+- `release/win-unpacked/InnoIDE.exe` (Standalone unpacked Windows executable)
+- `InnoIDE-Setup-1.0.0.exe` (NSIS Installer with desktop/start menu shortcuts)
+- `InnoIDE-Portable-1.0.0.exe` (Standalone single-file portable application)
+- `InnoIDE-Windows-x64.zip` (Compressed portable distribution)

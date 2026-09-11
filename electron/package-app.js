@@ -8,7 +8,7 @@ const releaseDir = path.join(rootDir, 'release');
 const winUnpackedDir = path.join(releaseDir, 'win-unpacked');
 const electronDistDir = path.join(rootDir, 'node_modules', 'electron', 'dist');
 
-console.log('--- InnoView IDE Executable Packager ---');
+console.log('--- InnoIDE Executable Packager ---');
 
 // 1. Ensure win-unpacked directory has Electron distribution
 if (!fs.existsSync(winUnpackedDir)) {
@@ -33,9 +33,9 @@ fs.cpSync(path.join(rootDir, 'electron'), path.join(stagingDir, 'electron'), { r
 // Minimal runtime package.json
 const runtimePkg = {
   name: 'innotrat-texteditor',
-  productName: 'InnoView IDE',
+  productName: 'InnoIDE',
   version: '1.0.0',
-  description: 'InnoView IDE Desktop Application',
+  description: 'InnoIDE Desktop Application',
   main: 'electron/main.js',
   type: 'module'
 };
@@ -60,16 +60,16 @@ if (fs.existsSync(defaultAppAsar)) {
   }
 }
 
-// 4. Create InnoViewIDE.exe executable in win-unpacked
+// 4. Create InnoIDE.exe executable in win-unpacked
 const electronExe = path.join(winUnpackedDir, 'electron.exe');
-const innoviewExe = path.join(winUnpackedDir, 'InnoViewIDE.exe');
+const innoIdeExe = path.join(winUnpackedDir, 'InnoIDE.exe');
 if (fs.existsSync(electronExe)) {
-  fs.copyFileSync(electronExe, innoviewExe);
-  console.log(`4. Created standalone executable: ${innoviewExe}`);
+  fs.copyFileSync(electronExe, innoIdeExe);
+  console.log(`4. Created standalone executable: ${innoIdeExe}`);
 }
 
 // 5. Clean up staging folder
 fs.rmSync(stagingDir, { recursive: true, force: true });
 
 console.log('--- Packaging Complete! ---');
-console.log(`Executable located at: ${innoviewExe}`);
+console.log(`Executable located at: ${innoIdeExe}`);

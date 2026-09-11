@@ -19,10 +19,10 @@ Pre-built Windows desktop binaries are generated for x64 Windows 10 / 11 archite
 
 | Package Type | File Name | Size | Architecture | Description & Direct Launch |
 | :--- | :--- | :--- | :--- | :--- |
-| **Windows Setup Installer (`.exe`)** | [`InnoView IDE Setup 1.0.0.exe`](./release/InnoView%20IDE%20Setup%201.0.0.exe) | ~152 MB | Windows x64 | **Recommended**. Standard Windows installer. Installs desktop shortcut, Start Menu entry, and uninstaller. |
-| **Standalone Portable (`.exe`)** | [`InnoViewIDE-Portable-1.0.0.exe`](./release/InnoViewIDE-Portable-1.0.0.exe) | ~540 MB | Windows x64 | **Zero-Install Executable**. Self-contained single `.exe`. Double-click to launch directly from any folder or USB drive. |
-| **Unpacked Application (`.exe`)** | [`release/win-unpacked/InnoViewIDE.exe`](./release/win-unpacked/InnoViewIDE.exe) | ~210 MB | Windows x64 | Direct unpacked executable. Instantly launches without any extraction or installation steps. |
-| **Portable ZIP Archive (`.zip`)** | [`InnoViewIDE-Windows-x64.zip`](./release/InnoViewIDE-Windows-x64.zip) | ~222 MB | Windows x64 | Compressed archive of the standalone unpacked distribution. Extract and run `InnoViewIDE.exe`. |
+| **Standalone Application (`.exe`)** | [`release/win-unpacked/InnoIDE.exe`](./release/win-unpacked/InnoIDE.exe) | ~210 MB | Windows x64 | **Direct Standalone Executable**. Instantly launches without any extraction or installation steps. |
+| **Standalone Portable (`.exe`)** | [`InnoIDE-Portable-1.0.0.exe`](./release/InnoIDE-Portable-1.0.0.exe) | ~540 MB | Windows x64 | **Zero-Install Single Executable**. Double-click to launch directly from any folder or USB drive. |
+| **Windows Setup Installer (`.exe`)** | [`InnoIDE-Setup-1.0.0.exe`](./release/InnoIDE-Setup-1.0.0.exe) | ~541 MB | Windows x64 | **Standard Installer**. Installs desktop shortcut, Start Menu entry, and uninstaller. |
+| **Portable ZIP Archive (`.zip`)** | [`InnoIDE-Windows-x64.zip`](./release/InnoIDE-Windows-x64.zip) | ~222 MB | Windows x64 | Compressed archive containing `InnoIDE.exe` and complete runtime libraries. |
 
 > [!TIP]
 > **GitHub Releases:**
@@ -30,8 +30,8 @@ Pre-built Windows desktop binaries are generated for x64 Windows 10 / 11 archite
 > [👉 InnoIDE Desktop App Releases](https://github.com/Dineshkumar-1393-innotrat/inno-ide-desktopapp/releases)
 
 ### 🏃 Quick Start with Pre-Built `.exe`
-1. Download either the **Setup Installer** (`InnoView IDE Setup 1.0.0.exe`) or the **Standalone Portable** (`InnoViewIDE-Portable-1.0.0.exe`).
-2. Run the `.exe` file.
+1. Download either [`InnoIDE.exe`](./release/win-unpacked/InnoIDE.exe) or the portable executable [`InnoIDE-Portable-1.0.0.exe`](./release/InnoIDE-Portable-1.0.0.exe).
+2. Run `InnoIDE.exe`.
 3. Plug in an ESP32 or microcontroller via USB. The application will automatically detect your COM port and provide full visual block programming, C++ Monaco editor, and live serial flashing!
 
 ---

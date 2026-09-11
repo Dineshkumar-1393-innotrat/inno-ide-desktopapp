@@ -21,7 +21,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
-    title: 'InnoView IDE Desktop',
+    title: 'InnoIDE Desktop',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
