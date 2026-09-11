@@ -49,6 +49,7 @@
     "html2canvas": "^1.4.1",
     "js-cookie": "^3.0.5",
     "jszip": "^3.10.1",
+    "localtunnel": "^2.0.2",
     "lucide-react": "^0.447.0",
     "monaco-editor": "^0.52.0",
     "qrcode.react": "^4.2.0",

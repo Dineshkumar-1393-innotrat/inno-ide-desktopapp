@@ -8,6 +8,9 @@ const electronAPI = {
     startCompanionServer: (params) => ipcRenderer.invoke('app:start-companion-server', params),
     getCompanionInfo: () => ipcRenderer.invoke('app:get-companion-info'),
     stopCompanionServer: () => ipcRenderer.invoke('app:stop-companion-server'),
+    startRemoteTunnel: (port) => ipcRenderer.invoke('app:start-remote-tunnel', port),
+    stopRemoteTunnel: () => ipcRenderer.invoke('app:stop-remote-tunnel'),
+    getRemoteTunnel: () => ipcRenderer.invoke('app:get-remote-tunnel'),
     onCompanionAction: (callback) => {
       const listener = (_event, value) => callback(value);
       ipcRenderer.on('companion:action', listener);

@@ -391,13 +391,21 @@ export default function ESP32Flasher({
   const activePort = selectedDevice?.port || "COM9";
   const [companionServerInfo, setCompanionServerInfo] = useState({ ip: "192.168.0.2", port: 5055 });
   const [localCompanionUrl, setLocalCompanionUrl] = useState("http://192.168.0.2:5055");
+  const [companionNetworkMode, setCompanionNetworkMode] = useState("local"); // "local" | "cloud"
+  const [remoteTunnelState, setRemoteTunnelState] = useState({
+    active: false,
+    url: "",
+    provider: "",
+    loading: false,
+    error: null
+  });
   const [qrScanMode, setQrScanMode] = useState("device"); // Default to Device QR
   const [deviceQrFormat, setDeviceQrFormat] = useState("url"); // "url" (Phone Camera Web App) | "json" (Raw Schema)
   const [expoQrTarget, setExpoQrTarget] = useState("app"); // "app" (Expo Go exp://) | "web" (Snack Web https://)
   const [expoSdkVersion, setExpoSdkVersion] = useState("54.0.0"); // Stable Expo Go SDK 54.0.0
   const [expoGoUrlMap, setExpoGoUrlMap] = useState({});
 
-  // Query actual host LAN IP from Electron Companion Server on mount
+  // Query actual host LAN IP from Electron Companion Server and check existing remote tunnel on mount
   useEffect(() => {
     if (window.electronAPI?.app?.getCompanionInfo) {
       window.electronAPI.app.getCompanionInfo().then((info) => {
@@ -407,7 +415,94 @@ export default function ESP32Flasher({
         }
       }).catch(() => { });
     }
+    if (window.electronAPI?.app?.getRemoteTunnel) {
+      window.electronAPI.app.getRemoteTunnel().then((res) => {
+        if (res?.active && res?.url) {
+          setRemoteTunnelState({ active: true, url: res.url, provider: res.provider, loading: false, error: null });
+        }
+      }).catch(() => { });
+    }
   }, []);
+
+  // Multi-device synchronization: listen to companion actions pushed from any connected phone or browser
+  useEffect(() => {
+    if (window.electronAPI?.app?.onCompanionAction) {
+      const unsub = window.electronAPI.app.onCompanionAction((action) => {
+        if (action) {
+          if (action.isOn) {
+            setLiveLedToggle(true);
+            setWidgets((prev) =>
+              prev.map((w) =>
+                w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+                  ? { ...w, state: true, value: true }
+                  : w
+              )
+            );
+          } else if (action.isOff) {
+            setLiveLedToggle(false);
+            setWidgets((prev) =>
+              prev.map((w) =>
+                w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+                  ? { ...w, state: false, value: false }
+                  : w
+              )
+            );
+          }
+        }
+      });
+      return unsub;
+    }
+  }, []);
+
+  // Toggle Cloud Remote Tunnel (HTTPS relay for cellular / WAN / non-local network access)
+  const handleToggleCloudRemote = async (enable) => {
+    if (enable) {
+      setRemoteTunnelState((prev) => ({ ...prev, loading: true, error: null }));
+      try {
+        if (window.electronAPI?.app?.startRemoteTunnel) {
+          const res = await window.electronAPI.app.startRemoteTunnel(5055);
+          if (res && res.success && res.url) {
+            setRemoteTunnelState({ active: true, url: res.url, provider: res.provider, loading: false, error: null });
+            setCompanionNetworkMode("cloud");
+            toast({
+              title: "🌐 Cloud Remote Active",
+              description: `Public HTTPS URL ready (${res.provider || 'SSL Tunnel'}). Mobile devices can now connect from any network (4G/5G).`,
+              status: "success",
+              duration: 4500
+            });
+            return;
+          } else {
+            throw new Error(res?.error || "Failed to start remote tunnel");
+          }
+        }
+      } catch (err) {
+        setRemoteTunnelState((prev) => ({ ...prev, loading: false, error: err.message }));
+        toast({
+          title: "Cloud Remote Notice",
+          description: err.message || "Could not establish cloud tunnel",
+          status: "warning",
+          duration: 4000
+        });
+      }
+    } else {
+      setRemoteTunnelState((prev) => ({ ...prev, loading: true }));
+      try {
+        if (window.electronAPI?.app?.stopRemoteTunnel) {
+          await window.electronAPI.app.stopRemoteTunnel();
+        }
+        setRemoteTunnelState({ active: false, url: "", provider: "", loading: false, error: null });
+        setCompanionNetworkMode("local");
+        toast({
+          title: "Local Wi-Fi Mode Active",
+          description: "Companion app switched to local Wi-Fi IP.",
+          status: "info",
+          duration: 2500
+        });
+      } catch (err) {
+        setRemoteTunnelState((prev) => ({ ...prev, loading: false }));
+      }
+    }
+  };
 
   // Live Telemetry Simulation for Gauges and Sensors in App Builder
   // Strictly PAUSED when Publish modal or Rule Builder modal is open to keep QR code 100% stable
@@ -440,6 +535,10 @@ export default function ESP32Flasher({
         localStorage.setItem("inno_publish_modal_open", "true");
       } catch (e) { }
       startLocalCompanionServer();
+      // Auto-start Cloud Remote tunnel so it is immediately ready when scanning from mobile 4G/5G
+      if (window.electronAPI?.app?.startRemoteTunnel && !remoteTunnelState.active && !remoteTunnelState.loading) {
+        handleToggleCloudRemote(true);
+      }
       if (!snackSessionId || !snackSessionMap[expoSdkVersion]) {
         syncSnackSession(false, expoSdkVersion);
       }
@@ -583,6 +682,11 @@ export default function ESP32Flasher({
         }
       }
 
+      // MULTI-DEVICE SYNC: Always notify Companion HTTP server (port 5055) so all connected phones on Wi-Fi & Cloud receive SSE update
+      try {
+        fetch("http://localhost:5055/api/action", { method: "POST", headers, body }).catch(() => {});
+      } catch (e) { }
+
       // TERTIARY: InnoIDE Backend (port 5004) — updates SwitchStatus record
       try {
         await fetch("http://localhost:5004/setSwitchStatus", {
@@ -719,21 +823,25 @@ export default function ESP32Flasher({
   // Mode 0: Mobile Web Companion App URL (Direct scan with any smartphone camera)
   const resolvedHostIp = companionServerInfo?.ip || "192.168.0.2";
   const resolvedHostPort = companionServerInfo?.port || 5055;
-  const webAppQrPayload = localCompanionUrl || `http://${resolvedHostIp}:${resolvedHostPort}`;
+  const isCloudActive = companionNetworkMode === "cloud" && remoteTunnelState.active && remoteTunnelState.url;
+  const webAppQrPayload = isCloudActive
+    ? remoteTunnelState.url
+    : (localCompanionUrl || `http://${resolvedHostIp}:${resolvedHostPort}`);
 
   // Mode 1: Compact Device Pairing QR (Exact schema required by React Native ScannerScreen)
   // Deterministic and stable: status is omitted so toggling light NEVER morphs the QR code
   const companionDevicePayload = useMemo(() => {
+    const bridgeBaseUrl = isCloudActive ? remoteTunnelState.url : `http://${resolvedHostIp}:${resolvedHostPort}`;
     return JSON.stringify({
       id: effectiveDeviceId,
       name: effectiveDeviceName,
       deviceType: effectiveDeviceType,
-      bridgeUrl: `http://${resolvedHostIp}:${resolvedHostPort}/api/action`,
-      serverUrl: `http://${resolvedHostIp}:${resolvedHostPort}`,
+      bridgeUrl: `${bridgeBaseUrl}/api/action`,
+      serverUrl: bridgeBaseUrl,
       backendUrl: `http://${resolvedHostIp}:5004`,
       port: activePort
     });
-  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort]);
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, isCloudActive, remoteTunnelState.url]);
 
   // Mode 2: Full Project Bundle QR (Device + UI + Logics, also 100% compliant with React Native ScannerScreen)
   const bundleQrPayload = useMemo(() => {
@@ -2187,6 +2295,74 @@ export default function ESP32Flasher({
       }, 3000);
     }
 
+    function applySynchronizedState(data) {
+      if (!data || !data.states) return;
+      var states = data.states;
+      Object.keys(states).forEach(function(widgetId) {
+        var val = states[widgetId];
+        // 1. Switch inputs
+        var switchEl = document.getElementById('input-' + widgetId);
+        if (!switchEl && (widgetId === 'w-led' || widgetId.toLowerCase().includes('led'))) {
+          switchEl = document.getElementById('input-w-led') || document.querySelector('input[type="checkbox"]');
+        }
+        if (switchEl && typeof val === 'boolean') {
+          if (switchEl.checked !== val) {
+            switchEl.checked = val;
+            var card = document.getElementById('card-' + widgetId) || switchEl.closest('.card');
+            if (card) {
+              if (val) card.classList.add('glow-blue');
+              else card.classList.remove('glow-blue');
+            }
+            addLog('🔄 [SYNC] ' + widgetId + ' updated from network -> ' + (val ? 'ON' : 'OFF'));
+          }
+        }
+        // 2. Sliders
+        var valEl = document.getElementById('val-' + widgetId);
+        var barEl = document.getElementById('bar-' + widgetId);
+        if (valEl && typeof val === 'number') {
+          widgetValues[widgetId] = val;
+          valEl.innerText = val + '°';
+          if (barEl) barEl.style.width = (((val - 0) / 180) * 100) + '%';
+        }
+      });
+    }
+
+    function initRealtimeStateSync() {
+      var companionIp = '${companionServerInfo?.ip || resolvedHostIp}';
+      var hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : ('http://' + companionIp + ':5055');
+
+      // 1. Initial State Fetch
+      fetch(hostOrigin + '/api/state', { method: 'GET', mode: 'cors' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res && res.states) applySynchronizedState(res);
+        }).catch(function() {});
+
+      // 2. Real-time Server-Sent Events (SSE)
+      try {
+        if (window.EventSource) {
+          var evtSource = new EventSource(hostOrigin + '/api/events');
+          evtSource.onmessage = function(e) {
+            try {
+              var payload = JSON.parse(e.data);
+              applySynchronizedState(payload);
+            } catch(err) {}
+          };
+        }
+      } catch(e) {}
+
+      // 3. Resilient Polling Fallback (every 1.5s for instant multi-device sync across mobile 4G/5G networks)
+      setInterval(function() {
+        fetch(hostOrigin + '/api/state', { method: 'GET', mode: 'cors' })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            if (res && res.states) applySynchronizedState(res);
+          }).catch(function() {});
+      }, 1500);
+    }
+
     function pingCompanionServer() {
       var companionIp = '${companionServerInfo?.ip || resolvedHostIp}';
       var hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
@@ -2231,6 +2407,7 @@ export default function ESP32Flasher({
 
     window.addEventListener('load', function() {
       pingCompanionServer();
+      initRealtimeStateSync();
       var ua = navigator.userAgent || '';
       var isInApp = /MicroMessenger|Line|FB_IAB|Instagram|Twitter|WebView|SamsungBrowser|MiuiBrowser|GSA/i.test(ua) || (window.self !== window.top);
       var notice = document.getElementById('scannerNotice');
@@ -3866,7 +4043,7 @@ Generated automatically by **InnoIDE App Companion Studio**.
                   <AccordionItem border="none">
                     <AccordionButton px={2} py={2} _hover={{ bg: "transparent" }}>
                       <Box flex="1" textAlign="left" fontWeight="bold" fontSize="xs" color="gray.500" letterSpacing="wider">
-                        USER INTERFACE ({filteredPalette.length})
+                        CONTROL PANEL({filteredPalette.length})
                       </Box>
                       <AccordionIcon />
                     </AccordionButton>
@@ -6009,45 +6186,95 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           <Box
                             px={2.5}
                             py={1}
-                            bg="rgba(34,211,238,0.15)"
+                            bg={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.2)" : "rgba(34,211,238,0.15)"}
                             borderRadius="full"
                             border="1px solid"
-                            borderColor="rgba(34,211,238,0.3)"
+                            borderColor={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.4)" : "rgba(34,211,238,0.3)"}
                           >
-                            <Text fontSize="9px" fontWeight="800" color="#22D3EE" letterSpacing="wider">
-                              ● COMPANION WEB APP QR
+                            <Text fontSize="9px" fontWeight="800" color={companionNetworkMode === "cloud" ? "#C084FC" : "#22D3EE"} letterSpacing="wider">
+                              ● {companionNetworkMode === "cloud" ? "CLOUD REMOTE QR" : "COMPANION WEB APP QR"}
                             </Text>
                           </Box>
                         </HStack>
-                        <Badge colorScheme="green" variant="solid" bg="#059669" color="white" fontSize="9px" px={2.5} py={0.5} borderRadius="full">
-                          PHONE WEB APP
+                        <Badge colorScheme={companionNetworkMode === "cloud" ? "purple" : "green"} variant="solid" bg={companionNetworkMode === "cloud" ? "#7C3AED" : "#059669"} color="white" fontSize="9px" px={2.5} py={0.5} borderRadius="full">
+                          {companionNetworkMode === "cloud" ? "INTERNET & 4G/5G" : "LOCAL WI-FI"}
                         </Badge>
                       </HStack>
                     </Box>
 
-                    {/* QR Payload Info Banner */}
+                    {/* Network Mode Switcher: Local Wi-Fi vs Cloud Remote (Mobile 4G/5G / WAN) */}
                     <Box px={4} pt={3}>
-                      <HStack bg="#090D16" p={2} borderRadius="xl" border="1px solid" borderColor="rgba(34,211,238,0.2)" justify="space-between">
-                        <HStack spacing={2} px={1}>
-                          <Badge colorScheme="green" fontSize="9px" px={2} py={0.5} borderRadius="md">
-                            ✓ WEB APP READY
+                      <HStack bg="#0B1120" p={1} borderRadius="xl" border="1px solid" borderColor="rgba(56,189,248,0.2)" spacing={1.5}>
+                        <Button
+                          flex={1}
+                          size="xs"
+                          height="32px"
+                          borderRadius="lg"
+                          fontWeight="700"
+                          fontSize="11px"
+                          leftIcon={<FaWifi size={12} />}
+                          variant={companionNetworkMode === "local" ? "solid" : "ghost"}
+                          color={companionNetworkMode === "local" ? "gray.900" : "gray.400"}
+                          bg={companionNetworkMode === "local" ? "#22D3EE" : "transparent"}
+                          _hover={{ bg: companionNetworkMode === "local" ? "#06B6D4" : "whiteAlpha.100" }}
+                          onClick={() => handleToggleCloudRemote(false)}
+                        >
+                          Local Wi-Fi
+                        </Button>
+                        <Button
+                          flex={1}
+                          size="xs"
+                          height="32px"
+                          borderRadius="lg"
+                          fontWeight="700"
+                          fontSize="11px"
+                          isLoading={remoteTunnelState.loading}
+                          loadingText="Connecting..."
+                          leftIcon={<FaGlobe size={12} />}
+                          variant={companionNetworkMode === "cloud" ? "solid" : "ghost"}
+                          color={companionNetworkMode === "cloud" ? "white" : "gray.400"}
+                          bg={companionNetworkMode === "cloud" ? "#8B5CF6" : "transparent"}
+                          _hover={{ bg: companionNetworkMode === "cloud" ? "#7C3AED" : "whiteAlpha.100" }}
+                          onClick={() => handleToggleCloudRemote(true)}
+                        >
+                          Cloud Remote (4G/5G)
+                        </Button>
+                      </HStack>
+                    </Box>
+
+                    {/* QR Payload Info Banner */}
+                    <Box px={4} pt={2}>
+                      <HStack bg="#090D16" p={2.5} borderRadius="xl" border="1px solid" borderColor={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.3)" : "rgba(34,211,238,0.2)"} justify="space-between">
+                        <HStack spacing={2} px={1} overflow="hidden">
+                          <Badge
+                            colorScheme={companionNetworkMode === "cloud" ? "purple" : "green"}
+                            fontSize="9px"
+                            px={2}
+                            py={0.5}
+                            borderRadius="md"
+                          >
+                            {companionNetworkMode === "cloud" ? "🌐 HTTPS RELAY" : "📶 SAME NETWORK"}
                           </Badge>
-                          <Text fontSize="11px" color="#94A3B8" fontWeight="medium">
-                            Scan with phone camera to launch companion
+                          <Text fontSize="11px" color="#94A3B8" fontWeight="medium" noOfLines={1}>
+                            {companionNetworkMode === "cloud"
+                              ? "Works on 4G, 5G cellular data & remote networks"
+                              : "Devices must be on same local Wi-Fi router"}
                           </Text>
                         </HStack>
-                        <Text fontSize="10px" color="cyan.300" fontFamily="monospace" fontWeight="bold">
-                          {webAppQrPayload.length} chars
-                        </Text>
+                        <Badge variant="outline" colorScheme="cyan" fontSize="9px" px={1.5} py={0.5}>
+                          ⚡ MULTI-DEVICE SYNC
+                        </Badge>
                       </HStack>
                     </Box>
 
                     {/* QR Title & Scanner Hint */}
-                    <Text fontSize="12px" fontWeight="700" color="#E2E8F0" letterSpacing="wide" mt={2.5} mb={1}>
-                      SCAN WITH ANY PHONE CAMERA TO LAUNCH
+                    <Text fontSize="12px" fontWeight="700" color="#E2E8F0" letterSpacing="wide" mt={2.5} mb={0.5}>
+                      {companionNetworkMode === "cloud" ? "SCAN FROM ANY PHONE / ANY NETWORK" : "SCAN WITH ANY PHONE CAMERA"}
                     </Text>
-                    <Text fontSize="10px" color="#94A3B8" mb={2.5} px={4}>
-                      Point your smartphone camera at this QR code to instantly launch the live interactive companion controls.
+                    <Text fontSize="10px" color="#94A3B8" mb={2} px={4}>
+                      {companionNetworkMode === "cloud"
+                        ? "Point your smartphone camera at this QR code. Works instantly across mobile 4G/5G networks and remote internet without shared Wi-Fi."
+                        : "Point your smartphone camera at this QR code to launch companion controls on your local network."}
                     </Text>
 
                     {/* QR Code Scanner Frame */}
@@ -6057,21 +6284,21 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           position="relative"
                           p="16px"
                           borderRadius="20px"
-                          border="3px solid #22D3EE"
-                          bg="rgba(34,211,238,0.03)"
-                          boxShadow="0 0 30px rgba(34,211,238,0.12), inset 0 0 20px rgba(34,211,238,0.04)"
+                          border={`3px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`}
+                          bg={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.03)" : "rgba(34,211,238,0.03)"}
+                          boxShadow={companionNetworkMode === "cloud" ? "0 0 30px rgba(168,85,247,0.15)" : "0 0 30px rgba(34,211,238,0.12)"}
                         >
-                          <Box position="absolute" top="-2px" left="-2px" w="20px" h="20px" borderTop="4px solid #22D3EE" borderLeft="4px solid #22D3EE" borderTopLeftRadius="12px" />
-                          <Box position="absolute" top="-2px" right="-2px" w="20px" h="20px" borderTop="4px solid #22D3EE" borderRight="4px solid #22D3EE" borderTopRightRadius="12px" />
-                          <Box position="absolute" bottom="-2px" left="-2px" w="20px" h="20px" borderBottom="4px solid #22D3EE" borderLeft="4px solid #22D3EE" borderBottomLeftRadius="12px" />
-                          <Box position="absolute" bottom="-2px" right="-2px" w="20px" h="20px" borderBottom="4px solid #22D3EE" borderRight="4px solid #22D3EE" borderBottomRightRadius="12px" />
+                          <Box position="absolute" top="-2px" left="-2px" w="20px" h="20px" borderTop={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderLeft={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderTopLeftRadius="12px" />
+                          <Box position="absolute" top="-2px" right="-2px" w="20px" h="20px" borderTop={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderRight={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderTopRightRadius="12px" />
+                          <Box position="absolute" bottom="-2px" left="-2px" w="20px" h="20px" borderBottom={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderLeft={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomLeftRadius="12px" />
+                          <Box position="absolute" bottom="-2px" right="-2px" w="20px" h="20px" borderBottom={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderRight={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomRightRadius="12px" />
 
                           <Box
                             position="absolute"
                             left="10px"
                             right="10px"
                             h="2px"
-                            bg="linear-gradient(90deg, transparent, #22D3EE, transparent)"
+                            bg={`linear-gradient(90deg, transparent, ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}, transparent)`}
                             borderRadius="full"
                             opacity={0.7}
                             sx={{
@@ -6104,9 +6331,16 @@ Generated automatically by **InnoIDE App Companion Studio**.
                         <Text fontSize="11px" fontWeight="semibold" color="gray.400" textAlign="left">
                           Web App URL
                         </Text>
-                        <Text fontSize="10px" color="cyan.400" fontFamily="monospace">
-                          Local Wi-Fi Companion
-                        </Text>
+                        <HStack spacing={1}>
+                          {companionNetworkMode === "cloud" && (
+                            <Badge colorScheme="purple" fontSize="9px">
+                              {remoteTunnelState.provider || "HTTPS"}
+                            </Badge>
+                          )}
+                          <Text fontSize="10px" color={companionNetworkMode === "cloud" ? "purple.300" : "cyan.400"} fontFamily="monospace">
+                            {companionNetworkMode === "cloud" ? "Public Cloud Relay (4G/5G)" : "Local Wi-Fi Companion"}
+                          </Text>
+                        </HStack>
                       </HStack>
                       <HStack bg={useColorModeValue("gray.50", "gray.800")} p={1} borderRadius="xl" border="1px" borderColor={borderColor}>
                         <Input
@@ -6116,12 +6350,12 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           variant="unstyled"
                           px={2}
                           fontFamily="monospace"
-                          color="cyan.400"
+                          color={companionNetworkMode === "cloud" ? "purple.300" : "cyan.400"}
                           fontWeight="semibold"
                         />
                         <Button
                           size="xs"
-                          colorScheme="cyan"
+                          colorScheme={companionNetworkMode === "cloud" ? "purple" : "cyan"}
                           px={3}
                           borderRadius="lg"
                           leftIcon={<FaCopy size={10} />}
@@ -7096,10 +7330,9 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           </HStack>
 
                           <HStack spacing={3}>
-                            <HStack spacing={1} color="green.600" fontSize="11px" fontWeight="bold">
+                            <Box color="green.600">
                               <FaWifi size={13} />
-                              <Text>🔋 {device.battery}%</Text>
-                            </HStack>
+                            </Box>
 
                             {/* Selected Radio Badge */}
                             <Box

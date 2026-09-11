@@ -8,8 +8,163 @@ import { serialService } from '../services/serial.service.js';
 import { ipcMain, app, shell } from 'electron';
 import http from 'http';
 import os from 'os';
+import { spawn } from 'child_process';
 
 let companionServer = null;
+
+// Multi-Device Synchronized State Store
+let companionState = {
+  version: 1,
+  lastUpdate: Date.now(),
+  states: {
+    'w-led': false
+  },
+  lastPayload: 'LED:0',
+  activePort: 'COM9'
+};
+
+const sseClients = new Set();
+
+function broadcastStateUpdate(extraData = {}) {
+  companionState.version += 1;
+  companionState.lastUpdate = Date.now();
+  const eventPayload = JSON.stringify({
+    version: companionState.version,
+    lastUpdate: companionState.lastUpdate,
+    states: companionState.states,
+    lastPayload: companionState.lastPayload,
+    activePort: companionState.activePort,
+    ...extraData
+  });
+
+  for (const client of sseClients) {
+    try {
+      client.write(`data: ${eventPayload}\n\n`);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// Remote Public Tunnel Manager (Works across different mobile networks / 4G / 5G / WAN)
+let remoteTunnelProcess = null;
+let remoteTunnelLt = null;
+let currentRemoteUrl = '';
+let remoteTunnelProvider = '';
+let tunnelStartingPromise = null;
+
+async function startRemoteTunnel(port = currentCompanionPort) {
+  if (currentRemoteUrl) {
+    return { success: true, url: currentRemoteUrl, provider: remoteTunnelProvider };
+  }
+  if (tunnelStartingPromise) return await tunnelStartingPromise;
+
+  tunnelStartingPromise = (async () => {
+    // Provider 1: localhost.run via SSH (Instant HTTPS, zero-setup, direct access across all networks)
+    try {
+      const lhrUrl = await new Promise((resolve, reject) => {
+        const sshTimeout = setTimeout(() => {
+          if (remoteTunnelProcess) {
+            try { remoteTunnelProcess.kill(); } catch {}
+            remoteTunnelProcess = null;
+          }
+          reject(new Error('localhost.run SSH connection timed out'));
+        }, 9000);
+
+        const proc = spawn('ssh', [
+          '-o', 'StrictHostKeyChecking=no',
+          '-o', 'ServerAliveInterval=30',
+          '-o', 'ServerAliveCountMax=3',
+          '-R', `80:127.0.0.1:${port}`,
+          'nokey@localhost.run'
+        ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+        remoteTunnelProcess = proc;
+
+        const checkOutput = (chunk) => {
+          const text = chunk.toString();
+          const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.lhr\.life/i);
+          if (match && match[0]) {
+            clearTimeout(sshTimeout);
+            resolve(match[0]);
+          }
+        };
+
+        proc.stdout.on('data', checkOutput);
+        proc.stderr.on('data', checkOutput);
+
+        proc.on('error', (err) => {
+          clearTimeout(sshTimeout);
+          remoteTunnelProcess = null;
+          reject(err);
+        });
+
+        proc.on('close', () => {
+          remoteTunnelProcess = null;
+          if (remoteTunnelProvider === 'localhost.run') {
+            currentRemoteUrl = '';
+            remoteTunnelProvider = '';
+          }
+        });
+      });
+
+      if (lhrUrl) {
+        currentRemoteUrl = lhrUrl;
+        remoteTunnelProvider = 'localhost.run';
+        console.log(`[RemoteTunnel] Public HTTPS tunnel active via localhost.run: ${lhrUrl}`);
+        return { success: true, url: lhrUrl, provider: 'localhost.run' };
+      }
+    } catch (sshErr) {
+      console.warn('[RemoteTunnel] localhost.run attempt notice, falling back to localtunnel:', sshErr.message);
+    }
+
+    // Provider 2: localtunnel npm package
+    try {
+      const localtunnelModule = await import('localtunnel');
+      const lt = localtunnelModule.default || localtunnelModule;
+      const tunnel = await lt({ port });
+      remoteTunnelLt = tunnel;
+      currentRemoteUrl = tunnel.url;
+      remoteTunnelProvider = 'localtunnel';
+
+      tunnel.on('close', () => {
+        remoteTunnelLt = null;
+        if (remoteTunnelProvider === 'localtunnel') {
+          currentRemoteUrl = '';
+          remoteTunnelProvider = '';
+        }
+      });
+
+      tunnel.on('error', (e) => {
+        console.warn('[RemoteTunnel] Localtunnel notice:', e.message);
+      });
+
+      console.log(`[RemoteTunnel] Public HTTPS tunnel active via localtunnel: ${tunnel.url}`);
+      return { success: true, url: tunnel.url, provider: 'localtunnel' };
+    } catch (ltErr) {
+      console.error('[RemoteTunnel] Both tunnel providers failed:', ltErr.message);
+      return { success: false, error: ltErr.message };
+    } finally {
+      tunnelStartingPromise = null;
+    }
+  })();
+
+  return await tunnelStartingPromise;
+}
+
+async function stopRemoteTunnel() {
+  if (remoteTunnelProcess) {
+    try { remoteTunnelProcess.kill(); } catch {}
+    remoteTunnelProcess = null;
+  }
+  if (remoteTunnelLt) {
+    try { remoteTunnelLt.close(); } catch {}
+    remoteTunnelLt = null;
+  }
+  currentRemoteUrl = '';
+  remoteTunnelProvider = '';
+  return { success: true };
+}
 let currentCompanionHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -111,6 +266,41 @@ let currentCompanionHtml = `<!DOCTYPE html>
         });
       });
     }
+
+    // Multi-device synchronization: sync state across all connected phones and desktop
+    function applySyncState(data) {
+      if (!data || !data.states) return;
+      const isLedOn = Boolean(data.states['w-led'] || data.states['led']);
+      const input = document.getElementById('input-led');
+      const card = document.getElementById('card-led');
+      if (input && input.checked !== isLedOn) {
+        input.checked = isLedOn;
+        if (card) {
+          if (isLedOn) card.classList.add('glow-blue');
+          else card.classList.remove('glow-blue');
+        }
+        addLog('🔄 [SYNC] LED updated from connected device -> ' + (isLedOn ? 'ON' : 'OFF'));
+      }
+    }
+
+    function initSync() {
+      // 1. Initial State Fetch
+      fetch('/api/state').then(r => r.json()).then(applySyncState).catch(() => {});
+      // 2. Real-time Push via SSE (sub-50ms sync)
+      if (window.EventSource) {
+        try {
+          const es = new EventSource('/api/events');
+          es.onmessage = (e) => {
+            try { applySyncState(JSON.parse(e.data)); } catch {}
+          };
+        } catch {}
+      }
+      // 3. Resilient Polling Fallback (every 1.5s for seamless sync over cellular / restricted networks)
+      setInterval(() => {
+        fetch('/api/state').then(r => r.json()).then(applySyncState).catch(() => {});
+      }, 1500);
+    }
+    window.addEventListener('load', initSync);
   </script>
 </body>
 </html>`;
@@ -293,6 +483,29 @@ export function registerAllIPCHandlers(getMainWindow) {
             console.log(`[CompanionServer] Dispatching to ${targetPort}:`, payload.trim());
             const writeResult = await serialService.writePort(targetPort, payload);
 
+            // Multi-device synchronization: update state store in memory
+            const widgetId = data.widgetId || 'w-led';
+            if (isExplicitOff) {
+              companionState.states[widgetId] = false;
+              companionState.states['w-led'] = false;
+            } else if (isExplicitOn) {
+              companionState.states[widgetId] = true;
+              companionState.states['w-led'] = true;
+            } else if (data.value !== undefined) {
+              companionState.states[widgetId] = data.value;
+            }
+            companionState.lastPayload = payload.trim();
+            companionState.activePort = targetPort;
+
+            // Broadcast to all connected phones (SSE stream)
+            broadcastStateUpdate({
+              port: targetPort,
+              isOn: isExplicitOn,
+              isOff: isExplicitOff,
+              widgetId: widgetId,
+              value: data.value
+            });
+
             const mainWindow = getMainWindow();
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('companion:action', {
@@ -311,7 +524,14 @@ export function registerAllIPCHandlers(getMainWindow) {
             }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ success: true, port: targetPort, payload: payload.trim(), writeResult }));
+            return res.end(JSON.stringify({
+              success: true,
+              port: targetPort,
+              payload: payload.trim(),
+              writeResult,
+              version: companionState.version,
+              states: companionState.states
+            }));
           } catch (err) {
             console.error('[CompanionServer] Error processing action:', err.message);
             res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -347,6 +567,43 @@ export function registerAllIPCHandlers(getMainWindow) {
         return;
       }
 
+      // Server-Sent Events (SSE) Endpoint for Instant Multi-Device State Streaming
+      if (pathname === '/api/events') {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.write(`data: ${JSON.stringify({
+          version: companionState.version,
+          lastUpdate: companionState.lastUpdate,
+          states: companionState.states,
+          lastPayload: companionState.lastPayload,
+          activePort: companionState.activePort
+        })}\n\n`);
+
+        sseClients.add(res);
+        req.on('close', () => {
+          sseClients.delete(res);
+        });
+        return;
+      }
+
+      // Multi-Device Current State Endpoint (Polling Fallback)
+      if (pathname === '/api/state') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+          success: true,
+          version: companionState.version,
+          lastUpdate: companionState.lastUpdate,
+          states: companionState.states,
+          lastPayload: companionState.lastPayload,
+          activePort: companionState.activePort,
+          connectedClients: sseClients.size
+        }));
+      }
+
       // HTML update endpoint — allows React renderer to push a fresh companion app page
       if (req.method === 'POST' && pathname === '/api/update-html') {
         let htmlBody = '';
@@ -362,7 +619,16 @@ export function registerAllIPCHandlers(getMainWindow) {
       if (pathname === '/api/status' || pathname === '/api/getSwitchStatus' || pathname === '/status') {
         const activePorts = Array.from(serialService.activePorts.keys());
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ activePorts, port: currentCompanionPort, ip: getLocalIPv4(), success: true }));
+        return res.end(JSON.stringify({
+          activePorts,
+          port: currentCompanionPort,
+          ip: getLocalIPv4(),
+          remoteUrl: currentRemoteUrl,
+          tunnelActive: Boolean(currentRemoteUrl),
+          version: companionState.version,
+          states: companionState.states,
+          success: true
+        }));
       }
 
       res.writeHead(200, {
@@ -414,7 +680,24 @@ export function registerAllIPCHandlers(getMainWindow) {
       companionServer.close();
       companionServer = null;
     }
+    await stopRemoteTunnel();
     return { success: true };
+  });
+
+  ipcMain.handle('app:start-remote-tunnel', async (_event, port = 5055) => {
+    return await startRemoteTunnel(port);
+  });
+
+  ipcMain.handle('app:stop-remote-tunnel', async () => {
+    return await stopRemoteTunnel();
+  });
+
+  ipcMain.handle('app:get-remote-tunnel', async () => {
+    return {
+      active: Boolean(currentRemoteUrl),
+      url: currentRemoteUrl,
+      provider: remoteTunnelProvider
+    };
   });
 
   ipcMain.handle('app:create-expo-snack', async (_event, { name, code, description, sdkVersion = '54.0.0' }) => {
