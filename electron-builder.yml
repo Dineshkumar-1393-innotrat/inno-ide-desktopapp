@@ -4,6 +4,10 @@ copyright: Copyright © 2026 Innotrat Labs
 electronDist: node_modules/electron/dist
 npmRebuild: false
 asar: true
+compression: store
+
+extraMetadata:
+  dependencies: {}
 
 directories:
   output: release
@@ -12,7 +16,6 @@ directories:
 files:
   - dist/**/*
   - electron/**/*
-  - node_modules/**/*
   - package.json
 
 win:

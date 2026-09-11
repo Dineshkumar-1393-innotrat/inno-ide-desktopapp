@@ -11,6 +11,31 @@
 
 ---
 
+## 🚀 Desktop App Releases & Executables (.exe)
+
+Pre-built Windows desktop binaries are generated for x64 Windows 10 / 11 architectures. You can run the application directly without installing Node.js, npm, or any development dependencies.
+
+### 📥 Download & Executable Files
+
+| Package Type | File Name | Size | Architecture | Description & Direct Launch |
+| :--- | :--- | :--- | :--- | :--- |
+| **Windows Setup Installer (`.exe`)** | [`InnoView IDE Setup 1.0.0.exe`](./release/InnoView%20IDE%20Setup%201.0.0.exe) | ~152 MB | Windows x64 | **Recommended**. Standard Windows installer. Installs desktop shortcut, Start Menu entry, and uninstaller. |
+| **Standalone Portable (`.exe`)** | [`InnoViewIDE-Portable-1.0.0.exe`](./release/InnoViewIDE-Portable-1.0.0.exe) | ~540 MB | Windows x64 | **Zero-Install Executable**. Self-contained single `.exe`. Double-click to launch directly from any folder or USB drive. |
+| **Unpacked Application (`.exe`)** | [`release/win-unpacked/InnoViewIDE.exe`](./release/win-unpacked/InnoViewIDE.exe) | ~210 MB | Windows x64 | Direct unpacked executable. Instantly launches without any extraction or installation steps. |
+| **Portable ZIP Archive (`.zip`)** | [`InnoViewIDE-Windows-x64.zip`](./release/InnoViewIDE-Windows-x64.zip) | ~222 MB | Windows x64 | Compressed archive of the standalone unpacked distribution. Extract and run `InnoViewIDE.exe`. |
+
+> [!TIP]
+> **GitHub Releases:**
+> For official team downloads and deployment artifacts, releases are published on the GitHub repository at:
+> [👉 InnoIDE Desktop App Releases](https://github.com/Dineshkumar-1393-innotrat/inno-ide-desktopapp/releases)
+
+### 🏃 Quick Start with Pre-Built `.exe`
+1. Download either the **Setup Installer** (`InnoView IDE Setup 1.0.0.exe`) or the **Standalone Portable** (`InnoViewIDE-Portable-1.0.0.exe`).
+2. Run the `.exe` file.
+3. Plug in an ESP32 or microcontroller via USB. The application will automatically detect your COM port and provide full visual block programming, C++ Monaco editor, and live serial flashing!
+
+---
+
 ## 🌟 Key Features
 
 ### 1. Dual Development Paradigm
@@ -172,14 +197,20 @@ flowchart TD
 
 ## 📦 Build & Packaging
 
-Build production desktop binaries for Windows:
+To compile and package fresh Windows desktop binaries from source:
 
 ```bash
-# Build Vite assets and package Electron executable
+# Full build: compiles React bundle, creates app.asar, and builds Setup & Portable .exe
 npm run dist:win
+
+# Fast directory build: compiles React bundle and updates release/win-unpacked/
+npm run package:dir
+
+# Package distributables from existing unpacked directory
+npm run package:exe
 ```
 
-Output installers and portable executables will be generated in `dist-desktop/` and `release/`.
+All output binaries and installers are located in [`release/`](./release/).
 
 ---
 
@@ -191,7 +222,9 @@ Output installers and portable executables will be generated in `dist-desktop/` 
 | `npm run electron:dev` | Launches both Vite and the Electron desktop application concurrently |
 | `npm run build` | Compiles the React application into production `dist/` bundle |
 | `npm run electron:build` | Compiles frontend assets for Electron distribution |
-| `npm run dist:win` | Builds Windows desktop installer (`.exe`) via `electron-builder` |
+| `npm run dist:win` | Full pipeline: Vite build + standalone packaging + Windows `.exe` installers |
+| `npm run package:dir` | Compiles frontend and updates `release/win-unpacked/` executable folder |
+| `npm run package:exe` | Generates `.exe` distributables (Setup Installer & Portable) from unpacked app |
 | `npm run lint` | Runs ESLint syntax verification across the codebase |
 
 ---

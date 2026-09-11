@@ -11,8 +11,10 @@
     "build": "vite build",
     "electron:dev": "node electron/dev-runner.js",
     "electron:build": "vite build",
-    "dist": "vite build && electron-builder",
-    "dist:win": "vite build && electron-builder --win",
+    "package:dir": "vite build && node electron/package-app.js",
+    "package:exe": "node electron/package-app.js && electron-builder --win portable nsis --prepackaged release/win-unpacked",
+    "dist": "vite build && node electron/package-app.js && electron-builder --win portable nsis --prepackaged release/win-unpacked",
+    "dist:win": "vite build && node electron/package-app.js && electron-builder --win portable nsis --prepackaged release/win-unpacked",
     "lint": "eslint .",
     "preview": "vite preview",
     "clear-cache": "node -e \"localStorage.clear(); sessionStorage.clear();\" 2>/dev/null || echo 'Run in browser console: localStorage.clear(); sessionStorage.clear();'"
