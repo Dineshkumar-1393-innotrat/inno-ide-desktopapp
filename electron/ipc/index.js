@@ -69,7 +69,7 @@ function saveTunnelStatus(active, url, provider) {
       active: Boolean(active),
       provider: provider || ''
     }, null, 2));
-  } catch {}
+  } catch { }
 }
 
 function notifyTunnelStatus(active, url, provider, status) {
@@ -83,7 +83,7 @@ function notifyTunnelStatus(active, url, provider, status) {
         status
       });
     }
-  } catch {}
+  } catch { }
 }
 
 async function startRemoteTunnel(port = currentCompanionPort, forceRestart = false) {
@@ -99,7 +99,7 @@ async function startRemoteTunnel(port = currentCompanionPort, forceRestart = fal
   tunnelStartingPromise = (async () => {
     // Clean up any stale process before starting fresh
     if (remoteTunnelProcess) {
-      try { remoteTunnelProcess.kill(); } catch {}
+      try { remoteTunnelProcess.kill(); } catch { }
       remoteTunnelProcess = null;
     }
 
@@ -108,7 +108,7 @@ async function startRemoteTunnel(port = currentCompanionPort, forceRestart = fal
       const lhrUrl = await new Promise((resolve, reject) => {
         const sshTimeout = setTimeout(() => {
           if (remoteTunnelProcess) {
-            try { remoteTunnelProcess.kill(); } catch {}
+            try { remoteTunnelProcess.kill(); } catch { }
             remoteTunnelProcess = null;
           }
           reject(new Error('localhost.run SSH connection timed out'));
@@ -171,7 +171,7 @@ async function startRemoteTunnel(port = currentCompanionPort, forceRestart = fal
       const serveoUrl = await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           if (remoteTunnelProcess) {
-            try { remoteTunnelProcess.kill(); } catch {}
+            try { remoteTunnelProcess.kill(); } catch { }
             remoteTunnelProcess = null;
           }
           reject(new Error('Serveo SSH connection timed out'));
@@ -242,11 +242,11 @@ async function startRemoteTunnel(port = currentCompanionPort, forceRestart = fal
 
 async function stopRemoteTunnel() {
   if (remoteTunnelProcess) {
-    try { remoteTunnelProcess.kill(); } catch {}
+    try { remoteTunnelProcess.kill(); } catch { }
     remoteTunnelProcess = null;
   }
   if (remoteTunnelLt) {
-    try { remoteTunnelLt.close(); } catch {}
+    try { remoteTunnelLt.close(); } catch { }
     remoteTunnelLt = null;
   }
   currentRemoteUrl = '';
@@ -536,7 +536,7 @@ export function registerAllIPCHandlers(getMainWindow) {
                 const ports = await serialService.listPorts();
                 const esp32Port = ports.find(p => p.recognized || /cp210|ch340|ftdi|usb/i.test(`${p.manufacturer || ''} ${p.friendlyName || ''}`)) || ports[0];
                 if (esp32Port?.path) targetPort = esp32Port.path;
-              } catch {}
+              } catch { }
             }
             if (!targetPort) targetPort = 'COM9';
 
@@ -800,7 +800,7 @@ export function registerAllIPCHandlers(getMainWindow) {
           };
         }
       }
-    } catch {}
+    } catch { }
 
     const isProcessAlive = remoteTunnelProcess && !remoteTunnelProcess.killed && remoteTunnelProcess.exitCode === null;
     return {

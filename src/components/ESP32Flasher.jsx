@@ -513,7 +513,7 @@ export default function ESP32Flasher({
       setRemoteTunnelState((prev) => ({ ...prev, loading: true, error: null }));
       try {
         if (forceRestart && window.electronAPI?.app?.stopRemoteTunnel) {
-          try { await window.electronAPI.app.stopRemoteTunnel(); } catch {}
+          try { await window.electronAPI.app.stopRemoteTunnel(); } catch { }
         }
         let activeUrl = "";
         let activeProvider = "localhost.run";
@@ -536,7 +536,7 @@ export default function ESP32Flasher({
                 activeProvider = data.provider || "localhost.run";
               }
             }
-          } catch {}
+          } catch { }
         }
 
         if (activeUrl) {
@@ -753,7 +753,7 @@ export default function ESP32Flasher({
 
       // MULTI-DEVICE SYNC: Always notify Companion HTTP server (port 5055) so all connected phones on Wi-Fi & Cloud receive SSE update
       try {
-        fetch("http://localhost:5055/api/action", { method: "POST", headers, body }).catch(() => {});
+        fetch("http://localhost:5055/api/action", { method: "POST", headers, body }).catch(() => { });
       } catch (e) { }
 
       // TERTIARY: InnoIDE Backend (port 5004) — updates SwitchStatus record
