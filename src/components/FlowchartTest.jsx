@@ -5713,9 +5713,31 @@ function DiagramEditor() {
       // 3. Mark tab as clean in Redux
       dispatch(markTabClean(activeTabId));
 
+      // 4. Save JSON file locally on the user's computer for reference
+      const tabName = activeTab.name || "flowchart";
+      const sanitizedName = sanitizeSegment ? sanitizeSegment(tabName) : tabName.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const fileName = `${sanitizedName}.json`;
+      const jsonStr = JSON.stringify(payloadContent, null, 2);
+      const jsonBlob = new Blob([jsonStr], { type: "application/json" });
+      const dlUrl = URL.createObjectURL(jsonBlob);
+      const dlAnchor = document.createElement("a");
+      dlAnchor.href = dlUrl;
+      dlAnchor.download = fileName;
+      document.body.appendChild(dlAnchor);
+      dlAnchor.click();
+      document.body.removeChild(dlAnchor);
+      URL.revokeObjectURL(dlUrl);
+
+      // If running inside Electron, also persist locally to disk via filesystem bridge
+      if (window.electronAPI?.filesystem?.writeFile) {
+        try {
+          await window.electronAPI.filesystem.writeFile(fileName, jsonStr, "utf8");
+        } catch (e) { }
+      }
+
       toast({
-        title: "Flowchart Saved",
-        description: `"${activeTab.name}" has been saved successfully.`,
+        title: "Flowchart Saved Locally",
+        description: `"${activeTab.name}" has been saved locally as ${fileName} and synced to project.`,
         status: "success",
         duration: 3000,
         isClosable: true,

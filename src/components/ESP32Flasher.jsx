@@ -422,6 +422,43 @@ export default function ESP32Flasher({
         }
       }).catch(() => { });
     }
+
+    // Auto-sync with background cloud tunnel status file
+    const syncWithDaemonTunnel = async () => {
+      try {
+        if (window.electronAPI?.filesystem?.readFile) {
+          const content = await window.electronAPI.filesystem.readFile("d:/ide-desktop-app/scratch/active_tunnel.json", "utf8");
+          if (content) {
+            const data = JSON.parse(content);
+            const isFresh = data?.timestamp && (Date.now() - data.timestamp < 1000 * 60 * 15);
+            if (data?.active && data?.url && isFresh) {
+              setRemoteTunnelState((prev) => {
+                if (prev.url !== data.url || !prev.active) {
+                  return {
+                    active: true,
+                    url: data.url,
+                    provider: data.provider || "localhost.run",
+                    loading: false,
+                    error: null
+                  };
+                }
+                return prev;
+              });
+            } else if (data?.active === false) {
+              setRemoteTunnelState((prev) => {
+                if (prev.active) {
+                  return { ...prev, active: false, url: "", provider: "", loading: false };
+                }
+                return prev;
+              });
+            }
+          }
+        }
+      } catch (e) { }
+    };
+    syncWithDaemonTunnel();
+    const daemonSyncInterval = setInterval(syncWithDaemonTunnel, 3000);
+    return () => clearInterval(daemonSyncInterval);
   }, []);
 
   // Multi-device synchronization: listen to companion actions pushed from any connected phone or browser
@@ -454,29 +491,68 @@ export default function ESP32Flasher({
     }
   }, []);
 
+  // Listen to background cloud tunnel status events from Electron
+  useEffect(() => {
+    if (window.electronAPI?.app?.onTunnelStatus) {
+      const unsub = window.electronAPI.app.onTunnelStatus((status) => {
+        if (status) {
+          if (status.active && status.url) {
+            setRemoteTunnelState({ active: true, url: status.url, provider: status.provider, loading: false, error: null });
+          } else if (status.status === "disconnected" || status.status === "failed") {
+            setRemoteTunnelState((prev) => ({ ...prev, active: false, url: "", provider: "", loading: false, error: status.status === "failed" ? "Failed to connect" : "Tunnel disconnected" }));
+          }
+        }
+      });
+      return unsub;
+    }
+  }, []);
+
   // Toggle Cloud Remote Tunnel (HTTPS relay for cellular / WAN / non-local network access)
-  const handleToggleCloudRemote = async (enable) => {
+  const handleToggleCloudRemote = async (enable, forceRestart = false) => {
     if (enable) {
       setRemoteTunnelState((prev) => ({ ...prev, loading: true, error: null }));
       try {
+        if (forceRestart && window.electronAPI?.app?.stopRemoteTunnel) {
+          try { await window.electronAPI.app.stopRemoteTunnel(); } catch {}
+        }
+        let activeUrl = "";
+        let activeProvider = "localhost.run";
         if (window.electronAPI?.app?.startRemoteTunnel) {
-          const res = await window.electronAPI.app.startRemoteTunnel(5055);
+          const res = await window.electronAPI.app.startRemoteTunnel(5055, forceRestart);
           if (res && res.success && res.url) {
-            setRemoteTunnelState({ active: true, url: res.url, provider: res.provider, loading: false, error: null });
-            setCompanionNetworkMode("cloud");
-            toast({
-              title: "🌐 Cloud Remote Active",
-              description: `Public HTTPS URL ready (${res.provider || 'SSL Tunnel'}). Mobile devices can now connect from any network (4G/5G).`,
-              status: "success",
-              duration: 4500
-            });
-            return;
-          } else {
-            throw new Error(res?.error || "Failed to start remote tunnel");
+            activeUrl = res.url;
+            activeProvider = res.provider || "localhost.run";
           }
         }
+        // Fallback to reading daemon tunnel status
+        if (!activeUrl && window.electronAPI?.filesystem?.readFile) {
+          try {
+            const content = await window.electronAPI.filesystem.readFile("d:/ide-desktop-app/scratch/active_tunnel.json", "utf8");
+            if (content) {
+              const data = JSON.parse(content);
+              const isFresh = data?.timestamp && (Date.now() - data.timestamp < 1000 * 60 * 15);
+              if (data?.active && data?.url && isFresh) {
+                activeUrl = data.url;
+                activeProvider = data.provider || "localhost.run";
+              }
+            }
+          } catch {}
+        }
+
+        if (activeUrl) {
+          setRemoteTunnelState({ active: true, url: activeUrl, provider: activeProvider, loading: false, error: null });
+          setCompanionNetworkMode("cloud");
+          toast({
+            title: forceRestart ? "🔄 Cloud Tunnel Refreshed" : "🌐 Cloud Remote Active",
+            description: `Live HTTPS Relay: ${activeUrl}. Ready for mobile 4G/5G data.`,
+            status: "success",
+            duration: 4500
+          });
+          return;
+        }
+        throw new Error("Could not establish cloud tunnel");
       } catch (err) {
-        setRemoteTunnelState((prev) => ({ ...prev, loading: false, error: err.message }));
+        setRemoteTunnelState((prev) => ({ ...prev, loading: false, error: err.message, active: false }));
         toast({
           title: "Cloud Remote Notice",
           description: err.message || "Could not establish cloud tunnel",
@@ -588,22 +664,15 @@ export default function ESP32Flasher({
     );
     if (hasFan) return "FAN";
 
-    const hasLed = widgets.some(
-      (w) =>
-        /led/i.test(w.title || "") ||
-        /led/i.test(w.boundTarget || "") ||
-        /led/i.test(w.boundTargetName || "") ||
-        w.id === "w-led"
-    );
-    if (hasLed) return "LED";
-
-    return "ESP32";
+    // Companion APK (application-5689ae1b-8e2a-4ff7-a99a-0ded6cc837ff.apk) specifically supports "LED" and "FAN".
+    // Defaulting to "LED" ensures the mobile companion UI renders instantly upon scanning.
+    return "LED";
   }, [widgets]);
 
   const [selectedDeviceType, setSelectedDeviceType] = useState("");
   const [customDeviceTypeInput, setCustomDeviceTypeInput] = useState("");
   const [isEditingDeviceConfig, setIsEditingDeviceConfig] = useState(false);
-  const [qrPayloadMode, setQrPayloadMode] = useState("webapp"); // "webapp" (Phone Camera Web QR)
+  const [qrPayloadMode, setQrPayloadMode] = useState("bundle"); // "bundle" (UI + Logics JSON Schema) | "webapp" (Phone Camera Web QR)
   const [customDeviceId, setCustomDeviceId] = useState("");
   const [customDeviceName, setCustomDeviceName] = useState("");
   const [liveLedToggle, setLiveLedToggle] = useState(false); // Hardware LED state toggle (OFF / ON-Blink)
@@ -742,9 +811,12 @@ export default function ESP32Flasher({
     }
   };
 
+  // The Android APK supports only "LED" and "FAN" controls.
+  // Mapping any type other than "FAN" to "LED" guarantees the APK renders the interactive control screen rather than "No UI design available".
   const effectiveDeviceType = (
-    (selectedDeviceType === "CUSTOM" ? customDeviceTypeInput : (selectedDeviceType || autoDetectDeviceType)) || "LED"
-  ).toUpperCase();
+    ((selectedDeviceType === "CUSTOM" ? customDeviceTypeInput : (selectedDeviceType || autoDetectDeviceType)) || "LED")
+      .toUpperCase().trim() === "FAN" ? "FAN" : "LED"
+  );
 
   const effectiveDeviceId =
     customDeviceId.trim() ||
@@ -757,16 +829,23 @@ export default function ESP32Flasher({
     projectName ||
     "ESP32 Companion Device";
 
-  // Build clean JSON payload containing UI and logics for QR code generation
+  // Build clean JSON payload containing UI styling and functional logics for QR code generation & schema export
   const cleanUiList = useMemo(() => {
     return widgets.map((w) => {
       const isLedWidget = w.id === "w-led" || /led|light/i.test(w.title || "") || /led/i.test(w.boundTarget || "");
+      const isFanWidget = /fan/i.test(w.title || "") || /fan/i.test(w.boundTarget || "");
       const item = {
         id: w.id,
         type: w.type,
         title: w.title || w.label || w.name || "",
-        boundTarget: w.boundTarget || w.boundTargetName || (isLedWidget ? "GPIO 2 / 48 (LED)" : ""),
-        action: w.action || "Turn ON / OFF"
+        boundTarget: w.boundTarget || w.boundTargetName || (isLedWidget ? "GPIO 2 / 48 (LED)" : (isFanWidget ? "GPIO 4 (FAN)" : "")),
+        target: w.boundTarget || w.target || (isLedWidget ? "GPIO 2 (LED)" : (isFanWidget ? "GPIO 4 (FAN)" : "GPIO Pin")),
+        action: w.action || "Turn ON / OFF",
+        fontSize: w.fontSize || 15,
+        backgroundColor: w.backgroundColor || w.bgColor || (w.state ? "#101a38" : "#131b2e"),
+        color: w.color || (isLedWidget ? "#2563eb" : "#38bdf8"),
+        textColor: w.textColor || "#f8fafc",
+        cornerRadius: w.cornerRadius || 16
       };
       if (w.state !== undefined) item.state = Boolean(w.state);
       if (isLedWidget) {
@@ -774,6 +853,16 @@ export default function ESP32Flasher({
         item.actionPayloadOff = "LED:0";
         item.commandOn = "LED:1";
         item.commandOff = "LED:0";
+        item.on = "1";
+        item.off = "0";
+      } else if (isFanWidget) {
+        item.actionPayloadOn = "FAN:1";
+        item.actionPayloadOff = "FAN:0";
+        item.on = "FAN:1";
+        item.off = "FAN:0";
+      } else {
+        if (w.on !== undefined) item.on = w.on;
+        if (w.off !== undefined) item.off = w.off;
       }
       // Lock telemetry/gauge/sensor values to fixed default value to guarantee stable QR code without flickering
       if (w.type === "gauge" || w.type === "sensor" || w.type === "telemetry") {
@@ -786,7 +875,6 @@ export default function ESP32Flasher({
       if (w.min !== undefined) item.min = w.min;
       if (w.max !== undefined) item.max = w.max;
       if (w.unit) item.unit = w.unit;
-      if (w.color || w.buttonColor) item.color = w.color || w.buttonColor;
       if (w.placeholder) item.placeholder = w.placeholder;
       if (w.visible !== undefined) item.visible = w.visible;
       return item;
@@ -802,16 +890,19 @@ export default function ESP32Flasher({
       const item = {
         id: b.id,
         name: b.name || "",
+        trigger: b.triggerWidgetId || b.trigger || "",
         triggerWidgetId: b.triggerWidgetId || "",
-        triggerName: linkedWidget ? linkedWidget.title : (b.triggerName || ""),
-        event: b.event || "",
-        condition: b.condition || "",
-        action: b.action || "",
-        payload: b.payload || (isLedRule ? "LED:{state}" : ""),
-        targetHardware: linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || b.targetHardware || "") : (b.targetHardware || ""),
+        triggerName: linkedWidget ? linkedWidget.title : (b.triggerName || "Trigger"),
+        event: b.event || "on_toggle",
+        condition: b.condition || "Always",
+        action: b.action || "Send Hardware Command",
+        payload: b.payload || (isLedRule ? "LED:{state}" : "1"),
+        target: linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || b.targetHardware || "Bound → GPIO Pin") : (b.targetHardware || "Bound → GPIO Pin"),
+        targetHardware: linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || b.targetHardware || "GPIO Pin") : (b.targetHardware || "GPIO Pin"),
         enabled: isStale ? false : (b.enabled !== false),
         isStale: isStale
       };
+      if (b.conditionThreshold !== undefined) item.conditionThreshold = b.conditionThreshold;
       if (isLedRule) {
         item.onPayload = "LED:1";
         item.offPayload = "LED:0";
@@ -836,80 +927,63 @@ export default function ESP32Flasher({
       id: effectiveDeviceId,
       name: effectiveDeviceName,
       deviceType: effectiveDeviceType,
-      bridgeUrl: `${bridgeBaseUrl}/api/action`,
+      status: false,
+      leds: [{ id: "led-1", name: effectiveDeviceName, pin: 2, state: false }],
       serverUrl: bridgeBaseUrl,
+      bridgeUrl: `${bridgeBaseUrl}/api/action`,
       backendUrl: `http://${resolvedHostIp}:5004`,
-      port: activePort
+      port: activePort || "COM9"
     });
   }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, isCloudActive, remoteTunnelState.url]);
 
-  // Mode 2: Full Project Bundle QR (Device + UI + Logics, also 100% compliant with React Native ScannerScreen)
+  // Mode 2: Full Project Bundle QR (Device + UI + Logics, 100% compliant with React Native ScannerScreen & DeviceControlScreen)
   const bundleQrPayload = useMemo(() => {
-    // Provide both full standard keys and compact aliases within safe byte limits (<1000 bytes)
-    const minimalUi = cleanUiList.map((w) => {
-      const isLed = /led|light/i.test(w.title || "") || /led/i.test(w.boundTarget || "") || w.id === "w-led";
-      const m = {
+    const bridgeBaseUrl = isCloudActive ? remoteTunnelState.url : `http://${resolvedHostIp}:${resolvedHostPort}`;
+    const compactWidgets = cleanUiList.map((w) => {
+      const item = {
         id: w.id,
         type: w.type,
         title: w.title,
-        boundTarget: w.boundTarget || (isLed ? "LED (GPIO 2)" : "GPIO"),
+        target: w.target || w.boundTarget || "GPIO Pin",
         state: Boolean(w.state),
-        on: isLed ? "LED:1" : (w.actionPayloadOn || "1"),
-        off: isLed ? "LED:0" : (w.actionPayloadOff || "0"),
-        commandOn: isLed ? "LED:1" : (w.commandOn || "1"),
-        commandOff: isLed ? "LED:0" : (w.commandOff || "0"),
-        actionPayloadOn: isLed ? "LED:1" : "1",
-        actionPayloadOff: isLed ? "LED:0" : "0"
+        on: "1",
+        off: "0",
+        fontSize: w.fontSize || 15,
+        color: w.color || "#2563eb",
+        bg: w.backgroundColor || (w.state ? "#101a38" : "#131b2e"),
+        radius: w.cornerRadius || 16
       };
-      if (w.value !== undefined) m.value = w.value;
-      if (w.unit) m.unit = w.unit;
-      if (w.min !== undefined) m.min = w.min;
-      if (w.max !== undefined) m.max = w.max;
-      return m;
+      if (w.value !== undefined) item.val = w.value;
+      if (w.unit) item.unit = w.unit;
+      return item;
     });
 
-    const minimalLogics = cleanLogicsList.map((b) => {
-      const isLedRule = b.id === "b-1" || /led|light/i.test(b.name || "") || /led/i.test(b.payload || "");
-      return {
-        id: b.id,
-        name: b.name,
-        triggerWidgetId: b.triggerWidgetId,
-        tw: b.triggerWidgetId,
-        event: b.event,
-        ev: b.event,
-        payload: b.payload,
-        pl: b.payload,
-        on: isLedRule ? "LED:1" : (b.onPayload || "1"),
-        off: isLedRule ? "LED:0" : (b.offPayload || "0"),
-        onPayload: isLedRule ? "LED:1" : (b.onPayload || "1"),
-        offPayload: isLedRule ? "LED:0" : (b.offPayload || "0"),
-        targetHardware: b.targetHardware || "GPIO 2 / 48",
-        enabled: b.enabled !== false,
-        en: b.enabled !== false
-      };
-    });
+    const compactRules = cleanLogicsList.map((b) => ({
+      id: b.id,
+      name: b.name,
+      trigger: b.trigger || b.triggerWidgetId,
+      event: b.event || "on_toggle",
+      condition: b.condition || "Always",
+      action: b.action || "Command",
+      payload: b.payload || "LED:{state}",
+      target: b.targetHardware || b.target || "GPIO Pin",
+      enabled: b.enabled !== false
+    }));
 
     const payload = JSON.stringify({
       id: effectiveDeviceId,
       name: effectiveDeviceName,
-      nm: effectiveDeviceName,
       deviceType: effectiveDeviceType,
-      dt: effectiveDeviceType,
-      bridgeUrl: `http://${resolvedHostIp}:${resolvedHostPort}/api/action`,
-      bu: `http://${resolvedHostIp}:${resolvedHostPort}/api/action`,
-      serverUrl: `http://${resolvedHostIp}:${resolvedHostPort}`,
-      su: `http://${resolvedHostIp}:${resolvedHostPort}`,
-      backendUrl: `http://${resolvedHostIp}:5004`,
-      port: activePort,
-      p: activePort,
-      widgets: minimalUi,
-      ui: minimalUi,
-      rules: minimalLogics,
-      logics: minimalLogics,
-      lg: minimalLogics
+      status: false,
+      leds: [{ id: "led-1", name: effectiveDeviceName, pin: 2, state: false }],
+      serverUrl: bridgeBaseUrl,
+      bridgeUrl: `${bridgeBaseUrl}/api/action`,
+      port: activePort || "COM9",
+      widgets: compactWidgets,
+      rules: compactRules
     });
     return payload;
-  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, cleanUiList, cleanLogicsList]);
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, cleanUiList, cleanLogicsList, isCloudActive, remoteTunnelState.url]);
 
   // Active QR payload based on selected QR mode
   const activeQrPayload = qrPayloadMode === "webapp" ? webAppQrPayload : (qrPayloadMode === "bundle" ? bundleQrPayload : companionDevicePayload);
@@ -1926,11 +2000,11 @@ export default function ESP32Flasher({
       ` : widgets.filter(w => w.visible !== false).map(w => {
       if (w.type === 'switch') {
         return `
-          <div class="card ${w.state ? 'glow-blue' : ''}" id="card-${w.id}">
+          <div class="card ${w.state ? 'glow-blue' : ''}" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
             <div class="row">
               <div>
-                <div class="title">${w.title}</div>
-                <div class="meta">Target: ${w.boundTarget || 'GPIO 2 (LED)'}</div>
+                <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
+                <div class="meta">Target: ${w.boundTarget || w.target || 'GPIO Pin'}</div>
               </div>
               <label class="toggle">
                 <input type="checkbox" id="input-${w.id}" ${w.state ? 'checked' : ''} onchange="handleSwitch('${w.id}', this.checked, '${w.title}')">
@@ -1941,13 +2015,13 @@ export default function ESP32Flasher({
       }
       if (w.type === 'slider') {
         return `
-          <div class="card" id="card-${w.id}">
+          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
             <div class="row">
               <div>
-                <div class="title">${w.title}</div>
-                <div class="meta">PWM Target: ${w.boundTarget || 'GPIO 4 (Servo)'}</div>
+                <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
+                <div class="meta">PWM Target: ${w.boundTarget || w.target || 'GPIO 4 (Servo)'}</div>
               </div>
-              <div style="font-weight: 800; font-size: 18px; color: ${w.color || '#a855f7'};" id="val-${w.id}">${w.value || 90}${w.unit || '°'}</div>
+              <div style="font-weight: 800; font-size: ${w.fontSize ? Math.round(w.fontSize * 1.2) : 18}px; color: ${w.color || '#a855f7'};" id="val-${w.id}">${w.value || 90}${w.unit || '°'}</div>
             </div>
             <div class="slider-row">
               <button class="step-btn" onclick="stepSlider('${w.id}', -10, ${w.min || 0}, ${w.max || 180}, '${w.title}')">-10°</button>
@@ -1962,32 +2036,32 @@ export default function ESP32Flasher({
       }
       if (w.type === 'gauge') {
         return `
-          <div class="card" id="card-${w.id}">
+          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
             <div class="row">
               <div>
-                <div class="title">${w.title}</div>
-                <div class="meta">Source: ${w.boundTarget || 'ADC Telemetry'}</div>
+                <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
+                <div class="meta">Source: ${w.boundTarget || w.target || 'ADC Telemetry'}</div>
               </div>
               <div class="live-pill" id="pill-${w.id}">● LIVE ADC</div>
             </div>
-            <div class="gauge-big" id="val-${w.id}">${w.value || 24.3}${w.unit || '°C'}</div>
+            <div class="gauge-big" id="val-${w.id}" style="color: ${w.color || '#38bdf8'};">${w.value || 24.3}${w.unit || '°C'}</div>
             <div class="meta" style="text-align: center;">Range: ${w.min || 0} - ${w.max || 50}${w.unit || '°C'} (Guard Threshold: 30°C)</div>
           </div>`;
       }
       if (w.type === 'button') {
         return `
-          <button class="btn" style="background: ${w.color || '#ea580c'};" onclick="handleBtn('${w.title}', '${w.boundTarget || 'GPIO 5'}', '${w.action || 'TRIGGER'}')">
+          <button class="btn" style="background: ${w.backgroundColor || w.color || '#ea580c'}; color: ${w.textColor || 'white'}; font-size: ${w.fontSize || 14}px; border-radius: ${w.cornerRadius || 14}px;" onclick="handleBtn('${w.title}', '${w.boundTarget || w.target || 'GPIO 5'}', '${w.action || 'TRIGGER'}')">
             🚨 ${w.title}
           </button>`;
       }
       if (w.type === 'device_card') {
         return `
-          <div class="card" id="card-${w.id}">
+          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
             <div class="row">
               <div style="display: flex; align-items: center; gap: 10px;">
                 <div style="width: 34px; height: 34px; border-radius: 10px; background: rgba(37,99,235,0.2); display: flex; align-items: center; justify-content: center; font-size: 16px;">📡</div>
                 <div>
-                  <div class="title">${w.title || 'ESP32 Dev Board'}</div>
+                  <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title || 'ESP32 Dev Board'}</div>
                   <div style="font-size: 10px; color: #4ade80; font-weight: 700; margin-top: 2px;">● Online & Connected</div>
                 </div>
               </div>
@@ -1997,15 +2071,15 @@ export default function ESP32Flasher({
       }
       if (w.type === 'label') {
         return `
-          <div class="card" id="card-${w.id}" style="padding: 12px 16px;">
-            <div class="title" style="color: ${w.color || '#f8fafc'};">${w.title}</div>
-            ${w.boundTarget ? `<div class="meta">${w.boundTarget}</div>` : ''}
+          <div class="card" id="card-${w.id}" style="padding: 12px 16px; ${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
+            <div class="title" style="color: ${w.textColor || w.color || '#f8fafc'}; font-size: ${w.fontSize || 15}px;">${w.title}</div>
+            ${(w.boundTarget || w.target) ? `<div class="meta">${w.boundTarget || w.target}</div>` : ''}
           </div>`;
       }
       if (w.type === 'textfield') {
         return `
-          <div class="card" id="card-${w.id}">
-            <div class="title">${w.title}</div>
+          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
+            <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
             <div style="background: #090d16; border-radius: 8px; padding: 10px; margin-top: 6px; border: 1px solid var(--border); font-size: 12px; color: var(--subtext);">
               ${w.placeholder || 'Text field...'}
             </div>
@@ -2041,7 +2115,7 @@ export default function ESP32Flasher({
           <div class="row">
             <div>
               <div style="font-weight: 800; font-size: 15px; color: #fff;">${rule.name}</div>
-              <div class="meta">Target: ${rule.targetHardware || 'Hardware Pin'}</div>
+              <div class="meta">Target: ${rule.targetHardware || rule.target || 'Hardware Pin'}</div>
             </div>
             <label class="toggle">
               <input type="checkbox" id="rule-toggle-${rule.id}" ${rule.enabled ? 'checked' : ''} onchange="toggleRule('${rule.id}', this.checked)">
@@ -2049,7 +2123,7 @@ export default function ESP32Flasher({
             </label>
           </div>
           <div class="logic-details">
-            <div class="logic-row"><span class="logic-label">🔄 Trigger:</span><span class="logic-val">${rule.triggerName} (${rule.event})</span></div>
+            <div class="logic-row"><span class="logic-label">🔄 Trigger:</span><span class="logic-val">${rule.triggerName || rule.trigger || 'Trigger'} (${rule.event || 'on_toggle'})</span></div>
             <div class="logic-row"><span class="logic-label">⚖️ Condition:</span><span class="logic-val" style="color: #fbbf24;">${rule.condition || 'Always'}</span></div>
             <div class="logic-row"><span class="logic-label">🚀 Action:</span><span class="logic-val" style="color: #38bdf8;">${rule.action}</span></div>
             <div class="logic-row"><span class="logic-label">📦 Payload:</span><span class="logic-code">${rule.payload}</span></div>
@@ -2202,7 +2276,7 @@ export default function ESP32Flasher({
     function evalRules(widgetId, val, title) {
       rules.forEach(r => {
         if (!r.enabled) return;
-        if (r.triggerWidgetId === widgetId || r.triggerName === title) {
+        if (r.triggerWidgetId === widgetId || r.trigger === widgetId || r.triggerName === title) {
           let passed = true;
           if (r.condition && r.condition.includes('>')) {
             const num = parseFloat(r.condition.replace(/[^0-9.]/g, ''));
@@ -2213,7 +2287,7 @@ export default function ESP32Flasher({
             const el = document.getElementById('rule-exec-' + r.id);
             if (el) el.innerText = 'Executions: ' + execCounts[r.id];
             const payload = (r.payload || '').replace('{state}', val ? '1' : '0').replace('{value}', val);
-            addLog('⚡ [LOGIC] "' + r.name + '" -> TX: ' + payload + ' to ' + (r.targetHardware || 'Hardware'));
+            addLog('⚡ [LOGIC] "' + r.name + '" -> TX: ' + payload + ' to ' + (r.targetHardware || r.target || 'Hardware'));
             sendHardwareAction(payload, { ruleId: r.id, ruleName: r.name });
           }
         }
@@ -5908,6 +5982,61 @@ Generated automatically by **InnoIDE App Companion Studio**.
                     </HStack>
                   </Box>
 
+                  {/* Font Size */}
+                  <Box>
+                    <HStack justify="space-between" mb={1}>
+                      <Text fontSize="xs" fontWeight="semibold" color="gray.600">
+                        Font Size
+                      </Text>
+                      <Text fontSize="xs" color="gray.400">
+                        {activeWidget.fontSize || 15}px
+                      </Text>
+                    </HStack>
+                    <Slider
+                      value={activeWidget.fontSize || 15}
+                      min={10}
+                      max={28}
+                      onChange={(val) => handleUpdateWidget("fontSize", val)}
+                    >
+                      <SliderTrack bg="gray.200">
+                        <SliderFilledTrack bg="blue.500" />
+                      </SliderTrack>
+                      <SliderThumb boxSize={3} />
+                    </Slider>
+                  </Box>
+
+                  {/* Card Background Color */}
+                  <Box>
+                    <Text fontSize="xs" fontWeight="semibold" mb={1.5} color="gray.600">
+                      Background Color
+                    </Text>
+                    <HStack spacing={2} wrap="wrap">
+                      {[
+                        { label: "Navy", hex: "#101a38" },
+                        { label: "Dark", hex: "#131b2e" },
+                        { label: "Slate", hex: "#0f172a" },
+                        { label: "Zinc", hex: "#18181b" },
+                        { label: "Indigo", hex: "#1e1b4b" },
+                        { label: "Emerald", hex: "#064e3b" },
+                        { label: "Crimson", hex: "#261214" }
+                      ].map((item) => (
+                        <Box
+                          key={item.hex}
+                          w="20px"
+                          h="20px"
+                          borderRadius="md"
+                          bg={item.hex}
+                          cursor="pointer"
+                          border={activeWidget.backgroundColor === item.hex ? "2px solid #38bdf8" : "1px solid rgba(0,0,0,0.2)"}
+                          _hover={{ transform: "scale(1.15)" }}
+                          transition="all 0.15s"
+                          title={item.label}
+                          onClick={() => handleUpdateWidget("backgroundColor", item.hex)}
+                        />
+                      ))}
+                    </HStack>
+                  </Box>
+
                   {/* Corner Radius */}
                   <Box>
                     <HStack justify="space-between" mb={1}>
@@ -6186,23 +6315,23 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           <Box
                             px={2.5}
                             py={1}
-                            bg={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.2)" : "rgba(34,211,238,0.15)"}
+                            bg={qrPayloadMode === "bundle" ? "rgba(168,85,247,0.2)" : (companionNetworkMode === "cloud" ? "rgba(168,85,247,0.2)" : "rgba(34,211,238,0.15)")}
                             borderRadius="full"
                             border="1px solid"
-                            borderColor={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.4)" : "rgba(34,211,238,0.3)"}
+                            borderColor={qrPayloadMode === "bundle" ? "rgba(168,85,247,0.4)" : (companionNetworkMode === "cloud" ? "rgba(168,85,247,0.4)" : "rgba(34,211,238,0.3)")}
                           >
-                            <Text fontSize="9px" fontWeight="800" color={companionNetworkMode === "cloud" ? "#C084FC" : "#22D3EE"} letterSpacing="wider">
-                              ● {companionNetworkMode === "cloud" ? "CLOUD REMOTE QR" : "COMPANION WEB APP QR"}
+                            <Text fontSize="9px" fontWeight="800" color={qrPayloadMode === "bundle" ? "#C084FC" : (companionNetworkMode === "cloud" ? "#C084FC" : "#22D3EE")} letterSpacing="wider">
+                              ● {qrPayloadMode === "bundle" ? "UI & LOGICS BUNDLE QR" : (companionNetworkMode === "cloud" ? "CLOUD REMOTE QR" : "COMPANION WEB APP QR")}
                             </Text>
                           </Box>
                         </HStack>
-                        <Badge colorScheme={companionNetworkMode === "cloud" ? "purple" : "green"} variant="solid" bg={companionNetworkMode === "cloud" ? "#7C3AED" : "#059669"} color="white" fontSize="9px" px={2.5} py={0.5} borderRadius="full">
-                          {companionNetworkMode === "cloud" ? "INTERNET & 4G/5G" : "LOCAL WI-FI"}
+                        <Badge colorScheme={qrPayloadMode === "bundle" ? "purple" : (companionNetworkMode === "cloud" ? "purple" : "green")} variant="solid" bg={qrPayloadMode === "bundle" ? "#7C3AED" : (companionNetworkMode === "cloud" ? "#7C3AED" : "#059669")} color="white" fontSize="9px" px={2.5} py={0.5} borderRadius="full">
+                          {qrPayloadMode === "bundle" ? `${widgets.length} UI • ${logicBlocks.length} LOGICS` : (companionNetworkMode === "cloud" ? "INTERNET & 4G/5G" : "LOCAL WI-FI")}
                         </Badge>
                       </HStack>
                     </Box>
 
-                    {/* Network Mode Switcher: Local Wi-Fi vs Cloud Remote (Mobile 4G/5G / WAN) */}
+                    {/* QR Payload Type Switcher: UI & Logics Bundle vs Web App URL */}
                     <Box px={4} pt={3}>
                       <HStack bg="#0B1120" p={1} borderRadius="xl" border="1px solid" borderColor="rgba(56,189,248,0.2)" spacing={1.5}>
                         <Button
@@ -6212,7 +6341,45 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           borderRadius="lg"
                           fontWeight="700"
                           fontSize="11px"
-                          leftIcon={<FaWifi size={12} />}
+                          leftIcon={<FaCogs size={12} />}
+                          variant={qrPayloadMode === "bundle" ? "solid" : "ghost"}
+                          color={qrPayloadMode === "bundle" ? "white" : "gray.400"}
+                          bg={qrPayloadMode === "bundle" ? "#8B5CF6" : "transparent"}
+                          _hover={{ bg: qrPayloadMode === "bundle" ? "#7C3AED" : "whiteAlpha.100" }}
+                          onClick={() => setQrPayloadMode("bundle")}
+                        >
+                          UI &amp; Logics Bundle
+                        </Button>
+                        <Button
+                          flex={1}
+                          size="xs"
+                          height="32px"
+                          borderRadius="lg"
+                          fontWeight="700"
+                          fontSize="11px"
+                          leftIcon={<FaGlobe size={12} />}
+                          variant={qrPayloadMode === "webapp" ? "solid" : "ghost"}
+                          color={qrPayloadMode === "webapp" ? "gray.900" : "gray.400"}
+                          bg={qrPayloadMode === "webapp" ? "#22D3EE" : "transparent"}
+                          _hover={{ bg: qrPayloadMode === "webapp" ? "#06B6D4" : "whiteAlpha.100" }}
+                          onClick={() => setQrPayloadMode("webapp")}
+                        >
+                          Web App URL
+                        </Button>
+                      </HStack>
+                    </Box>
+
+                    {/* Network Mode Switcher: Local Wi-Fi vs Cloud Remote (Mobile 4G/5G / WAN) */}
+                    <Box px={4} pt={2}>
+                      <HStack bg="#0B1120" p={1} borderRadius="xl" border="1px solid" borderColor="rgba(56,189,248,0.15)" spacing={1.5}>
+                        <Button
+                          flex={1}
+                          size="xs"
+                          height="28px"
+                          borderRadius="lg"
+                          fontWeight="600"
+                          fontSize="10px"
+                          leftIcon={<FaWifi size={11} />}
                           variant={companionNetworkMode === "local" ? "solid" : "ghost"}
                           color={companionNetworkMode === "local" ? "gray.900" : "gray.400"}
                           bg={companionNetworkMode === "local" ? "#22D3EE" : "transparent"}
@@ -6224,18 +6391,18 @@ Generated automatically by **InnoIDE App Companion Studio**.
                         <Button
                           flex={1}
                           size="xs"
-                          height="32px"
+                          height="28px"
                           borderRadius="lg"
-                          fontWeight="700"
-                          fontSize="11px"
+                          fontWeight="600"
+                          fontSize="10px"
                           isLoading={remoteTunnelState.loading}
                           loadingText="Connecting..."
-                          leftIcon={<FaGlobe size={12} />}
+                          leftIcon={<FaGlobe size={11} />}
                           variant={companionNetworkMode === "cloud" ? "solid" : "ghost"}
                           color={companionNetworkMode === "cloud" ? "white" : "gray.400"}
                           bg={companionNetworkMode === "cloud" ? "#8B5CF6" : "transparent"}
                           _hover={{ bg: companionNetworkMode === "cloud" ? "#7C3AED" : "whiteAlpha.100" }}
-                          onClick={() => handleToggleCloudRemote(true)}
+                          onClick={() => handleToggleCloudRemote(true, companionNetworkMode === "cloud")}
                         >
                           Cloud Remote (4G/5G)
                         </Button>
@@ -6244,24 +6411,28 @@ Generated automatically by **InnoIDE App Companion Studio**.
 
                     {/* QR Payload Info Banner */}
                     <Box px={4} pt={2}>
-                      <HStack bg="#090D16" p={2.5} borderRadius="xl" border="1px solid" borderColor={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.3)" : "rgba(34,211,238,0.2)"} justify="space-between">
+                      <HStack bg="#090D16" p={2.5} borderRadius="xl" border="1px solid" borderColor={qrPayloadMode === "bundle" ? "rgba(168,85,247,0.3)" : (companionNetworkMode === "cloud" ? "rgba(168,85,247,0.3)" : "rgba(34,211,238,0.2)")} justify="space-between">
                         <HStack spacing={2} px={1} overflow="hidden">
                           <Badge
-                            colorScheme={companionNetworkMode === "cloud" ? "purple" : "green"}
+                            colorScheme={qrPayloadMode === "bundle" ? "purple" : (companionNetworkMode === "cloud" ? "purple" : "green")}
                             fontSize="9px"
                             px={2}
                             py={0.5}
                             borderRadius="md"
                           >
-                            {companionNetworkMode === "cloud" ? "🌐 HTTPS RELAY" : "📶 SAME NETWORK"}
+                            {qrPayloadMode === "bundle"
+                              ? "📦 UI + LOGICS BUNDLE"
+                              : (companionNetworkMode === "cloud" ? "🌐 HTTPS RELAY" : "📶 SAME NETWORK")}
                           </Badge>
                           <Text fontSize="11px" color="#94A3B8" fontWeight="medium" noOfLines={1}>
-                            {companionNetworkMode === "cloud"
-                              ? "Works on 4G, 5G cellular data & remote networks"
-                              : "Devices must be on same local Wi-Fi router"}
+                            {qrPayloadMode === "bundle"
+                              ? `Contains ${widgets.length} UI components & ${logicBlocks.length} automation rules`
+                              : (companionNetworkMode === "cloud"
+                                ? "Works on 4G, 5G cellular data & remote networks"
+                                : "Devices must be on same local Wi-Fi router")}
                           </Text>
                         </HStack>
-                        <Badge variant="outline" colorScheme="cyan" fontSize="9px" px={1.5} py={0.5}>
+                        <Badge variant="outline" colorScheme={qrPayloadMode === "bundle" ? "purple" : "cyan"} fontSize="9px" px={1.5} py={0.5}>
                           ⚡ MULTI-DEVICE SYNC
                         </Badge>
                       </HStack>
@@ -6269,13 +6440,62 @@ Generated automatically by **InnoIDE App Companion Studio**.
 
                     {/* QR Title & Scanner Hint */}
                     <Text fontSize="12px" fontWeight="700" color="#E2E8F0" letterSpacing="wide" mt={2.5} mb={0.5}>
-                      {companionNetworkMode === "cloud" ? "SCAN FROM ANY PHONE / ANY NETWORK" : "SCAN WITH ANY PHONE CAMERA"}
+                      {qrPayloadMode === "bundle"
+                        ? `SCAN TO IMPORT UI & LOGICS (${widgets.length} COMPONENTS, ${logicBlocks.length} RULES)`
+                        : (companionNetworkMode === "cloud" ? "SCAN FROM ANY PHONE / ANY NETWORK" : "SCAN WITH ANY PHONE CAMERA")}
                     </Text>
                     <Text fontSize="10px" color="#94A3B8" mb={2} px={4}>
-                      {companionNetworkMode === "cloud"
-                        ? "Point your smartphone camera at this QR code. Works instantly across mobile 4G/5G networks and remote internet without shared Wi-Fi."
-                        : "Point your smartphone camera at this QR code to launch companion controls on your local network."}
+                      {qrPayloadMode === "bundle"
+                        ? "Point your smartphone camera or companion app scanner at this QR code. Encodes all UI widgets, actions, and logic rules directly into the QR code."
+                        : (companionNetworkMode === "cloud"
+                          ? "Point your smartphone camera at this QR code. Works instantly across mobile 4G/5G networks and remote internet without shared Wi-Fi."
+                          : "Point your smartphone camera at this QR code to launch companion controls on your local network.")}
                     </Text>
+
+                    {/* Cloud Relay Status Banner */}
+                    {companionNetworkMode === "cloud" && (
+                      <Box px={4} pb={2}>
+                        {!remoteTunnelState.active || remoteTunnelState.error ? (
+                          <HStack bg="rgba(239,68,68,0.12)" p={2} borderRadius="xl" border="1px solid" borderColor="rgba(239,68,68,0.3)" justify="space-between">
+                            <HStack spacing={2} overflow="hidden">
+                              <Text fontSize="13px">⚠️</Text>
+                              <VStack align="start" spacing={0}>
+                                <Text fontSize="10px" fontWeight="700" color="red.300">
+                                  Cloud Tunnel Disconnected (Old URL Expired)
+                                </Text>
+                                <Text fontSize="9px" color="gray.400" noOfLines={1}>
+                                  SSH session closed. Tap Reconnect to generate a live link.
+                                </Text>
+                              </VStack>
+                            </HStack>
+                            <Button
+                              size="xs"
+                              colorScheme="red"
+                              height="22px"
+                              fontSize="10px"
+                              px={2.5}
+                              isLoading={remoteTunnelState.loading}
+                              leftIcon={<FaSync size={9} />}
+                              onClick={() => handleToggleCloudRemote(true, true)}
+                            >
+                              Reconnect
+                            </Button>
+                          </HStack>
+                        ) : (
+                          <HStack bg="rgba(34,197,94,0.1)" p={2} borderRadius="xl" border="1px solid" borderColor="rgba(34,197,94,0.25)" justify="space-between">
+                            <HStack spacing={2} overflow="hidden">
+                              <Box w="7px" h="7px" borderRadius="full" bg="#22C55E" />
+                              <Text fontSize="10px" fontWeight="700" color="#4ADE80" noOfLines={1}>
+                                Live Cloud Relay Active • 4G/5G Accessible
+                              </Text>
+                            </HStack>
+                            <Badge colorScheme="green" fontSize="9px" px={1.5} py={0.5}>
+                              ONLINE
+                            </Badge>
+                          </HStack>
+                        )}
+                      </Box>
+                    )}
 
                     {/* QR Code Scanner Frame */}
                     <Box display="flex" justifyContent="center" alignItems="center" pb={3} px={4}>
@@ -6284,40 +6504,23 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           position="relative"
                           p="16px"
                           borderRadius="20px"
-                          border={`3px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`}
-                          bg={companionNetworkMode === "cloud" ? "rgba(168,85,247,0.03)" : "rgba(34,211,238,0.03)"}
-                          boxShadow={companionNetworkMode === "cloud" ? "0 0 30px rgba(168,85,247,0.15)" : "0 0 30px rgba(34,211,238,0.12)"}
+                          border={`3px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`}
+                          bg={qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "rgba(168,85,247,0.03)" : "rgba(34,211,238,0.03)"}
+                          boxShadow={qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "0 0 30px rgba(168,85,247,0.15)" : "0 0 30px rgba(34,211,238,0.12)"}
                         >
-                          <Box position="absolute" top="-2px" left="-2px" w="20px" h="20px" borderTop={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderLeft={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderTopLeftRadius="12px" />
-                          <Box position="absolute" top="-2px" right="-2px" w="20px" h="20px" borderTop={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderRight={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderTopRightRadius="12px" />
-                          <Box position="absolute" bottom="-2px" left="-2px" w="20px" h="20px" borderBottom={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderLeft={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomLeftRadius="12px" />
-                          <Box position="absolute" bottom="-2px" right="-2px" w="20px" h="20px" borderBottom={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderRight={`4px solid ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomRightRadius="12px" />
+                          <Box position="absolute" top="-2px" left="-2px" w="20px" h="20px" borderTop={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderLeft={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderTopLeftRadius="12px" />
+                          <Box position="absolute" top="-2px" right="-2px" w="20px" h="20px" borderTop={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderRight={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderTopRightRadius="12px" />
+                          <Box position="absolute" bottom="-2px" left="-2px" w="20px" h="20px" borderBottom={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderLeft={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomLeftRadius="12px" />
+                          <Box position="absolute" bottom="-2px" right="-2px" w="20px" h="20px" borderBottom={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderRight={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomRightRadius="12px" />
 
-                          <Box
-                            position="absolute"
-                            left="10px"
-                            right="10px"
-                            h="2px"
-                            bg={`linear-gradient(90deg, transparent, ${companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}, transparent)`}
-                            borderRadius="full"
-                            opacity={0.7}
-                            sx={{
-                              animation: "scanLine 2.5s ease-in-out infinite",
-                              "@keyframes scanLine": {
-                                "0%": { top: "14px" },
-                                "50%": { top: "calc(100% - 14px)" },
-                                "100%": { top: "14px" }
-                              }
-                            }}
-                          />
-
-                          <Box bg="white" borderRadius="12px" p={2.5} position="relative" zIndex={1} minW="180px" minH="180px" display="flex" alignItems="center" justifyContent="center">
+                          <Box bg="white" borderRadius="16px" p={3} position="relative" zIndex={1} minW="240px" minH="240px" display="flex" alignItems="center" justifyContent="center">
                             <SafeQRCode
-                              value={webAppQrPayload}
-                              size={185}
-                              level="M"
+                              value={activeQrPayload}
+                              size={240}
+                              level="L"
+                              includeMargin={true}
                               bgColor="#ffffff"
-                              fgColor="#0F172A"
+                              fgColor="#000000"
                               style={{ display: "block" }}
                             />
                           </Box>
@@ -6325,45 +6528,78 @@ Generated automatically by **InnoIDE App Companion Studio**.
                       </Box>
                     </Box>
 
-                    {/* Web App URL Box with Copy & Open Buttons */}
+                    {/* Google Lens / Camera Guidance Notice */}
+                    {qrPayloadMode === "bundle" ? (
+                      <Box px={4} pb={2}>
+                        <HStack bg="rgba(56,189,248,0.08)" border="1px solid" borderColor="rgba(56,189,248,0.25)" borderRadius="xl" p={2.5} justify="space-between">
+                          <HStack spacing={2} overflow="hidden">
+                            <Text fontSize="13px">🔍</Text>
+                            <VStack align="start" spacing={0}>
+                              <Text fontSize="10px" fontWeight="700" color="#38BDF8">
+                                Scanning with Google Lens or Phone Camera?
+                              </Text>
+                              <Text fontSize="9px" color="#94A3B8" noOfLines={1}>
+                                Switch to "Web App URL" above to open the full UI &amp; logic in Chrome/Safari.
+                              </Text>
+                            </VStack>
+                          </HStack>
+                          <Button size="xs" colorScheme="cyan" height="24px" fontSize="10px" px={2.5} onClick={() => setQrPayloadMode("webapp")}>
+                            Switch
+                          </Button>
+                        </HStack>
+                      </Box>
+                    ) : (
+                      <Box px={4} pb={2}>
+                        <HStack bg="rgba(34,197,94,0.08)" border="1px solid" borderColor="rgba(34,197,94,0.25)" borderRadius="xl" p={2} justify="space-between">
+                          <HStack spacing={2} overflow="hidden">
+                            <Text fontSize="12px">✅</Text>
+                            <Text fontSize="10px" fontWeight="600" color="#4ADE80" noOfLines={1}>
+                              100% compatible with Google Lens, iPhone Camera &amp; Chrome/Safari
+                            </Text>
+                          </HStack>
+                        </HStack>
+                      </Box>
+                    )}
+
+                    {/* QR Payload Box with Copy & Open Buttons */}
                     <Box px={4} pb={4} pt={1}>
                       <HStack justify="space-between" mb={1.5}>
                         <Text fontSize="11px" fontWeight="semibold" color="gray.400" textAlign="left">
-                          Web App URL
+                          {qrPayloadMode === "bundle" ? "Project Payload (UI + Logics JSON)" : "Web App URL"}
                         </Text>
                         <HStack spacing={1}>
-                          {companionNetworkMode === "cloud" && (
-                            <Badge colorScheme="purple" fontSize="9px">
-                              {remoteTunnelState.provider || "HTTPS"}
-                            </Badge>
-                          )}
-                          <Text fontSize="10px" color={companionNetworkMode === "cloud" ? "purple.300" : "cyan.400"} fontFamily="monospace">
-                            {companionNetworkMode === "cloud" ? "Public Cloud Relay (4G/5G)" : "Local Wi-Fi Companion"}
+                          <Badge colorScheme={qrPayloadMode === "bundle" ? "purple" : (companionNetworkMode === "cloud" ? "purple" : "cyan")} fontSize="9px">
+                            {qrPayloadMode === "bundle" ? `${widgets.length} UI • ${logicBlocks.length} Logics` : (companionNetworkMode === "cloud" ? (remoteTunnelState.provider || "HTTPS") : "Local Wi-Fi")}
+                          </Badge>
+                          <Text fontSize="10px" color={qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "purple.300" : "cyan.400"} fontFamily="monospace">
+                            {qrPayloadMode === "bundle" ? "Full Bundle Schema" : (companionNetworkMode === "cloud" ? "Public Cloud Relay (4G/5G)" : "Local Wi-Fi Companion")}
                           </Text>
                         </HStack>
                       </HStack>
                       <HStack bg={useColorModeValue("gray.50", "gray.800")} p={1} borderRadius="xl" border="1px" borderColor={borderColor}>
                         <Input
-                          value={webAppQrPayload}
+                          value={activeQrPayload}
                           isReadOnly
                           fontSize="xs"
                           variant="unstyled"
                           px={2}
                           fontFamily="monospace"
-                          color={companionNetworkMode === "cloud" ? "purple.300" : "cyan.400"}
+                          color={qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "purple.300" : "cyan.400"}
                           fontWeight="semibold"
                         />
                         <Button
                           size="xs"
-                          colorScheme={companionNetworkMode === "cloud" ? "purple" : "cyan"}
+                          colorScheme={qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "purple" : "cyan"}
                           px={3}
                           borderRadius="lg"
                           leftIcon={<FaCopy size={10} />}
                           onClick={() => {
-                            navigator.clipboard.writeText(webAppQrPayload);
+                            navigator.clipboard.writeText(activeQrPayload);
                             toast({
-                              title: "Copied URL to Clipboard",
-                              description: `${webAppQrPayload} copied.`,
+                              title: qrPayloadMode === "bundle" ? "Copied UI & Logics Schema" : "Copied URL to Clipboard",
+                              description: qrPayloadMode === "bundle"
+                                ? `JSON schema containing ${widgets.length} widgets and ${logicBlocks.length} logic rules copied.`
+                                : `${activeQrPayload} copied.`,
                               status: "success",
                               duration: 2000
                             });
@@ -6371,18 +6607,36 @@ Generated automatically by **InnoIDE App Companion Studio**.
                         >
                           Copy
                         </Button>
-                        <Button
-                          size="xs"
-                          colorScheme="blue"
-                          px={3}
-                          borderRadius="lg"
-                          leftIcon={<FaExternalLinkAlt size={10} />}
-                          onClick={() => {
-                            window.open(webAppQrPayload, "_blank");
-                          }}
-                        >
-                          Open
-                        </Button>
+                        {companionNetworkMode === "cloud" && (
+                          <Button
+                            size="xs"
+                            colorScheme="purple"
+                            variant="outline"
+                            px={2.5}
+                            borderRadius="lg"
+                            isLoading={remoteTunnelState.loading}
+                            loadingText="Reconnecting..."
+                            leftIcon={<FaSync size={10} />}
+                            onClick={() => handleToggleCloudRemote(true, true)}
+                            title="Generate a fresh live HTTPS tunnel"
+                          >
+                            Refresh Tunnel
+                          </Button>
+                        )}
+                        {qrPayloadMode === "webapp" && (
+                          <Button
+                            size="xs"
+                            colorScheme="blue"
+                            px={3}
+                            borderRadius="lg"
+                            leftIcon={<FaExternalLinkAlt size={10} />}
+                            onClick={() => {
+                              window.open(webAppQrPayload, "_blank");
+                            }}
+                          >
+                            Open
+                          </Button>
+                        )}
                       </HStack>
                     </Box>
                   </Box>
@@ -6578,7 +6832,19 @@ Generated automatically by **InnoIDE App Companion Studio**.
                     transition="all 0.15s"
                     justify="space-between"
                     onClick={() => {
-                      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ projectName, widgets, logicBlocks }, null, 2));
+                      const bridgeBaseUrl = isCloudActive ? remoteTunnelState.url : `http://${resolvedHostIp}:${resolvedHostPort}`;
+                      const exportObj = {
+                        projectName,
+                        id: effectiveDeviceId,
+                        name: effectiveDeviceName,
+                        deviceType: effectiveDeviceType,
+                        port: activePort || "COM9",
+                        serverUrl: bridgeBaseUrl,
+                        bridgeUrl: `${bridgeBaseUrl}/api/action`,
+                        widgets: cleanUiList,
+                        rules: cleanLogicsList
+                      };
+                      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObj, null, 2));
                       const dlAnchor = document.createElement("a");
                       dlAnchor.setAttribute("href", dataStr);
                       dlAnchor.setAttribute("download", `${projectName.toLowerCase().replace(/\s+/g, "-")}-config.json`);

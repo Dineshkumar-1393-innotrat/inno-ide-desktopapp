@@ -9,6 +9,12 @@ import { ipcMain, app, shell } from 'electron';
 import http from 'http';
 import os from 'os';
 import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let companionServer = null;
 
@@ -52,14 +58,51 @@ let remoteTunnelLt = null;
 let currentRemoteUrl = '';
 let remoteTunnelProvider = '';
 let tunnelStartingPromise = null;
+let globalGetMainWindow = null;
 
-async function startRemoteTunnel(port = currentCompanionPort) {
-  if (currentRemoteUrl) {
+function saveTunnelStatus(active, url, provider) {
+  try {
+    const statusFile = path.join(__dirname, '../../scratch/active_tunnel.json');
+    fs.writeFileSync(statusFile, JSON.stringify({
+      url: active ? url : '',
+      timestamp: Date.now(),
+      active: Boolean(active),
+      provider: provider || ''
+    }, null, 2));
+  } catch {}
+}
+
+function notifyTunnelStatus(active, url, provider, status) {
+  try {
+    const win = globalGetMainWindow?.();
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('companion:tunnel-status', {
+        active,
+        url,
+        provider,
+        status
+      });
+    }
+  } catch {}
+}
+
+async function startRemoteTunnel(port = currentCompanionPort, forceRestart = false) {
+  // If force restart requested or previous process died, clean up first
+  if (forceRestart || (remoteTunnelProcess && remoteTunnelProcess.exitCode !== null)) {
+    await stopRemoteTunnel();
+  } else if (currentRemoteUrl && remoteTunnelProcess && !remoteTunnelProcess.killed && remoteTunnelProcess.exitCode === null) {
     return { success: true, url: currentRemoteUrl, provider: remoteTunnelProvider };
   }
+
   if (tunnelStartingPromise) return await tunnelStartingPromise;
 
   tunnelStartingPromise = (async () => {
+    // Clean up any stale process before starting fresh
+    if (remoteTunnelProcess) {
+      try { remoteTunnelProcess.kill(); } catch {}
+      remoteTunnelProcess = null;
+    }
+
     // Provider 1: localhost.run via SSH (Instant HTTPS, zero-setup, direct access across all networks)
     try {
       const lhrUrl = await new Promise((resolve, reject) => {
@@ -69,12 +112,13 @@ async function startRemoteTunnel(port = currentCompanionPort) {
             remoteTunnelProcess = null;
           }
           reject(new Error('localhost.run SSH connection timed out'));
-        }, 9000);
+        }, 14000);
 
         const proc = spawn('ssh', [
           '-o', 'StrictHostKeyChecking=no',
-          '-o', 'ServerAliveInterval=30',
-          '-o', 'ServerAliveCountMax=3',
+          '-o', 'ServerAliveInterval=15',
+          '-o', 'ServerAliveCountMax=4',
+          '-o', 'ExitOnForwardFailure=yes',
           '-R', `80:127.0.0.1:${port}`,
           'nokey@localhost.run'
         ], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -105,6 +149,8 @@ async function startRemoteTunnel(port = currentCompanionPort) {
             currentRemoteUrl = '';
             remoteTunnelProvider = '';
           }
+          saveTunnelStatus(false, '', '');
+          notifyTunnelStatus(false, '', '', 'disconnected');
         });
       });
 
@@ -112,44 +158,86 @@ async function startRemoteTunnel(port = currentCompanionPort) {
         currentRemoteUrl = lhrUrl;
         remoteTunnelProvider = 'localhost.run';
         console.log(`[RemoteTunnel] Public HTTPS tunnel active via localhost.run: ${lhrUrl}`);
+        saveTunnelStatus(true, lhrUrl, 'localhost.run');
+        notifyTunnelStatus(true, lhrUrl, 'localhost.run', 'active');
         return { success: true, url: lhrUrl, provider: 'localhost.run' };
       }
     } catch (sshErr) {
-      console.warn('[RemoteTunnel] localhost.run attempt notice, falling back to localtunnel:', sshErr.message);
+      console.warn('[RemoteTunnel] localhost.run attempt notice:', sshErr.message);
     }
 
-    // Provider 2: localtunnel npm package
+    // Provider 2: Serveo via SSH fallback
     try {
-      const localtunnelModule = await import('localtunnel');
-      const lt = localtunnelModule.default || localtunnelModule;
-      const tunnel = await lt({ port });
-      remoteTunnelLt = tunnel;
-      currentRemoteUrl = tunnel.url;
-      remoteTunnelProvider = 'localtunnel';
+      const serveoUrl = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          if (remoteTunnelProcess) {
+            try { remoteTunnelProcess.kill(); } catch {}
+            remoteTunnelProcess = null;
+          }
+          reject(new Error('Serveo SSH connection timed out'));
+        }, 12000);
 
-      tunnel.on('close', () => {
-        remoteTunnelLt = null;
-        if (remoteTunnelProvider === 'localtunnel') {
-          currentRemoteUrl = '';
-          remoteTunnelProvider = '';
-        }
+        const proc = spawn('ssh', [
+          '-o', 'StrictHostKeyChecking=no',
+          '-o', 'ServerAliveInterval=15',
+          '-o', 'ServerAliveCountMax=4',
+          '-R', `80:127.0.0.1:${port}`,
+          'serveo.net'
+        ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+        remoteTunnelProcess = proc;
+
+        const checkOutput = (chunk) => {
+          const text = chunk.toString();
+          const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.(?:serveousercontent\.com|serveo\.net)/i);
+          if (match && match[0]) {
+            clearTimeout(timeout);
+            resolve(match[0]);
+          }
+        };
+
+        proc.stdout.on('data', checkOutput);
+        proc.stderr.on('data', checkOutput);
+
+        proc.on('error', (err) => {
+          clearTimeout(timeout);
+          remoteTunnelProcess = null;
+          reject(err);
+        });
+
+        proc.on('close', () => {
+          remoteTunnelProcess = null;
+          if (remoteTunnelProvider === 'serveo') {
+            currentRemoteUrl = '';
+            remoteTunnelProvider = '';
+          }
+          saveTunnelStatus(false, '', '');
+          notifyTunnelStatus(false, '', '', 'disconnected');
+        });
       });
 
-      tunnel.on('error', (e) => {
-        console.warn('[RemoteTunnel] Localtunnel notice:', e.message);
-      });
-
-      console.log(`[RemoteTunnel] Public HTTPS tunnel active via localtunnel: ${tunnel.url}`);
-      return { success: true, url: tunnel.url, provider: 'localtunnel' };
-    } catch (ltErr) {
-      console.error('[RemoteTunnel] Both tunnel providers failed:', ltErr.message);
-      return { success: false, error: ltErr.message };
-    } finally {
-      tunnelStartingPromise = null;
+      if (serveoUrl) {
+        currentRemoteUrl = serveoUrl;
+        remoteTunnelProvider = 'serveo';
+        console.log(`[RemoteTunnel] Public HTTPS tunnel active via Serveo: ${serveoUrl}`);
+        saveTunnelStatus(true, serveoUrl, 'serveo');
+        notifyTunnelStatus(true, serveoUrl, 'serveo', 'active');
+        return { success: true, url: serveoUrl, provider: 'serveo' };
+      }
+    } catch (serveoErr) {
+      console.warn('[RemoteTunnel] Serveo fallback attempt notice:', serveoErr.message);
     }
+
+    saveTunnelStatus(false, '', '');
+    notifyTunnelStatus(false, '', '', 'failed');
+    return { success: false, error: 'Could not establish SSH cloud tunnel to localhost.run or Serveo' };
   })();
 
-  return await tunnelStartingPromise;
+  try {
+    return await tunnelStartingPromise;
+  } finally {
+    tunnelStartingPromise = null;
+  }
 }
 
 async function stopRemoteTunnel() {
@@ -163,6 +251,8 @@ async function stopRemoteTunnel() {
   }
   currentRemoteUrl = '';
   remoteTunnelProvider = '';
+  saveTunnelStatus(false, '', '');
+  notifyTunnelStatus(false, '', '', 'disconnected');
   return { success: true };
 }
 let currentCompanionHtml = `<!DOCTYPE html>
@@ -331,6 +421,7 @@ function getLocalIPv4() {
 }
 
 export function registerAllIPCHandlers(getMainWindow) {
+  globalGetMainWindow = getMainWindow;
   registerFilesystemIPC(getMainWindow);
   registerProjectIPC();
   registerDeviceIPC();
@@ -684,8 +775,8 @@ export function registerAllIPCHandlers(getMainWindow) {
     return { success: true };
   });
 
-  ipcMain.handle('app:start-remote-tunnel', async (_event, port = 5055) => {
-    return await startRemoteTunnel(port);
+  ipcMain.handle('app:start-remote-tunnel', async (_event, port = 5055, forceRestart = false) => {
+    return await startRemoteTunnel(port, forceRestart);
   });
 
   ipcMain.handle('app:stop-remote-tunnel', async () => {
@@ -693,10 +784,29 @@ export function registerAllIPCHandlers(getMainWindow) {
   });
 
   ipcMain.handle('app:get-remote-tunnel', async () => {
+    try {
+      const statusFile = path.join(__dirname, '../../scratch/active_tunnel.json');
+      if (fs.existsSync(statusFile)) {
+        const raw = fs.readFileSync(statusFile, 'utf8');
+        const data = JSON.parse(raw);
+        const isFresh = data?.timestamp && (Date.now() - data.timestamp < 1000 * 60 * 15);
+        if (data && data.active && data.url && isFresh) {
+          currentRemoteUrl = data.url;
+          remoteTunnelProvider = data.provider || 'localhost.run';
+          return {
+            active: true,
+            url: data.url,
+            provider: remoteTunnelProvider
+          };
+        }
+      }
+    } catch {}
+
+    const isProcessAlive = remoteTunnelProcess && !remoteTunnelProcess.killed && remoteTunnelProcess.exitCode === null;
     return {
-      active: Boolean(currentRemoteUrl),
-      url: currentRemoteUrl,
-      provider: remoteTunnelProvider
+      active: Boolean(isProcessAlive && currentRemoteUrl),
+      url: isProcessAlive ? currentRemoteUrl : '',
+      provider: isProcessAlive ? remoteTunnelProvider : ''
     };
   });
 
