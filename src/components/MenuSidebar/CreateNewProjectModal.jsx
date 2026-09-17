@@ -105,6 +105,11 @@ const CreateNewProjectModal = ({
 
       console.log(`[CreateNewProjectModal] Product created: ${productId}`);
 
+      // Mark this project as newly created so CreateProductButton shows "+ Create Product"
+      localStorage.setItem(`innoide:project_status_${generatedProjectId}`, "new");
+      localStorage.removeItem(`innoide:product_create_missed_${generatedProjectId}`);
+      localStorage.removeItem(`innoide:product_created_${generatedProjectId}`);
+
       // Switch to the new project globally
       await switchProject({
         projectId: generatedProjectId,
@@ -115,6 +120,10 @@ const CreateNewProjectModal = ({
 
       // Refresh filesystem
       await fetchFileSystem(userId, setFileSystem, buildTree);
+
+      // Broadcast event so UI updates immediately
+      window.dispatchEvent(new CustomEvent("product-definition-changed"));
+      window.dispatchEvent(new CustomEvent("innoide:refresh-filesystem"));
 
       // Navigation mapping
       const routeMap = {

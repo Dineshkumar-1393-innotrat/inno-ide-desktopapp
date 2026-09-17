@@ -39,7 +39,7 @@ import { productAPIBase, baseURL } from "../utilities";
 
 import { COMPONENT_DATA, COMPONENT_TYPES } from "./componentData.js";
 
-export default function ProductDefinition({ onSuccess }) {
+export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 }) {
   const toast = useToast();
 
   // Get project data from ProjectContext to ensure accurate association
@@ -350,10 +350,12 @@ export default function ProductDefinition({ onSuccess }) {
   const [note, setNote] = useState("");
 
   // Step 1 (popup) or Step 2 (full form)
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(initialStep);
 
   // Basic Info (Step 1 + reused in Step 2)
-  const [productName, setProductName] = useState("");
+  const [productName, setProductName] = useState(() => {
+    return activeProjectName || localStorage.getItem("activeProjectName") || "";
+  });
   const [description, setDescription] = useState("");
 
   // Basic Info - Step 2
@@ -449,17 +451,18 @@ export default function ProductDefinition({ onSuccess }) {
     }
   ]);
 
-  // Auto-advance to Step 2 if a product is already associated with the project
+  // Auto-advance to Step 2 if a product is already associated with the project or initialStep === 2
   useEffect(() => {
-    if (activeProductId && step === 1) {
-      console.log("[ProductDefinition] Existing product found, advancing to Step 2", activeProductId);
+    if ((activeProductId || initialStep === 2) && step === 1) {
+      console.log("[ProductDefinition] Existing product found or initialStep=2, advancing to Step 2", activeProductId);
       setStep(2);
     }
     // Pre-populate name if available
-    if (activeProjectName && !productName) {
-      setProductName(activeProjectName);
+    const curName = activeProjectName || localStorage.getItem("activeProjectName");
+    if (curName && !productName) {
+      setProductName(curName);
     }
-  }, [activeProductId, activeProjectName, step]);
+  }, [activeProductId, activeProjectName, step, initialStep]);
 
   console.log(formComponents, "formComponents---");
 
@@ -1052,6 +1055,7 @@ export default function ProductDefinition({ onSuccess }) {
       }
 
       if (onSuccess) onSuccess();
+      if (typeof onClose === "function") onClose();
 
     } catch (error) {
       console.error("❌ Definition API Error (All servers failed):", error);
@@ -1285,9 +1289,11 @@ export default function ProductDefinition({ onSuccess }) {
     setDeviceInfos([{ imei: "", iccid: "", phone: "" }]);
     setUrlLink("");
     setNote("");
-    setStep(1);
+    setStep(initialStep);
     setEditingParam(null);
-    // setEditingComponentIndex(null); // removed
+    if (typeof onClose === "function") {
+      onClose();
+    }
   };
 
   // popup handlers

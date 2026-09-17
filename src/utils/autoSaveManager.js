@@ -276,8 +276,8 @@ class AutoSaveManager {
         stored = sessionStorage.getItem(storageKey);
       }
       
-      // Fallback to old "default" project ID key to recover yesterday's work
-      if (!stored) {
+      // Fallback to old "default" project ID key ONLY IF current project is 'default'
+      if (!stored && this.getCurrentProjectId() === 'default') {
         const userId = this.getCurrentUserId();
         const oldStorageKey = `innoide:autosave:${userId}:default:${screenKey}`;
         stored = localStorage.getItem(oldStorageKey) || sessionStorage.getItem(oldStorageKey);

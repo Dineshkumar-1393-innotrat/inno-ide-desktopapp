@@ -231,16 +231,31 @@ export default function ESP32Flasher({
 
   // Active Wizard Step: 'connection' | 'devices' | 'compatibility' | 'flashing' | 'success' | 'app_builder'
   const [wizardStep, setWizardStepState] = useState(() => {
-    // When opening the Flasher (via initialStep or fresh modal open), prioritize initialStep.
-    // Never automatically restore "app_builder" as the opening screen, so an already-flashed board
-    // never gets stuck redirecting to the App Builder mobile designer.
+    // When an explicit initialStep is provided (e.g. parent opens the flasher modal fresh),
+    // always honour it — but never force "app_builder" via prop on a fresh open.
     if (initialStep && initialStep !== "app_builder") {
       return initialStep;
     }
-    const saved = localStorage.getItem("inno_flasher_active_step");
-    if (saved && saved !== "app_builder") {
-      return saved;
-    }
+    // FIX 1: Restore "app_builder" from localStorage only if the saved timestamp is < 30 min old.
+    // This means idle/HMR reloads correctly return the user to the App Builder, while a cold
+    // app restart after hours still opens at the default "connection" step.
+    try {
+      const raw = localStorage.getItem("inno_flasher_active_step");
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.step === "app_builder") {
+            const age = Date.now() - (parsed.ts || 0);
+            if (age < 30 * 60 * 1000) return "app_builder"; // within 30 minutes
+          } else if (parsed.step) {
+            return parsed.step;
+          }
+        } catch (_) {
+          // Legacy plain-string format from older app versions
+          if (raw !== "app_builder") return raw;
+        }
+      }
+    } catch (e) { }
     return "connection";
   });
 
@@ -253,13 +268,11 @@ export default function ESP32Flasher({
 
   const setWizardStep = useCallback((step) => {
     setWizardStepState(step);
+    // FIX 1: Persist ALL steps (including "app_builder") as JSON with a TTL timestamp.
+    // "app_builder" is persisted with a 30-min TTL so idle/hot-reload restores it correctly,
+    // while a cold restart after the TTL expires returns safely to "connection".
     try {
-      if (step === "app_builder") {
-        // Do not persist "app_builder" so reopening the flasher modal never gets trapped in the app builder
-        localStorage.removeItem("inno_flasher_active_step");
-      } else {
-        localStorage.setItem("inno_flasher_active_step", step);
-      }
+      localStorage.setItem("inno_flasher_active_step", JSON.stringify({ step, ts: Date.now() }));
     } catch (e) { }
   }, []);
 
@@ -272,6 +285,35 @@ export default function ESP32Flasher({
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0] || null;
   const [isScanning, setIsScanning] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [manualWifiIp, setManualWifiIp] = useState("192.168.1.105:8888");
+
+  const handleAddManualWifiDevice = () => {
+    if (!manualWifiIp || !manualWifiIp.trim()) return;
+    const cleanIp = manualWifiIp.trim().replace(/^TCP:/i, '');
+    const fullPort = `TCP:${cleanIp.includes(':') ? cleanIp : `${cleanIp}:8888`}`;
+    const newDev = {
+      id: `esp32-manual-${cleanIp}`,
+      name: `ESP32-S3 Wireless Node (${cleanIp.split(':')[0]})`,
+      ip: cleanIp.split(':')[0],
+      firmware: "Firmware v1.2.1 (Wi-Fi)",
+      port: fullPort,
+      chip: "esp32s3",
+      manufacturer: 'Wi-Fi Socket Node',
+      signal: 5,
+      battery: 100,
+      isUsb: false,
+      isNetwork: true,
+      selected: true
+    };
+    setDevices((prev) => [newDev, ...prev.filter((d) => d.port !== fullPort)]);
+    setSelectedDeviceId(newDev.id);
+    toast({
+      title: "🌐 Wi-Fi Target Linked",
+      description: `Targeting wireless node at ${fullPort}`,
+      status: "success",
+      duration: 3500
+    });
+  };
 
   // Step 3: Compatibility Checklist Status (dynamically calculated)
   const compatibilityChecks = useMemo(() => {
@@ -607,8 +649,10 @@ export default function ESP32Flasher({
   // Pre-sync Snack session & track Publish modal state
   useEffect(() => {
     if (isPublishOpen) {
+      // FIX 3: Store publish modal state as JSON with a timestamp so stale keys left by
+      // a crash or force-kill don't phantom-reopen the modal on the next cold launch.
       try {
-        localStorage.setItem("inno_publish_modal_open", "true");
+        localStorage.setItem("inno_publish_modal_open", JSON.stringify({ open: true, ts: Date.now() }));
       } catch (e) { }
       startLocalCompanionServer();
       // Auto-start Cloud Remote tunnel so it is immediately ready when scanning from mobile 4G/5G
@@ -625,11 +669,25 @@ export default function ESP32Flasher({
     }
   }, [isPublishOpen]);
 
-  // Auto-restore publish modal if it was open prior to hot reload
+  // FIX 3: Auto-restore publish modal only if it was open within the last 5 minutes.
+  // This handles idle/HMR hot-reloads correctly while ignoring stale keys from crashes.
   useEffect(() => {
     try {
-      if (localStorage.getItem("inno_publish_modal_open") === "true") {
-        onPublishOpen();
+      const raw = localStorage.getItem("inno_publish_modal_open");
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          const age = Date.now() - (parsed.ts || 0);
+          if (parsed.open === true && age < 5 * 60 * 1000) {
+            onPublishOpen();
+          } else {
+            // Stale key — clear it so it never interferes again
+            localStorage.removeItem("inno_publish_modal_open");
+          }
+        } catch (_) {
+          // Legacy bare-string format — always clear, never reopen on cold start
+          localStorage.removeItem("inno_publish_modal_open");
+        }
       }
     } catch (e) { }
   }, []);
@@ -1021,37 +1079,102 @@ export default function ESP32Flasher({
     }
   }, [flashTerminalLogs]);
 
-  // Scan Real Ports via Electron IPC if available
+  // Scan Real Ports & Discovered Wi-Fi Devices via Electron IPC
   const handleRefreshDevices = useCallback(async (isSilent = false) => {
     if (!isSilent) {
       setIsScanning(true);
     }
     try {
       let ports = [];
+      let wifiNodes = [];
+
+      if (window.electronAPI?.device?.discoverWifi) {
+        try {
+          wifiNodes = await window.electronAPI.device.discoverWifi();
+        } catch { }
+      }
+
       if (window.electronAPI?.flash?.detectPorts) {
         ports = await window.electronAPI.flash.detectPorts();
       } else if (window.electronAPI?.serial?.listPorts) {
         ports = await window.electronAPI.serial.listPorts();
       }
 
+      const allDevices = [];
+
       if (ports && ports.length > 0) {
-        const mapped = ports.map((p, idx) => ({
-          id: `esp32-detected-${p.path || idx}`,
-          name: p.friendlyName || (p.isUsb ? `ESP32-S3 Board (${p.path})` : `Serial Port (${p.path})`),
-          ip: `192.168.1.${40 + idx}`,
-          firmware: "Firmware v1.2.1",
-          port: p.path,
-          chip: p.chip || "esp32s3",
-          manufacturer: p.manufacturer || (p.isUsb ? 'USB Serial Device' : 'Serial Port'),
-          signal: 4,
-          battery: 85 + (idx * 5) % 15,
-          isUsb: p.isUsb !== false,
-          selected: idx === 0
-        }));
-        setDevices(mapped);
+        ports.forEach((p, idx) => {
+          if (p.isNetwork) {
+            allDevices.push({
+              id: `esp32-wifi-${p.path || idx}`,
+              name: p.friendlyName || `ESP32-S3 Wireless Node`,
+              ip: p.ip || (p.path ? p.path.replace(/^TCP:/i, '') : '192.168.1.105'),
+              firmware: "Firmware v1.2.1 (Wi-Fi)",
+              port: p.path,
+              chip: "esp32s3",
+              manufacturer: 'Wi-Fi Socket (:8888)',
+              signal: 5,
+              battery: 95,
+              isUsb: false,
+              isNetwork: true,
+              selected: false
+            });
+          } else {
+            allDevices.push({
+              id: `esp32-detected-${p.path || idx}`,
+              name: p.friendlyName || (p.isUsb ? `ESP32-S3 Board (${p.path})` : `Serial Port (${p.path})`),
+              ip: `COM Port (${p.path})`,
+              firmware: "Firmware v1.2.1",
+              port: p.path,
+              chip: p.chip || "esp32s3",
+              manufacturer: p.manufacturer || (p.isUsb ? 'USB Serial Device' : 'Serial Port'),
+              signal: 4,
+              battery: 85 + (idx * 5) % 15,
+              isUsb: p.isUsb !== false,
+              isNetwork: false,
+              selected: idx === 0
+            });
+          }
+        });
+      }
+
+      if (wifiNodes && wifiNodes.length > 0) {
+        wifiNodes.forEach((wn) => {
+          const exists = allDevices.some((d) => d.port === wn.port || d.ip === wn.ip);
+          if (!exists) {
+            allDevices.unshift({
+              id: `esp32-wifi-${wn.ip}`,
+              name: wn.name || `ESP32-S3 Wireless Node (${wn.ip})`,
+              ip: wn.ip,
+              firmware: "Firmware v1.2.1 (Wi-Fi)",
+              port: wn.port || `TCP:${wn.ip}:${wn.tcpPort || 8888}`,
+              chip: "esp32s3",
+              manufacturer: 'Wi-Fi Broadcast (:8888)',
+              signal: 5,
+              battery: 100,
+              isUsb: false,
+              isNetwork: true,
+              selected: false
+            });
+          }
+        });
+      }
+
+      // Filter based on active connectionType
+      let filtered = allDevices;
+      if (connectionType === "wifi") {
+        const netDevs = allDevices.filter(d => d.isNetwork);
+        filtered = netDevs.length > 0 ? netDevs : allDevices;
+      } else if (connectionType === "usb") {
+        const usbDevs = allDevices.filter(d => !d.isNetwork);
+        filtered = usbDevs.length > 0 ? usbDevs : allDevices;
+      }
+
+      if (filtered && filtered.length > 0) {
+        setDevices(filtered);
         setSelectedDeviceId((prevId) => {
-          const exists = mapped.some((d) => d.id === prevId);
-          return exists ? prevId : mapped[0]?.id;
+          const exists = filtered.some((d) => d.id === prevId);
+          return exists ? prevId : filtered[0]?.id;
         });
       } else {
         setDevices([]);
@@ -1066,7 +1189,7 @@ export default function ESP32Flasher({
         setIsScanning(false);
       }
     }
-  }, []);
+  }, [connectionType]);
 
   // Run initial scan on mount
   useEffect(() => {
@@ -7488,6 +7611,51 @@ Generated automatically by **InnoIDE App Companion Studio**.
                 </HStack>
               </HStack>
 
+              {/* Wi-Fi Direct IP Connect Toolbar */}
+              {connectionType === "wifi" && (
+                <Box
+                  p={3.5}
+                  bg={useColorModeValue("blue.50", "gray.800")}
+                  borderRadius="xl"
+                  border="1px solid"
+                  borderColor="blue.200"
+                >
+                  <VStack align="stretch" spacing={2.5}>
+                    <HStack justify="space-between">
+                      <HStack spacing={2}>
+                        <FaWifi size={13} color="#2563eb" />
+                        <Text fontSize="xs" fontWeight="bold" color={useColorModeValue("blue.800", "blue.200")}>
+                          Connect Wireless ESP32-S3 via Wi-Fi IP
+                        </Text>
+                      </HStack>
+                      <Badge colorScheme="blue" fontSize="9px">TCP Socket :8888</Badge>
+                    </HStack>
+                    <HStack spacing={2}>
+                      <Input
+                        size="sm"
+                        bg="white"
+                        borderRadius="lg"
+                        placeholder="e.g. 192.168.1.105:8888 or 192.168.4.1:8888"
+                        value={manualWifiIp}
+                        onChange={(e) => setManualWifiIp(e.target.value)}
+                        fontSize="xs"
+                        fontFamily="monospace"
+                      />
+                      <Button
+                        size="sm"
+                        colorScheme="blue"
+                        px={4}
+                        fontSize="xs"
+                        onClick={handleAddManualWifiDevice}
+                        leftIcon={<FaBolt size={10} />}
+                      >
+                        Connect
+                      </Button>
+                    </HStack>
+                  </VStack>
+                </Box>
+              )}
+
               {/* Discovered Device Cards List / Empty State */}
               {devices.length === 0 ? (
                 <Box
@@ -7500,14 +7668,16 @@ Generated automatically by **InnoIDE App Companion Studio**.
                 >
                   <VStack spacing={3}>
                     <Box p={3} bg="orange.100" color="orange.600" borderRadius="full">
-                      <FaExclamationTriangle size={22} />
+                      {connectionType === "wifi" ? <FaWifi size={22} /> : <FaExclamationTriangle size={22} />}
                     </Box>
                     <VStack spacing={1}>
                       <Text fontWeight="bold" fontSize="sm" color={useColorModeValue("orange.800", "orange.200")}>
-                        No Serial / USB Devices Detected
+                        {connectionType === "wifi" ? "No Wireless ESP32 Devices Discovered" : "No Serial / USB Devices Detected"}
                       </Text>
                       <Text fontSize="xs" color={useColorModeValue("gray.600", "gray.400")} maxW="440px">
-                        Connect your ESP32 board to your PC via USB and click <b>Scan for Devices</b>.
+                        {connectionType === "wifi"
+                          ? "Power on your ESP32-S3 with battery or wall adapter. Enter the IP above or connect to SoftAP 'InnoIDE-ESP32-S3' (IP: 192.168.4.1)."
+                          : "Connect your ESP32 board to your PC via USB and click Scan for Devices."}
                       </Text>
                     </VStack>
 
@@ -7524,12 +7694,22 @@ Generated automatically by **InnoIDE App Companion Studio**.
                       color={useColorModeValue("gray.700", "gray.300")}
                     >
                       <Text fontWeight="semibold" mb={1} color={useColorModeValue("gray.800", "gray.200")}>
-                        Hardware Checklist:
+                        {connectionType === "wifi" ? "Wireless Checklist:" : "Hardware Checklist:"}
                       </Text>
                       <VStack align="start" spacing={1}>
-                        <Text>• <b>Data Cable:</b> Verify your USB cable supports data transfer (not a power-only cable).</Text>
-                        <Text>• <b>Driver:</b> Ensure CP2102, CH340, or FTDI drivers are installed if required.</Text>
-                        <Text>• <b>Bootloader Mode:</b> If using native ESP32-S3 USB, hold <b>BOOT</b>, tap <b>RST</b>, then release <b>BOOT</b>.</Text>
+                        {connectionType === "wifi" ? (
+                          <>
+                            <Text>• <b>Initial Flash:</b> Ensure the board has been flashed once with Wi-Fi enabled firmware.</Text>
+                            <Text>• <b>Power:</b> Ensure ESP32-S3 is powered via battery, power bank, or 5V USB charger.</Text>
+                            <Text>• <b>Same Network:</b> Ensure laptop and ESP32 are connected to the same 2.4GHz Wi-Fi.</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text>• <b>Data Cable:</b> Verify your USB cable supports data transfer (not a power-only cable).</Text>
+                            <Text>• <b>Driver:</b> Ensure CP2102, CH340, or FTDI drivers are installed if required.</Text>
+                            <Text>• <b>Bootloader Mode:</b> If using native ESP32-S3 USB, hold <b>BOOT</b>, tap <b>RST</b>, then release <b>BOOT</b>.</Text>
+                          </>
+                        )}
                       </VStack>
                     </Box>
 

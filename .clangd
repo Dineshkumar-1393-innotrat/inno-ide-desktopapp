@@ -10,6 +10,7 @@ CompileFlags:
     - "-fno-jump-tables"
     - "-fmacro-prefix-map=*"
   Add:
+    - "--target=arm-none-eabi"
     - "-D__XTENSA__"
     - "-D__XTENSA_EL__"
     - "-DESP_PLATFORM"
@@ -27,4 +28,11 @@ Diagnostics:
     - "drv_unknown_argument"
     - "unused-includes"
     - "attributes"
+    - "typedef-redefinition"
+    - "redefinition_different_type"
+    - "typecheck_redefinition_different_types"
+    - "*typedef redefinition*"
+    - "*type name requires a specifier or qualifier*"
+    - "*redefinition with different types*"
+    - "typecheck_decl_invalid_specifier"
 

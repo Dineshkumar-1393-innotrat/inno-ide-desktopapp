@@ -30,25 +30,30 @@ function ProductEditModal({
   const [userId, setUserId] = useState(null);
   const [removeRefreshKey, setRemoveRefreshKey] = useState(0);
 
+  const effectiveProductId = productID || localStorage.getItem("activeProductId") || localStorage.getItem("activeProjectId") || "";
+  const effectiveProductName = productName || localStorage.getItem("activeProjectName") || "Product";
+
   const btnRef = useRef(null);
 
   const handleRemoveAllComponent = async () => {
-    // const storedValues = sessionStorage.getItem("productDefinition");
-    // const productID = storedValues ? JSON.parse(storedValues).productID : null;
+    const targetId = effectiveProductId;
 
-    if (!productID) {
+    if (!targetId) {
       alert("No product selected. Please try again.");
       return;
     }
 
     try {
-      await axios.delete(`${baseURL}/product/${productID}/definitionNew`);
+      await axios.delete(`${baseURL}/product/${targetId}/definitionNew`);
 
       alert("All components removed successfully");
       
       if (setIsProductDefined) {
         setIsProductDefined(false);
       }
+      window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("innoide:refresh-filesystem"));
+      window.dispatchEvent(new CustomEvent("product-definition-changed"));
     } catch (error) {
       console.error("Error removing all components:", error);
       alert("Failed to remove all components. Please try again.");
@@ -301,8 +306,8 @@ function ProductEditModal({
                         }}
                       >
                         <ViewProductDefinition
-                          productID={productID}
-                          productName={productName}
+                          productID={effectiveProductId}
+                          productName={effectiveProductName}
                         />
                       </Box>
                     </TabPanel>
@@ -338,8 +343,8 @@ function ProductEditModal({
                       >
                         <AddProductComponent
                           setIsProductDefined={setIsProductDefined}
-                          productID={productID}
-                          productName={productName}
+                          productID={effectiveProductId}
+                          productName={effectiveProductName}
                         />
                       </Box>
                     </TabPanel>
@@ -355,8 +360,8 @@ function ProductEditModal({
                       >
                         <RemoveProductComponent
                           setIsProductDefined={setIsProductDefined}
-                          productID={productID}
-                          productName={productName}
+                          productID={effectiveProductId}
+                          productName={effectiveProductName}
                           refreshKey={removeRefreshKey}
                         />
                       </Box>

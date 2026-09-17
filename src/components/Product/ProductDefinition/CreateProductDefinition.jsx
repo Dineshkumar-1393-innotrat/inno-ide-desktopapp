@@ -693,7 +693,7 @@ import Footer from "../../Footer";
 import { Button } from "@chakra-ui/react";
 import { getUserInfo } from "../../../utilities";
 import { useProject } from "../../../ProjectContext";
-import { baseURL } from "../../../utilities";
+import { baseURL, productAPIBase } from "../../../utilities";
 
 const CreateProductDefinition = ({
   productID,
@@ -730,9 +730,12 @@ const CreateProductDefinition = ({
     };
   };
 
+  const effectiveProductId = productID || localStorage.getItem("activeProductId") || activeProjectId || localStorage.getItem("activeProjectId") || "";
+  const effectiveProductName = productName || localStorage.getItem("activeProjectName") || "Product";
+
   const [initialValues, setInitialValues] = useState({
-    productID: productID,
-    productName: productName,
+    productID: effectiveProductId,
+    productName: effectiveProductName,
     components: [],
   });
 
@@ -763,33 +766,55 @@ const CreateProductDefinition = ({
       }
     });
 
+    const targetProductId = values.productID || effectiveProductId;
+    const targetProductName = values.productName || effectiveProductName;
+
     const resultData = {
-      productID: values.productID,
+      productID: targetProductId,
       components: formattedComponents,
-      productName: values.productName,
+      productName: targetProductName,
     };
 
     console.log("result data", resultData);
 
     try {
-      const response = await axios.post(
-        `${baseURL}/product/${values.productID}/definitionNew`,
-        resultData
-      );
+      let response;
+      try {
+        response = await axios.post(
+          `${productAPIBase}/product/${targetProductId}/definitionNew`,
+          resultData,
+          { timeout: 4000 }
+        );
+      } catch (localErr) {
+        console.warn("[CreateProductDefinition] Local post failed, trying baseURL fallback...", localErr);
+        response = await axios.post(
+          `${baseURL}/product/${targetProductId}/definitionNew`,
+          resultData
+        );
+      }
       console.log("Data successfully sent to the server:", response.data);
 
-      alert("Prodcut defined successfuly!");
+      alert("Product defined successfully!");
 
       if (userId && typeof fetchFileSystem === "function") await fetchFileSystem(userId);
 
-      setIsProductDefined(() => true);
+      if (typeof setIsProductDefined === "function") {
+        setIsProductDefined(true);
+      }
+
+      // Notify other components across the app to update UI
+      window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("innoide:refresh-filesystem"));
+      window.dispatchEvent(new CustomEvent("product-definition-changed"));
 
       // close modal on success
-      onClose();
+      if (typeof onClose === "function") {
+        onClose();
+      }
     } catch (error) {
       console.error(
         "Error sending data to the server:",
-        error.response.data.message
+        error.response?.data?.message || error.message
       );
       alert("Error submitting form. Please try again.");
       throw error; // Re-throw to be caught by the form submission handler
@@ -797,13 +822,14 @@ const CreateProductDefinition = ({
   };
 
   useEffect(() => {
-    // const values = getStoredValues();
+    const effId = productID || localStorage.getItem("activeProductId") || activeProjectId || localStorage.getItem("activeProjectId") || "";
+    const effName = productName || localStorage.getItem("activeProjectName") || "Product";
     setInitialValues({
-      productID: productID,
-      productName: productName,
+      productID: effId,
+      productName: effName,
       components: [],
     });
-  }, [productID]);
+  }, [productID, productName, activeProjectId]);
 
   useEffect(() => {
     return () => {

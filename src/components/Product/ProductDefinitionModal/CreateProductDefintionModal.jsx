@@ -1,65 +1,3 @@
-// import React from "react";
-// import {
-//   Modal,
-//   ModalOverlay,
-//   ModalContent,
-//   ModalHeader,
-//   ModalFooter,
-//   ModalBody,
-//   ModalCloseButton,
-//   useDisclosure,
-//   Button,
-//   Center,
-// } from "@chakra-ui/react";
-// import CreateProductDefinition from "../ProductDefinition/CreateProductDefinition";
-// import { useProject } from "../../../ProjectContext";
-
-// const CreateProductDefintionModal = ({
-//   // activeProductId,
-//   // activeProjectName,
-//   setIsProductDefined,
-
-//   fetchFileSystem,
-// }) => {
-//   const { isOpen, onOpen, onClose } = useDisclosure();
-
-//   const { activeProductId, activeProjectName } = useProject();
-
-//   return (
-//     <>
-//       <Button
-//         onClick={onOpen}
-//         size={"sm"}
-//         colorScheme="teal"
-//         float={"inline-end"}
-//         zIndex={999}
-//       >
-//         Define Product
-//       </Button>
-
-//       <Modal isOpen={isOpen} onClose={onClose} size={"xl"}>
-//         <ModalOverlay />
-//         <ModalContent>
-//           <ModalHeader textAlign="center">{activeProjectName}</ModalHeader>
-
-//           <ModalCloseButton />
-//           <ModalBody>
-//             <CreateProductDefinition
-//               setIsProductDefined={setIsProductDefined}
-//               productID={activeProductId}
-//               productName={activeProjectName}
-//               onClose={onClose}
-//               fetchFileSystem={fetchFileSystem}
-//             />
-//           </ModalBody>
-//         </ModalContent>
-//       </Modal>
-//     </>
-//   );
-// };
-
-// export default CreateProductDefintionModal;
-
 
 //22-11-25
 import React from "react";
@@ -75,7 +13,7 @@ import {
   Button,
   Center,
 } from "@chakra-ui/react";
-import CreateProductDefinition from "../ProductDefinition/CreateProductDefinition";
+import ProductDefinition from "../../CreateProduct";
 import { useProject } from "../../../ProjectContext";
 
 const CreateProductDefintionModal = ({
@@ -89,9 +27,22 @@ const CreateProductDefintionModal = ({
 
   const { activeProductId, activeProjectName, activeProjectId } = useProject();
 
-  if (!activeProjectId || !activeProductId || !activeProjectName || activeProjectName === "Untitled Project") {
-    return null;
-  }
+  const currentProjectId = activeProjectId || localStorage.getItem("activeProjectId") || "";
+  const currentProductId = activeProductId || localStorage.getItem("activeProductId") || currentProjectId;
+  const currentProductName = activeProjectName || localStorage.getItem("activeProjectName") || "Product";
+
+  const isMissed = localStorage.getItem(`innoide:product_create_missed_${currentProjectId}`) === "true";
+  const projectStatus = localStorage.getItem(`innoide:project_status_${currentProjectId}`);
+  const isNew = (projectStatus === "new" || !projectStatus) && !isMissed;
+
+  const handleClose = () => {
+    if (isNew && currentProjectId) {
+      localStorage.setItem(`innoide:product_create_missed_${currentProjectId}`, "true");
+      localStorage.setItem(`innoide:project_status_${currentProjectId}`, "missed");
+      window.dispatchEvent(new CustomEvent("product-definition-changed"));
+    }
+    onClose();
+  };
 
   return (
     <>
@@ -106,22 +57,27 @@ const CreateProductDefintionModal = ({
         px={5}
         zIndex={999}
       >
-        + Define Product
+        {isNew ? "+ Create Product" : "+ Define Product"}
       </Button>
 
-      <Modal isOpen={isOpen} onClose={onClose} size={"xl"}>
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader textAlign="center">{activeProjectName}</ModalHeader>
+      <Modal isOpen={isOpen} onClose={handleClose} size={"6xl"} scrollBehavior="inside">
+        <ModalOverlay backdropFilter="blur(8px)" />
+        <ModalContent bg="#f8fafc" maxW="1150px" borderRadius="xl" overflow="hidden">
+          <ModalHeader bg="white" borderBottom="1px solid" borderColor="gray.200" py={3} px={6} fontSize="md" fontWeight="bold">
+            {isNew ? "Create Product" : "Define Product"}
+          </ModalHeader>
 
-          <ModalCloseButton />
-          <ModalBody>
-            <CreateProductDefinition
-              setIsProductDefined={setIsProductDefined}
-              productID={activeProductId}
-              productName={activeProjectName}
-              onClose={onClose}
-              fetchFileSystem={fetchFileSystem}
+          <ModalCloseButton top="10px" right="16px" />
+          <ModalBody p={0}>
+            <ProductDefinition
+              initialStep={2}
+              onClose={handleClose}
+              onSuccess={() => {
+                if (typeof setIsProductDefined === "function") {
+                  setIsProductDefined(true);
+                }
+                handleClose();
+              }}
             />
           </ModalBody>
         </ModalContent>

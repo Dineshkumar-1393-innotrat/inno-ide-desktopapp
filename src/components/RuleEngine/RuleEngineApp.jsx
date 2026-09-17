@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import "./styles/index.css";
-import CreateProductDefintionModal from "../Product/ProductDefinitionModal/CreateProductDefintionModal";
+import CreateProductButton from "../shared/CreateProductButton";
 import { ruleEngineApi } from "../../services/ruleEngineService";
 import { useProject } from "../../ProjectContext";
 import {
@@ -288,7 +288,7 @@ function SubNavbar({ screen, setScreen }) {
       </div>
 
       <div className="flex items-center gap-3 shrink-0 ml-6">
-        <CreateProductDefintionModal />
+        <CreateProductButton />
       </div>
     </div>
   );

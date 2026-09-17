@@ -24,6 +24,7 @@ import { AiFillFileAdd } from "react-icons/ai";
 import { MdDelete } from "react-icons/md";
 import CreateProductDefintionModal from "../Product/ProductDefinitionModal/CreateProductDefintionModal";
 import ProductEditModal from "../Product/ProductEdit/ProductEditModal";
+import CreateProductButton from "../shared/CreateProductButton";
 import CreateNewProjectModal from "../MenuSidebar/CreateNewProjectModal";
 import { useDisclosure } from "@chakra-ui/react";
 import { FaChevronRight, FaChevronDown } from "react-icons/fa";
@@ -40,7 +41,9 @@ export const checkProductDefinition = async (
   activeProjectId = null
 ) => {
   if (!activeProductId) {
-    setIsProductDefined(null); // Reset if no active project
+    if (typeof setIsProductDefined === 'function') {
+      setIsProductDefined(false);
+    }
     return;
   }
 
@@ -63,19 +66,32 @@ export const checkProductDefinition = async (
 
     console.log("[checkProductDefinition] RAW Response:", response.data);
 
-    // Check if components exist in the response (either components key or data.components)
-    const components = response.data?.components || response.data?.data?.components;
-    const hasComponents = components && Object.keys(components).length > 0;
+    // Check if components exist in the response (supports { components }, { data: { components } }, or array response)
+    const rawData = response.data?.data || response.data;
+    const item = Array.isArray(rawData) ? rawData[0] : rawData;
+    const components = item?.components || response.data?.components || response.data?.data?.components;
     
-    // Legacy check: If response itself has some core fields like name or productId
-    const hasIdentity = response.data?.productId || response.data?.productID || response.data?.status === "success";
+    let hasComponents = false;
+    if (components) {
+      if (Array.isArray(components)) {
+        hasComponents = components.length > 0;
+      } else if (typeof components === 'object') {
+        hasComponents = Object.keys(components).length > 0;
+      } else {
+        hasComponents = Boolean(components);
+      }
+    }
     
-    console.log(`[checkProductDefinition] Result: hasComponents=${hasComponents}, hasIdentity=${hasIdentity}`);
+    console.log(`[checkProductDefinition] Result: hasComponents=${hasComponents}`);
     
-    setIsProductDefined(hasComponents);
+    if (typeof setIsProductDefined === 'function') {
+      setIsProductDefined(Boolean(hasComponents));
+    }
   } catch (error) {
     console.error("Error fetching product definition (All servers failed):", error);
-    setIsProductDefined(false); // Assume false if error occurs
+    if (typeof setIsProductDefined === 'function') {
+      setIsProductDefined(false); // Assume false if error occurs
+    }
   }
 };
 
@@ -667,30 +683,9 @@ const EmbeddedFileManagement = () => {
         </Box>
 
         <Box flex="1" mt={{ base: 0, md: 16 }} p={4} bg="gray.900" minHeight="100vh" overflowX="auto">
-          {activeProjectId && activeProductId && activeProjectName && activeProjectName !== "Untitled Project" && (
-            <Box>
-              {isProductDefined && (
-                <ProductEditModal
-                  productID={activeProductId}
-                  productName={activeProjectName}
-                  fetchFileSystem={() =>
-                    fetchFileSystem(user?.userId, setFileSystem, buildTree)
-                  }
-                />
-              )}
-
-              {!isProductDefined && (
-                <CreateProductDefintionModal
-                  setIsProductDefined={setIsProductDefined}
-                  // activeProjectId={activeProductId}
-                  // activeProjectName={activeProjectName}
-                  fetchFileSystem={() =>
-                    fetchFileSystem(user?.userId, setFileSystem, buildTree)
-                  }
-                />
-              )}
-            </Box>
-          )}
+          <Box mb={3}>
+            <CreateProductButton />
+          </Box>
 
           {/* Tabs for Open Files */}
           <Tabs

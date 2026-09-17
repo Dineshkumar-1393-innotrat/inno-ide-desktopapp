@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { 
     Button, 
     Modal, 
@@ -14,9 +14,10 @@ import { useProject } from "../../ProjectContext";
 import { checkProductDefinition } from "../EmbeddedFileManagement/EmbeddedFileManagement";
 
 /**
- * CreateProductButton - A reusable component that handles both product creation and viewing.
- * It dynamically toggles between "Create Product", "Define Product", and "View Product" based on 
- * whether a product is associated with the active project and if its definition exists in the backend.
+ * CreateProductButton - Reusable button that dynamically toggles between:
+ * 1. "Create Product": Shown after project creation.
+ * 2. "Define Product": Shown if user missed/cancelled create product without defining.
+ * 3. "View Product": Shown once product components are defined.
  */
 const CreateProductButton = () => {
     const { 
@@ -29,59 +30,123 @@ const CreateProductButton = () => {
     const [isModalOpen, setModalOpen] = useState(false);
     const [isProductDefined, setIsProductDefined] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [isMissed, setIsMissed] = useState(false);
+    const [projectStatus, setProjectStatus] = useState(null);
+    const isSubmittedRef = useRef(false);
 
+    // Resolve current IDs from context or localStorage
+    const currentProjectId = activeProjectId || localStorage.getItem("activeProjectId") || "";
+    const currentProductId = activeProductId || localStorage.getItem("activeProductId") || currentProjectId || "";
+    const currentProductName = activeProductName || activeProjectName || localStorage.getItem("activeProjectName") || "Product";
 
+    const syncStatusFromStorage = useCallback(() => {
+        const projId = activeProjectId || localStorage.getItem("activeProjectId") || "";
+        if (projId) {
+            const missed = localStorage.getItem(`innoide:product_create_missed_${projId}`) === "true";
+            const status = localStorage.getItem(`innoide:project_status_${projId}`);
+            setIsMissed(missed);
+            setProjectStatus(status);
+        } else {
+            setIsMissed(false);
+            setProjectStatus(null);
+        }
+    }, [activeProjectId]);
 
-    // Synchronize local state with backend when activeProductId or activeProjectId changes
+    const fetchStatus = useCallback(async () => {
+        const prodId = activeProductId || localStorage.getItem("activeProductId") || activeProjectId || localStorage.getItem("activeProjectId");
+        const projId = activeProjectId || localStorage.getItem("activeProjectId");
+
+        syncStatusFromStorage();
+
+        if (!prodId) {
+            setIsProductDefined(false);
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            await checkProductDefinition(prodId, (defined) => {
+                setIsProductDefined(Boolean(defined));
+            }, projId);
+        } catch (error) {
+            console.error("[CreateProductButton] Failed to check product definition:", error);
+            setIsProductDefined(false);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [activeProductId, activeProjectId, syncStatusFromStorage]);
+
+    // Check status on mount, ID change, or project switch
     useEffect(() => {
-        const fetchStatus = async () => {
-            if (!activeProductId) {
-                console.log(`[CreateProductButton] No activeProductId for project ${activeProjectId}`);
-                setIsProductDefined(false);
-                return;
-            }
+        fetchStatus();
+    }, [fetchStatus]);
 
-            // Only reset to null if we are actually about to fetch for a new ID
-            // or if we haven't checked yet.
-            setIsLoading(true);
-            
-            try {
-                console.log(`[CreateProductButton] Checking definition for product: ${activeProductId} in project: ${activeProjectId}`);
-                await checkProductDefinition(activeProductId, (defined) => {
-                    console.log(`[CreateProductButton] Definition status for ${activeProductId}: ${defined}`);
-                    setIsProductDefined(defined);
-                }, activeProjectId);
-            } catch (error) {
-                console.error("Failed to check product definition:", error);
-                setIsProductDefined(false);
-            } finally {
-                setIsLoading(false);
-            }
+    // Listen to refresh events across the application
+    useEffect(() => {
+        const handleRefresh = () => {
+            fetchStatus();
+            syncStatusFromStorage();
         };
 
-        fetchStatus();
-    }, [activeProductId, activeProjectId]);
+        window.addEventListener("storage", handleRefresh);
+        window.addEventListener("product-definition-changed", handleRefresh);
+        window.addEventListener("innoide:refresh-filesystem", handleRefresh);
+        window.addEventListener("project:created", handleRefresh);
+
+        return () => {
+            window.removeEventListener("storage", handleRefresh);
+            window.removeEventListener("product-definition-changed", handleRefresh);
+            window.removeEventListener("innoide:refresh-filesystem", handleRefresh);
+            window.removeEventListener("project:created", handleRefresh);
+        };
+    }, [fetchStatus, syncStatusFromStorage]);
+
+    // Open modal
+    const handleOpenModal = useCallback(() => {
+        isSubmittedRef.current = false;
+        setModalOpen(true);
+    }, []);
+
+    // Handle user closing/skipping create product without submitting
+    const handleModalClose = useCallback(() => {
+        if (!isSubmittedRef.current && currentProjectId) {
+            // User missed or dismissed create product -> switch to "Define Product"
+            localStorage.setItem(`innoide:product_create_missed_${currentProjectId}`, "true");
+            localStorage.setItem(`innoide:project_status_${currentProjectId}`, "missed");
+            setIsMissed(true);
+            setProjectStatus("missed");
+            window.dispatchEvent(new CustomEvent("product-definition-changed"));
+        }
+        setModalOpen(false);
+    }, [currentProjectId]);
 
     // Handle successful product creation/definition
     const handleSuccess = useCallback(() => {
-        // Refresh definition status immediately
-        if (activeProductId) {
-            checkProductDefinition(activeProductId, setIsProductDefined);
+        isSubmittedRef.current = true;
+        if (currentProjectId) {
+            localStorage.setItem(`innoide:project_status_${currentProjectId}`, "completed");
+            localStorage.removeItem(`innoide:product_create_missed_${currentProjectId}`);
+            setIsMissed(false);
+            setProjectStatus("completed");
+        }
+        const prodId = localStorage.getItem("activeProductId") || activeProductId;
+        if (prodId) {
+            checkProductDefinition(prodId, (defined) => {
+                setIsProductDefined(Boolean(defined));
+            }, currentProjectId);
+        } else {
+            setIsProductDefined(true);
         }
         setModalOpen(false);
         
-        // Notify other components (legacy support for storage listeners)
+        // Notify other components across the app
         window.dispatchEvent(new Event("storage"));
         window.dispatchEvent(new Event("innoide:refresh-filesystem"));
-    }, [activeProductId]);
+        window.dispatchEvent(new CustomEvent("product-definition-changed"));
+    }, [activeProductId, currentProjectId]);
 
-    // If there is no active project or no active product, we shouldn't show any product-related buttons.
-    if (!activeProjectId || !activeProductId || !activeProjectName || activeProjectName === "Untitled Project") {
-        return null;
-    }
-
-    // 1. Loading State: Show a consistent loading pill while checking definition
-    if (activeProductId && isProductDefined === null) {
+    // 1. Loading State: If checking status with a known product ID
+    if (isLoading && isProductDefined === null && currentProductId) {
         return (
             <Button
                 size="sm"
@@ -97,45 +162,58 @@ const CreateProductButton = () => {
         );
     }
 
-    // 2. If we have a product ID AND it is defined in the backend, show the View Product Modal
-    if (activeProductId && isProductDefined) {
+    // 2. If product definition exists in the backend: Show "View Product" button
+    if (isProductDefined) {
         return (
             <ProductEditModal
-                productID={activeProductId}
-                productName={activeProductName || activeProjectName || "Product"}
-                setIsProductDefined={setIsProductDefined}
+                productID={currentProductId || "default_product"}
+                productName={currentProductName}
+                setIsProductDefined={(defined) => {
+                    setIsProductDefined(Boolean(defined));
+                    window.dispatchEvent(new CustomEvent("product-definition-changed"));
+                }}
             />
         );
     }
 
-    // 2. If we have no product OR it's not defined, show the Create/Define button
+    // 3. If product is NOT defined:
+    // Determine whether to show "Create Product" or "Define Product".
+    // After creating project: show "Create Product".
+    // If user missed/skipped create product: only "Define Product" should come.
+    const isNewProject = (projectStatus === "new" || !projectStatus) && !isMissed;
+    const buttonLabel = isNewProject ? "Create Product" : "Define Product";
+    const modalTitle = `${buttonLabel}: ${currentProductName}`;
+
     return (
         <>
             <Button
                 size="sm"
-                colorScheme="blue"
+                bg="#2563eb"
+                color="#ffffff"
+                _hover={{ bg: "#1d4ed8", transform: "translateY(-1px)", boxShadow: "md" }}
+                _active={{ transform: "translateY(0)" }}
                 borderRadius="full"
                 height="32px"
-                px={6}
-                onClick={() => setModalOpen(true)}
+                px={5}
+                onClick={handleOpenModal}
                 isLoading={isLoading}
-                leftIcon={<span>+</span>}
-                _hover={{ transform: "translateY(-1px)", boxShadow: "lg" }}
-                _active={{ transform: "translateY(0)" }}
+                leftIcon={<span style={{ fontWeight: "bold", fontSize: "14px" }}>+</span>}
             >
-                {activeProductId ? "Define Product" : "Create Product"}
+                {buttonLabel}
             </Button>
 
             {isModalOpen && (
-                <Modal isOpen={isModalOpen} onClose={() => setModalOpen(false)} size="full" scrollBehavior="inside">
+                <Modal isOpen={isModalOpen} onClose={handleModalClose} size="6xl" scrollBehavior="inside">
                     <ModalOverlay backdropFilter="blur(8px)" />
-                    <ModalContent bg="gray.100">
-                        <ModalHeader bg="white" borderBottom="1px solid" borderColor="gray.200">
-                            {activeProductId ? "Define Product" : "Create New Product"}
+                    <ModalContent bg="#f8fafc" maxW="1150px" borderRadius="xl" overflow="hidden">
+                        <ModalHeader bg="white" borderBottom="1px solid" borderColor="gray.200" py={3} px={6} fontSize="md" fontWeight="bold">
+                            {buttonLabel}
                         </ModalHeader>
-                        <ModalCloseButton />
+                        <ModalCloseButton top="10px" right="16px" />
                         <ModalBody p={0}>
                             <ProductDefinition
+                                initialStep={2}
+                                onClose={handleModalClose}
                                 onSuccess={handleSuccess}
                             />
                         </ModalBody>

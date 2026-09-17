@@ -2505,6 +2505,7 @@ import { saveProjectFile, sanitizeSegment, ensureProjectFolder } from '../utils/
 import { saveAssetToScreenFolder } from '../utils/screenFileManager';
 import { useProject } from '../ProjectContext';
 import DiagramTabs from './DiagramTabs';
+import CreateProductButton from './shared/CreateProductButton';
 import projectFileManager from '../utils/projectFileManager';
 import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
 import ProjectFileExplorer from './ProjectFileExplorer';
@@ -3816,7 +3817,12 @@ return (
               mr={2}
               verticalAlign="middle"
             />
-            <DiagramTabs title="Block Programming Workspace" kind="blockProgramming" onSaveJSON={saveDiagram} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <DiagramTabs title="Block Programming Workspace" kind="blockProgramming" onSaveJSON={saveDiagram} />
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <CreateProductButton />
+              </div>
+            </div>
           </div>
           <div className="canvas-frame" onDrop={onDrop} onDragOver={onDragOver}>
             <div

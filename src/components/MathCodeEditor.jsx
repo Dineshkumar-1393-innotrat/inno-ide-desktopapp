@@ -295,21 +295,39 @@ const MathCodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
         [tabs, activeTabId]
     );
 
-    const handleRenameTab = useCallback(
-        (tabId) => {
-            const targetTab = tabs.find((tab) => tab.id === tabId);
-            if (!targetTab) return;
+    const [editingTabId, setEditingTabId] = useState(null);
+    const [tempTabName, setTempTabName] = useState('');
 
-            const requested = window.prompt('Rename tab', targetTab.name || '');
-            if (requested === null) return;
+    const startEditingTab = useCallback((tabId, currentName, e) => {
+        if (e) {
+            e.stopPropagation();
+            e.preventDefault();
+        }
+        setEditingTabId(tabId);
+        setTempTabName(currentName || '');
+    }, []);
 
-            const trimmed = requested.trim();
-            if (!trimmed || trimmed === targetTab.name) return;
+    const finishEditingTab = useCallback((tabId) => {
+        const targetId = tabId || editingTabId;
+        if (targetId && tempTabName.trim()) {
+            dispatch(renameReduxTab({ tabId: targetId, name: tempTabName.trim() }));
+        }
+        setEditingTabId(null);
+        setTempTabName('');
+    }, [dispatch, editingTabId, tempTabName]);
 
-            dispatch(renameReduxTab({ tabId, name: trimmed }));
-        },
-        [tabs, dispatch]
-    );
+    const handleTabRenameKeyDown = useCallback((e, tabId) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            finishEditingTab(tabId);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            setEditingTabId(null);
+            setTempTabName('');
+        }
+    }, [finishEditingTab]);
 
     const onSelect = (selectedLanguage) => {
         setLanguage(selectedLanguage);
@@ -867,12 +885,37 @@ ${expr}
                                                     overflow="hidden"
                                                     gap={1}
                                                 >
-                                                    <Text noOfLines={1} onDoubleClick={() => handleRenameTab(tab.id)} title="Double-click to rename" fontSize="xs" display="flex" alignItems="center" gap="4px">
-                                                        {tab.name}
-                                                        {tab.dirty && (
-                                                            <Box as="span" w="6px" h="6px" borderRadius="50%" bg={isActive ? "#fca5a5" : "#ef4444"} display="inline-block" flexShrink={0} />
-                                                        )}
-                                                    </Text>
+                                                    {editingTabId === tab.id ? (
+                                                        <input
+                                                            type="text"
+                                                            value={tempTabName}
+                                                            onChange={(e) => setTempTabName(e.target.value)}
+                                                            onBlur={() => finishEditingTab(tab.id)}
+                                                            onKeyDown={(e) => handleTabRenameKeyDown(e, tab.id)}
+                                                            autoFocus
+                                                            onFocus={(e) => e.target.select()}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            onDoubleClick={(e) => e.stopPropagation()}
+                                                            style={{
+                                                                background: "#ffffff",
+                                                                color: "#0f172a",
+                                                                border: "1px solid #3b82f6",
+                                                                borderRadius: "4px",
+                                                                padding: "1px 4px",
+                                                                fontSize: "11px",
+                                                                fontWeight: "600",
+                                                                width: "80px",
+                                                                outline: "none",
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <Text noOfLines={1} onDoubleClick={(e) => startEditingTab(tab.id, tab.name, e)} title="Double-click to rename" fontSize="xs" display="flex" alignItems="center" gap="4px">
+                                                            {tab.name}
+                                                            {tab.dirty && (
+                                                                <Box as="span" w="6px" h="6px" borderRadius="50%" bg={isActive ? "#fca5a5" : "#ef4444"} display="inline-block" flexShrink={0} />
+                                                            )}
+                                                        </Text>
+                                                    )}
                                                     <IconButton
                                                         icon={<CloseIcon fontSize="6px" />}
                                                         size="xs"
@@ -914,7 +957,9 @@ ${expr}
                                     </HStack>
                                 </Flex>
 
-                                <Box position="relative">
+                                <HStack spacing={2}>
+                                    <DefineProductButton />
+                                    <Box position="relative">
                                     <Button
                                         size="sm"
                                         variant="outline"
@@ -981,6 +1026,7 @@ ${expr}
                                         </Box>
                                     )}
                                 </Box>
+                                </HStack>
                             </div>
 
                             <Box

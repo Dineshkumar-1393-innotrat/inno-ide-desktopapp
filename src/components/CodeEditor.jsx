@@ -48,6 +48,7 @@ import {
   renameTab,
   updateTabContent as updateReduxTabContent,
 } from "../store/slices/editorSlice";
+import { useProject } from "../ProjectContext";
 
 import IconBar from "./IconBar";
 import FileExplorer from "./FileExplorer";
@@ -229,6 +230,12 @@ const getStoredIdentity = () => {
 const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
   const editorRef = useRef();
   const outputRef = useRef(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const { activeProjectId, activeProjectName, user } = useProject?.() ?? {};
+  const currentProjectIdRef = useRef(null);
+  const isSwitchingProjectRef = useRef(false);
 
   const dispatch = useDispatch();
   const { tabs, activeTabId } = useSelector((state) => state.editor);
@@ -238,17 +245,29 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     [tabs, activeTabId],
   );
 
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
+
+  useEffect(() => {
+    tabsRef.current = tabs;
+    activeTabIdRef.current = activeTabId;
+  }, [tabs, activeTabId]);
+
+  const userId = user?.userId || user?._id || user?.id || localStorage.getItem("userId") || "anonymous";
+
   const addNewTab = useCallback(() => {
     const newId = Date.now();
+    const projName = activeProjectName || localStorage.getItem("activeProjectName") || "ESP32";
+    const starterContent = `#include <stdio.h>\n#include "freertos/FreeRTOS.h"\n#include "freertos/task.h"\n\nvoid app_main(void)\n{\n    printf("Hello from ${projName}!\\n");\n    while (1) {\n        vTaskDelay(pdMS_TO_TICKS(1000));\n    }\n}\n`;
     dispatch(
       addTab({
         id: newId,
         name: `file-${tabs.length + 1}.c`,
-        content: CODE_SNIPPETS["C"] || "",
+        content: CODE_SNIPPETS["c"] || starterContent,
         dirty: true,
       }),
     );
-  }, [dispatch, tabs.length]);
+  }, [dispatch, tabs.length, activeProjectName]);
 
   const updateTabContent = useCallback(
     (id, content) => {
@@ -271,9 +290,133 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     [dispatch],
   );
 
-  // Initialize first tab if none exists
+  // Dynamic Project Isolation: Switch tabs per project
   useEffect(() => {
-    if (tabs.length === 0) {
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    if (!effectiveProjectId) return;
+
+    const prevProjectId = currentProjectIdRef.current;
+    if (prevProjectId === effectiveProjectId) return;
+
+    // 1. Save tabs of previous project if they exist
+    if (prevProjectId && tabsRef.current && tabsRef.current.length > 0) {
+      try {
+        localStorage.setItem(
+          `innoide:code_editor_tabs:${userId}:${prevProjectId}`,
+          JSON.stringify({
+            tabs: tabsRef.current,
+            activeTabId: activeTabIdRef.current,
+          })
+        );
+      } catch (e) {
+        console.warn("[CodeEditor] Failed to save previous project tabs:", e);
+      }
+    }
+
+    currentProjectIdRef.current = effectiveProjectId;
+    isSwitchingProjectRef.current = true;
+
+    // 2. Load tabs for the new project
+    let loadedTabs = null;
+    let loadedActiveId = null;
+
+    try {
+      const stored = localStorage.getItem(`innoide:code_editor_tabs:${userId}:${effectiveProjectId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.tabs && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
+          loadedTabs = parsed.tabs;
+          loadedActiveId = parsed.activeTabId || parsed.tabs[0]?.id;
+        }
+      }
+    } catch (e) {
+      console.warn("[CodeEditor] Failed to load tabs from localStorage:", e);
+    }
+
+    // Secondary fallback: check autoSaveManager for this specific project
+    if (!loadedTabs) {
+      try {
+        const autoSaved = autoSaveManager.loadData("/editor");
+        if (autoSaved?.tabs && Array.isArray(autoSaved.tabs) && autoSaved.tabs.length > 0) {
+          loadedTabs = autoSaved.tabs;
+          loadedActiveId = autoSaved.activeTab || autoSaved.tabs[0]?.id;
+        }
+      } catch (e) {
+        console.warn("[CodeEditor] Failed to load tabs from autoSaveManager:", e);
+      }
+    }
+
+    // 3. Set tabs or create fresh starter tab for new project
+    if (loadedTabs && loadedTabs.length > 0) {
+      dispatch(setTabs(loadedTabs));
+      dispatch(setActiveTab(loadedActiveId || loadedTabs[0].id));
+    } else {
+      const projName = activeProjectName || localStorage.getItem("activeProjectName") || "ESP32";
+      const cleanStarterCode = `#include <stdio.h>\n#include "freertos/FreeRTOS.h"\n#include "freertos/task.h"\n\nvoid app_main(void)\n{\n    printf("Hello from ${projName}!\\n");\n    while (1) {\n        vTaskDelay(pdMS_TO_TICKS(1000));\n    }\n}\n`;
+      const freshTab = {
+        id: Date.now(),
+        name: "file-1.c",
+        content: cleanStarterCode,
+        dirty: false,
+      };
+      dispatch(setTabs([freshTab]));
+      dispatch(setActiveTab(freshTab.id));
+    }
+
+    setTimeout(() => {
+      isSwitchingProjectRef.current = false;
+    }, 100);
+  }, [activeProjectId, activeProjectName, dispatch, userId]);
+
+  // Persist current project tabs on edit
+  useEffect(() => {
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    if (!effectiveProjectId || !tabs || tabs.length === 0 || isSwitchingProjectRef.current) return;
+
+    try {
+      localStorage.setItem(
+        `innoide:code_editor_tabs:${userId}:${effectiveProjectId}`,
+        JSON.stringify({
+          tabs,
+          activeTabId,
+        })
+      );
+    } catch (e) {
+      console.warn("[CodeEditor] Failed to persist tabs:", e);
+    }
+  }, [tabs, activeTabId, activeProjectId, userId]);
+
+  // Handle opening files from FileExplorer navigation
+  useEffect(() => {
+    if (location.state?.filePath) {
+      const filePath = location.state.filePath;
+      const fileContent = location.state.fileContent ?? "";
+      const fileName = filePath.split("/").pop() || "file.c";
+
+      const existingTab = tabs.find(
+        (t) => t.filePath === filePath || t.name === fileName
+      );
+
+      if (existingTab) {
+        dispatch(setActiveTab(existingTab.id));
+      } else {
+        const newTab = {
+          id: Date.now(),
+          name: fileName,
+          filePath,
+          content: fileContent,
+          dirty: false,
+        };
+        dispatch(addTab(newTab));
+      }
+
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, dispatch, tabs]);
+
+  // Initialize first tab if none exists and no project is loaded yet
+  useEffect(() => {
+    if (!currentProjectIdRef.current && tabs.length === 0) {
       addNewTab();
     }
   }, [tabs.length, addNewTab]);
@@ -298,7 +441,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       },
       onLoad: (loadedData) => {
         console.log("[CodeEditor] Loading saved editor state:", loadedData);
-        if (loadedData && loadedData.tabs && loadedData.tabs.length > 0) {
+        if (!currentProjectIdRef.current && loadedData && loadedData.tabs && loadedData.tabs.length > 0) {
           dispatch(setTabs(loadedData.tabs));
           if (loadedData.activeTab) {
             dispatch(setActiveTab(loadedData.activeTab));
@@ -360,8 +503,6 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
   const [debugBreakpoints, setDebugBreakpoints] = useState([]);
   const { colorMode } = useColorMode();
   const toast = useToast();
-  const location = useLocation();
-  const navigate = useNavigate();
   const identityFromLocation = location.state?.identity;
 
   const computeIdentity = useCallback(() => {

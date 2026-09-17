@@ -31,6 +31,7 @@ const flowchartSlice = createSlice({
             const tab = state.tabs.find((t) => t.id === id);
             if (tab) {
                 tab.name = name;
+                tab.dirty = true;
             }
         },
         updateTabState: (state, action) => {

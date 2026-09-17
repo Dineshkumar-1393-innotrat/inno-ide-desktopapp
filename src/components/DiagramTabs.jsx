@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { API } from '@/config';
 import { Plus, Save, Loader2, X } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -39,6 +39,9 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
   const flowchartState = useSelector(state => state.flowchart);
   const blockDiagramState = useSelector(state => state.blockDiagram);
   const blockProgrammingState = useSelector(state => state.blockProgramming);
+
+  const [editingTabId, setEditingTabId] = useState(null);
+  const [tempName, setTempName] = useState('');
 
   let reduxTabs, reduxActiveTabId;
 
@@ -155,13 +158,39 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
     }
   };
 
-  const renameTab = (id, nextName) => {
+  const renameTab = async (id, nextName) => {
+    const trimmed = nextName?.trim();
+    if (!trimmed) return;
+
     if (reduxTabs) {
-      if (kind === 'flowchart') dispatch(renameFlowchartTab({ id, name: nextName }));
-      else if (kind === 'blockDiagram') dispatch(renameBlockDiagramTab({ id, name: nextName }));
-      else if (kind === 'blockProgramming') dispatch(renameBlockProgrammingTab({ id, name: nextName }));
+      if (kind === 'flowchart') dispatch(renameFlowchartTab({ id, name: trimmed }));
+      else if (kind === 'blockDiagram') dispatch(renameBlockDiagramTab({ id, name: trimmed }));
+      else if (kind === 'blockProgramming') dispatch(renameBlockProgrammingTab({ id, name: trimmed }));
     } else {
-      context.renameTab?.(id, nextName);
+      context.renameTab?.(id, trimmed);
+    }
+
+    const targetTab = tabs.find(t => t.id === id);
+    if (targetTab && targetTab.fileId) {
+      try {
+        let baseFileName = 'misc';
+        let extension = '.json';
+        if (kind === 'flowchart') baseFileName = 'flowchart';
+        else if (kind === 'blockDiagram') baseFileName = 'blockdiagram';
+        else if (kind === 'blockProgramming') baseFileName = 'blockprogramming';
+
+        const formattedTabName = trimmed.replace(/\s+/g, '');
+        const fileName = `${baseFileName}_${formattedTabName}${extension}`;
+
+        console.log(`[DiagramTabs] Updating file name on backend: ${fileName}`);
+        await axios.put(`${API.MAIN}/api/v1/updateFileAndFolder`, {
+          fileId: targetTab.fileId,
+          newName: fileName
+        });
+        window.dispatchEvent(new Event('file-system-refresh'));
+      } catch (err) {
+        console.error("[DiagramTabs] Error renaming file on backend:", err);
+      }
     }
   };
 
@@ -172,10 +201,34 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
 
   const savingIds = useMemo(() => new Set(savingTabIds), [savingTabIds]);
 
-  const handleRename = (tabId, currentName) => {
-    const nextName = window.prompt('Rename tab', currentName || 'Tab');
-    if (nextName && nextName.trim().length) {
-      renameTab(tabId, nextName.trim());
+  const startRenaming = (tabId, currentName, event) => {
+    if (event) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+    setEditingTabId(tabId);
+    setTempName(currentName || '');
+  };
+
+  const finishRenaming = (tabId) => {
+    const targetId = tabId || editingTabId;
+    if (targetId && tempName.trim()) {
+      renameTab(targetId, tempName.trim());
+    }
+    setEditingTabId(null);
+    setTempName('');
+  };
+
+  const handleRenameKeyDown = (e, tabId) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      finishRenaming(tabId);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      setEditingTabId(null);
+      setTempName('');
     }
   };
 
@@ -203,6 +256,8 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
           if (!tab) return null;
           const isActive = tab.id === activeTabId;
           const isSaving = savingIds.has(tab.id);
+          const isEditing = editingTabId === tab.id;
+
           return (
             <div
               key={tab.id}
@@ -211,23 +266,44 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
               tabIndex={0}
               className={`diagram-tabs__tab ${isActive ? 'is-active' : ''}`}
               onClick={() => selectTab(tab.id)}
+              onDoubleClick={(event) => {
+                if (!isEditing) {
+                  startRenaming(tab.id, tab.name, event);
+                }
+              }}
               onKeyDown={(event) => {
+                if (isEditing) return;
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   selectTab(tab.id);
                 }
               }}
             >
-              <span
-                className="diagram-tabs__label"
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  handleRename(tab.id, tab.name);
-                }}
-              >
-                {tab.name}
-                {tab.dirty && <span className="diagram-tabs__dirty-dot" title="Unsaved changes" />}
-              </span>
+              {isEditing ? (
+                <input
+                  type="text"
+                  className="diagram-tabs__input"
+                  value={tempName}
+                  onChange={(e) => setTempName(e.target.value)}
+                  onBlur={() => finishRenaming(tab.id)}
+                  onKeyDown={(e) => handleRenameKeyDown(e, tab.id)}
+                  autoFocus
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span
+                  className="diagram-tabs__label"
+                  onDoubleClick={(event) => {
+                    startRenaming(tab.id, tab.name, event);
+                  }}
+                  title="Double-click to rename"
+                >
+                  {tab.name}
+                  {tab.dirty && <span className="diagram-tabs__dirty-dot" title="Unsaved changes" />}
+                </span>
+              )}
               <button
                 type="button"
                 className="diagram-tabs__close"

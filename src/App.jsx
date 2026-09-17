@@ -122,6 +122,7 @@ import AutoSaveDemo from "./components/AutoSaveDemo";
 import { autoSaveManager } from "./utils/autoSaveManager";
 import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
+import { useRouteRestoration } from "./hooks/useRouteRestoration";
 
 import CodeEditor from "./components/CodeEditor";
 import Home from "./components/Home";
@@ -163,6 +164,9 @@ const App = () => {
   const location = useLocation();
   const [currentPanel, setCurrentPanel] = useState("fileExplorer");
 
+  // Restore the last active route after idle reloads / HMR / Electron restarts.
+  // Must be called inside the router context (i.e. inside <App>).
+  useRouteRestoration();
   const handleToggleDebug = () => {
     setCurrentPanel((prevPanel) =>
       prevPanel === "debug" ? "fileExplorer" : "debug",

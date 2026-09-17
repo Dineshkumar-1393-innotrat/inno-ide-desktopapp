@@ -43,7 +43,8 @@ const electronAPI = {
 
   device: {
     list: () => ipcRenderer.invoke('device:list'),
-    getStatus: (id) => ipcRenderer.invoke('device:get-status', id)
+    getStatus: (id) => ipcRenderer.invoke('device:get-status', id),
+    discoverWifi: () => ipcRenderer.invoke('device:discover-wifi')
   },
 
   serial: {

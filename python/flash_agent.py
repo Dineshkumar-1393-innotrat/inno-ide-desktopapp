@@ -285,6 +285,12 @@ def write_project_files(code, project_dir):
                     f.write('dependencies:\n  espressif/led_strip: "^3.0.0"\n')
                 send_event("log", stream="system", log=f"Created {idf_component_path}")
 
+        # Check if code requires Wi-Fi / Networking components
+        if "esp_wifi.h" in normalized_code or "esp_wifi" in normalized_code:
+            for comp in ["esp_wifi", "esp_netif", "esp_event", "nvs_flash", "lwip", "esp_http_server"]:
+                if comp not in requires_components:
+                    requires_components.append(comp)
+
         # Write main/CMakeLists.txt
         main_cmake_contents = (
             f'idf_component_register(SRCS "main.c"\n'

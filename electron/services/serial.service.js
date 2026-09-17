@@ -2,7 +2,23 @@ import { execSync, exec } from 'child_process';
 import { promisify } from 'util';
 const execPromise = promisify(exec);
 import fs from 'fs';
+import net from 'net';
 import { logger } from '../utils/logger.js';
+import { networkDiscoveryService } from './network_discovery.service.js';
+
+export function isNetworkPort(portPath) {
+  if (!portPath || typeof portPath !== 'string') return false;
+  return /^(TCP:|WIFI:)/i.test(portPath) || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$/.test(portPath.trim());
+}
+
+export function parseNetworkPort(portPath) {
+  const clean = portPath.trim().replace(/^(TCP:|WIFI:)/i, '');
+  const [host, portStr] = clean.split(':');
+  return {
+    host,
+    port: parseInt(portStr || '8888', 10)
+  };
+}
 
 // Common Microcontroller & USB-to-UART Chipset Signatures
 const KNOWN_CHIPSETS = [
@@ -175,12 +191,58 @@ $res | ConvertTo-Json -Compress
       }
     }
 
+    // Tier 4: Discovered Wi-Fi Devices
+    try {
+      const netDevices = networkDiscoveryService.getDevices();
+      for (const netDev of netDevices) {
+        addPort({
+          path: netDev.path,
+          friendlyName: netDev.friendlyName,
+          isUsb: false,
+          isNetwork: true,
+          ip: netDev.ip
+        });
+      }
+    } catch { }
+
     return Array.from(discovered.values());
   }
 
   async testPortOpen(portPath) {
     if (!portPath || typeof portPath !== 'string') return { openable: false, error: 'Invalid port' };
     await this.disconnectPort(portPath);
+
+    if (isNetworkPort(portPath)) {
+      const { host, port: netPort } = parseNetworkPort(portPath);
+      return new Promise(resolve => {
+        const testSock = new net.Socket();
+        let done = false;
+        const to = setTimeout(() => {
+          if (!done) {
+            done = true;
+            try { testSock.destroy(); } catch {}
+            resolve({ openable: false, error: 'Network device connection timed out' });
+          }
+        }, 2500);
+
+        testSock.connect(netPort, host, () => {
+          if (!done) {
+            done = true;
+            clearTimeout(to);
+            testSock.destroy();
+            resolve({ openable: true, port: portPath, isNetwork: true });
+          }
+        });
+
+        testSock.on('error', err => {
+          if (!done) {
+            done = true;
+            clearTimeout(to);
+            resolve({ openable: false, error: err.message });
+          }
+        });
+      });
+    }
 
     if (this.SerialPort) {
       return new Promise(resolve => {
@@ -207,12 +269,12 @@ $res | ConvertTo-Json -Compress
       if (this.pendingConnects.has(portPath)) {
         await this.pendingConnects.get(portPath);
         const existing = this.activePorts.get(portPath);
-        if (existing && (existing.virtual || existing.isOpen)) return { success: true, port: portPath, virtual: Boolean(existing.virtual) };
+        if (existing && (existing.virtual || existing.isOpen)) return { success: true, port: portPath, virtual: Boolean(existing.virtual), isNetwork: Boolean(existing.isNetwork) };
       }
 
       if (this.activePorts.has(portPath)) {
         const existing = this.activePorts.get(portPath);
-        if (existing && !existing.virtual && existing.isOpen) return { success: true, message: 'Already connected', port: portPath };
+        if (existing && !existing.virtual && existing.isOpen) return { success: true, message: 'Already connected', port: portPath, isNetwork: Boolean(existing.isNetwork) };
         if (existing && !existing.virtual && existing.opening) {
           await new Promise((resolve, reject) => {
             const to = setTimeout(() => reject(new Error(`Timeout waiting for port ${portPath} to open`)), 4000);
@@ -222,6 +284,52 @@ $res | ConvertTo-Json -Compress
           return { success: true, port: portPath };
         }
         this.activePorts.delete(portPath);
+      }
+
+      // Transparent Network Socket Connection (Wi-Fi ESP32)
+      if (isNetworkPort(portPath)) {
+        const { host, port: netPort } = parseNetworkPort(portPath);
+        const connectPromise = new Promise((resolve, reject) => {
+          const socket = new net.Socket();
+          let connected = false;
+          const to = setTimeout(() => {
+            if (!connected) {
+              try { socket.destroy(); } catch {}
+              reject(new Error(`Timeout connecting to wireless device at ${host}:${netPort}`));
+            }
+          }, 4500);
+
+          socket.connect(netPort, host, () => {
+            connected = true;
+            clearTimeout(to);
+            socket.isOpen = true;
+            socket.isNetwork = true;
+            socket.path = portPath;
+            this.activePorts.set(portPath, socket);
+            logger.info(`Connected to wireless device ${portPath} (${host}:${netPort})`);
+            resolve({ success: true, port: portPath, isNetwork: true });
+          });
+
+          socket.on('data', data => {
+            if (dataCallback) dataCallback(data.toString('utf8'));
+          });
+
+          socket.on('error', err => {
+            logger.warn(`Network socket error on ${portPath}:`, err.message);
+            if (!connected) {
+              clearTimeout(to);
+              reject(err);
+            }
+          });
+
+          socket.on('close', () => {
+            socket.isOpen = false;
+            this.activePorts.delete(portPath);
+          });
+        });
+
+        this.pendingConnects.set(portPath, connectPromise);
+        try { return await connectPromise; } finally { this.pendingConnects.delete(portPath); }
       }
 
       if (this.SerialPort) {
@@ -249,7 +357,7 @@ $res | ConvertTo-Json -Compress
       this.activePorts.set(portPath, { virtual: true, baudRate: options.baudRate || 115200 });
       return { success: true, port: portPath, virtual: true };
     } catch (error) {
-      logger.error(`Error connecting to serial port ${portPath}:`, error.message);
+      logger.error(`Error connecting to port ${portPath}:`, error.message);
       throw error;
     }
   }
@@ -290,7 +398,9 @@ $res | ConvertTo-Json -Compress
       for (const [key, port] of this.activePorts.entries()) {
         if (key.trim().toUpperCase() === normalized) {
           this.activePorts.delete(key);
-          if (!port.virtual && typeof port.close === 'function') {
+          if (port.isNetwork) {
+            try { port.end(); port.destroy(); } catch {}
+          } else if (!port.virtual && typeof port.close === 'function') {
             if (port.isOpen) {
               await new Promise((resolve) => {
                 port.close(() => resolve());
@@ -310,7 +420,7 @@ $res | ConvertTo-Json -Compress
       await new Promise(r => setTimeout(r, 100));
       return { success: true, port: portPath };
     } catch (error) {
-      logger.error(`Error disconnecting serial port ${portPath}:`, error.message);
+      logger.error(`Error disconnecting port ${portPath}:`, error.message);
       throw error;
     }
   }

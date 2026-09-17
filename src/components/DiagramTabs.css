@@ -63,6 +63,26 @@
   gap: 4px;
 }
 
+.diagram-tabs__input {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  width: 90px;
+  min-width: 60px;
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.diagram-tabs__input:focus {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
 .diagram-tabs__dirty-dot {
   width: 6px;
   height: 6px;

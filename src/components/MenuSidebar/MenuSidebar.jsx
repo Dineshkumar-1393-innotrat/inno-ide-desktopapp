@@ -27,6 +27,7 @@ import { AiFillFileAdd } from "react-icons/ai";
 import { MdDelete } from "react-icons/md";
 import CreateProductDefintionModal from "../Product/ProductDefinitionModal/CreateProductDefintionModal";
 import ProductEditModal from "../Product/ProductEdit/ProductEditModal";
+import CreateProductButton from "../shared/CreateProductButton";
 import CreateNewProjectModal from "./CreateNewProjectModal";
 import { useDisclosure } from "@chakra-ui/react";
 import { FaChevronRight, FaChevronDown } from "react-icons/fa";
@@ -592,23 +593,9 @@ const MenuSidebar = () => {
         </Box>
 
         <Box flex="1" mt={{ base: 0, md: 16 }} p={4} bg="gray.900" minHeight="100vh" overflowX="auto">
-          {activeProductId && isProductDefined !== null && (
-            <Box>
-              {isProductDefined ? (
-                <ProductEditModal
-                  productID={activeProductId}
-                  productName={activeProjectName}
-                  fetchFileSystem={fetchFileSystem}
-                />
-              ) : (
-                <CreateProductDefintionModal
-                  activeProjectId={activeProductId}
-                  activeProjectName={activeProjectName}
-                  fetchFileSystem={fetchFileSystem}
-                />
-              )}
-            </Box>
-          )}
+          <Box mb={3}>
+            <CreateProductButton />
+          </Box>
 
           {/* Tabs for Open Files */}
           <Tabs
