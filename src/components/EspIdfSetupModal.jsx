@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Modal,
   ModalOverlay,
@@ -22,6 +22,7 @@ import { FaBolt, FaCog, FaExternalLinkAlt } from "react-icons/fa";
  */
 const EspIdfSetupModal = ({ isOpen, onClose, onContinue }) => {
   const toast = useToast();
+  const [isInstalling, setIsInstalling] = useState(false);
 
   const bgCard = useColorModeValue("white", "gray.900");
   const borderColor = useColorModeValue("gray.200", "gray.700");
@@ -49,25 +50,30 @@ const EspIdfSetupModal = ({ isOpen, onClose, onContinue }) => {
   };
 
   const handleYes = () => {
+    setIsInstalling(true);
     localStorage.setItem("innoide:idf-setup-prompt-dismissed", "true");
-    const espIdfUrl = "https://dl.espressif.com/dl/esp-idf/";
-    if (window.electronAPI?.app?.openExternal) {
-      window.electronAPI.app.openExternal(espIdfUrl);
-    } else {
-      window.open(espIdfUrl, "_blank", "noopener,noreferrer");
-    }
-    toast({
-      title: "Opening ESP-IDF Installer Page",
-      description: "Redirecting to official Espressif tools download page in your browser...",
-      status: "info",
-      duration: 4000,
-      isClosable: true
-    });
-    if (onContinue) {
-      onContinue();
-    } else if (onClose) {
-      onClose();
-    }
+
+    setTimeout(() => {
+      const espIdfUrl = "https://dl.espressif.com/dl/esp-idf/";
+      if (window.electronAPI?.app?.openExternal) {
+        window.electronAPI.app.openExternal(espIdfUrl);
+      } else {
+        window.open(espIdfUrl, "_blank", "noopener,noreferrer");
+      }
+      toast({
+        title: "Opening ESP-IDF Installer Page",
+        description: "Redirecting to official Espressif tools download page in your browser...",
+        status: "info",
+        duration: 4000,
+        isClosable: true
+      });
+      setIsInstalling(false);
+      if (onContinue) {
+        onContinue();
+      } else if (onClose) {
+        onClose();
+      }
+    }, 800);
   };
 
   return (
@@ -165,6 +171,7 @@ const EspIdfSetupModal = ({ isOpen, onClose, onContinue }) => {
               size="md"
               fontSize="xs"
               fontWeight="semibold"
+              isDisabled={isInstalling}
             >
               No, Continue to Next Step
             </Button>
@@ -177,6 +184,9 @@ const EspIdfSetupModal = ({ isOpen, onClose, onContinue }) => {
               size="md"
               fontSize="xs"
               fontWeight="bold"
+              isLoading={isInstalling}
+              loadingText="Opening..."
+              isDisabled={isInstalling}
               rightIcon={<FaExternalLinkAlt size={11} />}
               shadow="md"
             >
