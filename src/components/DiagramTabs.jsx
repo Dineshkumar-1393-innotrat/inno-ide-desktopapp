@@ -60,7 +60,15 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
   const context = useContext(WorkspaceTabsContext) || {};
 
   const tabs = reduxTabs || context.tabs || [];
-  const activeTabId = reduxActiveTabId || context.activeTabId;
+  const activeTabId = reduxActiveTabId || context.activeTabId || (tabs.length > 0 ? tabs[0]?.id : 'default_tab');
+
+  React.useEffect(() => {
+    if (!reduxActiveTabId && tabs.length > 0 && tabs[0]?.id) {
+      if (kind === 'flowchart') dispatch(setFlowchartActiveTab(tabs[0].id));
+      else if (kind === 'blockDiagram') dispatch(setBlockDiagramActiveTab(tabs[0].id));
+      else if (kind === 'blockProgramming') dispatch(setBlockProgrammingActiveTab(tabs[0].id));
+    }
+  }, [reduxActiveTabId, tabs, kind, dispatch]);
 
   const selectTab = (id) => {
     if (id === activeTabId) return; // Prevent redundant updates if already active
@@ -241,12 +249,25 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
         <button
           type="button"
           className="diagram-tabs__action"
-          onClick={async () => {
-            await saveActiveTabNow();
-            if (onSaveJSON) onSaveJSON();
+          onClick={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+              if (typeof onSaveJSON === 'function') {
+                onSaveJSON();
+              }
+            } catch (err) {
+              console.error('[DiagramTabs] onSaveJSON error:', err);
+            }
+            try {
+              if (typeof saveActiveTabNow === 'function') {
+                await saveActiveTabNow();
+              }
+            } catch (err) {
+              console.warn('[DiagramTabs] saveActiveTabNow error:', err);
+            }
           }}
-          title="Save"
-          disabled={!activeTabId}
+          title="Save Diagram"
         >
           <Save size={16} />
         </button>

@@ -110,6 +110,27 @@ const CreateNewProjectModal = ({
       localStorage.removeItem(`innoide:product_create_missed_${generatedProjectId}`);
       localStorage.removeItem(`innoide:product_created_${generatedProjectId}`);
 
+      // Cache detailed project creation metadata for exports and system-wide lookup
+      const projectDetails = {
+        projectId: generatedProjectId,
+        projectName: createdFile?.name ?? projectName,
+        description: projDesc || "",
+        projectCategory: category || "Logistics",
+        projectType: projectType || "Bare Metal",
+        board: boardType || "STM32 U5",
+        boardType: boardType || "STM32 U5",
+        features: feature || "writeCode",
+        userId: userId,
+        createdAt: createdFile?.createdAt || new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(`innoide:project_details_${generatedProjectId}`, JSON.stringify(projectDetails));
+        localStorage.setItem(`innoide:project_details_${createdFile?.name ?? projectName}`, JSON.stringify(projectDetails));
+        localStorage.setItem('innoide:last_project_details', JSON.stringify(projectDetails));
+      } catch (storageErr) {
+        console.warn("[CreateNewProjectModal] Failed to cache project creation details:", storageErr);
+      }
+
       // Switch to the new project globally
       await switchProject({
         projectId: generatedProjectId,

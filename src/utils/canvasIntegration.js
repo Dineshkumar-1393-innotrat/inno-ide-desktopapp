@@ -247,7 +247,9 @@ export class ReactFlowCanvasHandler extends BaseCanvasHandler {
         return false;
       }
 
-      const { nodes = [], edges = [], viewport } = content;
+      const nodes = content.nodes || content.canvas?.nodes || [];
+      const edges = content.edges || content.canvas?.edges || [];
+      const viewport = content.viewport || content.canvas?.viewport;
 
       // Update ReactFlow state
       this.setNodes(nodes);

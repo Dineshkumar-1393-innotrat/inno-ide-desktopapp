@@ -1054,6 +1054,32 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
         if (productName) setActiveProductName(productName);
       }
 
+      // Cache product creation details in localStorage for diagram exports and offline lookup
+      const productCreationDetails = {
+        productId: productId || activeProductId,
+        productName: productName || activeProductName || activeProjectName,
+        basicInformation: {
+          noOfDevices: Number(numDevices) || 1,
+          noOfComponents: Number(numComponents) || formComponents.length,
+        },
+        noOfDevices: Number(numDevices) || 1,
+        noOfComponents: Number(numComponents) || formComponents.length,
+        components: formComponents,
+        componentsPayload: componentsPayload,
+        devices: deviceInfos,
+        note: note || "",
+        urls: urlLink ? [urlLink] : [],
+        createdAt: new Date().toISOString()
+      };
+      try {
+        if (productId) localStorage.setItem(`innoide:product_details_${productId}`, JSON.stringify(productCreationDetails));
+        if (productName) localStorage.setItem(`innoide:product_details_${productName}`, JSON.stringify(productCreationDetails));
+        if (activeProjectId) localStorage.setItem(`innoide:product_details_${activeProjectId}`, JSON.stringify(productCreationDetails));
+        localStorage.setItem('innoide:last_product_details', JSON.stringify(productCreationDetails));
+      } catch (storageErr) {
+        console.warn("[CreateProduct] Failed to cache product creation details:", storageErr);
+      }
+
       if (onSuccess) onSuccess();
       if (typeof onClose === "function") onClose();
 

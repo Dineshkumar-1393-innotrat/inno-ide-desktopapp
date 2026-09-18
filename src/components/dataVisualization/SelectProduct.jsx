@@ -142,24 +142,46 @@ const SelectProduct = () => {
 
     const fetchData = async () => {
       try {
-        // --- 1. Fetch products (all endpoints raced in parallel) ---
-        const productUrls = [
-          `${baseURL}/getProductIds/${userId}`,
-          `${baseURL}/api/v1/getProductIds/${userId}`,
-          `${baseURL}/api/v2/getProductIds/${userId}`,
-          `${productAPIBase}/getProductIds/${userId}`,
-          `${productAPIBase}/api/v1/getProductIds/${userId}`,
-          `${productAPIBase}/api/v2/getProductIds/${userId}`,
-          `${productAPIBase}/products/${userId}`,
-          `${productAPIBase}/product/all/${userId}`,
-          `${baseURL}/product/all/${userId}`,
-        ];
+        // --- 1. Fetch products from valid user files/folders ---
+        let productsList = [];
+        try {
+          const filesRes = await axios.get(`${baseURL}/api/v1/files/${userId}`);
+          if (filesRes.data?.success && Array.isArray(filesRes.data.files)) {
+            const root = filesRes.data.files.find(f => f.name === 'root');
+            const projectFolders = filesRes.data.files.filter(f => 
+              f.type === 'folder' && (root ? f.parentId === root._id : f.parentId === null)
+            );
+            productsList = projectFolders.map(f => ({
+              productId: f.productId || f._id,
+              productID: f.productId || f._id,
+              productName: f.name,
+              name: f.name,
+              projectId: f._id,
+              _id: f.productId || f._id
+            }));
+          }
+        } catch (filesErr) {
+          console.warn("[SelectProduct] Failed to fetch user files:", filesErr);
+        }
 
-        const productsList = await raceEndpoints(
-          productUrls,
-          extractProducts,
-          5000
-        );
+        // Check cached product details as fallback
+        if (productsList.length === 0) {
+          try {
+            const stored = localStorage.getItem('innoide:last_product_details');
+            if (stored) {
+              const p = JSON.parse(stored);
+              if (p.productId) {
+                productsList.push({
+                  productId: p.productId,
+                  productID: p.productId,
+                  productName: p.productName || 'Default Product',
+                  name: p.productName || 'Default Product',
+                  _id: p.productId
+                });
+              }
+            }
+          } catch (e) {}
+        }
 
         if (!productsList || productsList.length === 0) {
           setProducts([]);

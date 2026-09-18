@@ -95,8 +95,11 @@ const DiagramEditorInternal = ({
 
   const loadDiagram = useCallback((data) => {
     if (data) {
-      rf.setNodes(data.nodes || []);
-      rf.setEdges(data.edges || []);
+      rf.setNodes(data.nodes || data.canvas?.nodes || []);
+      rf.setEdges(data.edges || data.canvas?.edges || []);
+      if (data.viewport || data.canvas?.viewport) {
+        rf.setViewport(data.viewport || data.canvas?.viewport);
+      }
     }
   }, [rf]);
 

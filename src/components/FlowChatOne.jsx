@@ -3250,6 +3250,7 @@ import DefineProductButton from './shared/DefineProductButton';
 import projectFileManager from '../utils/projectFileManager';
 import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
 import ProjectFileExplorer from './ProjectFileExplorer';
+import { buildDiagramExportPayload } from '../utils/projectProductExportHelper';
 
 let nodeId = 1;
 const getId = () => `n_${nodeId++}`;
@@ -4080,7 +4081,7 @@ const saveCanvasAsScreen = async ({ userId, projectId, screenName }) => {
 function FlowchartCanvasInner() {
   const rf = useReactFlow();
   const navigate = useNavigate();
-  const { userId } = useProject() || {};
+  const { userId, activeProjectId: ctxProjectId, activeProjectName, activeProductId, activeProductName } = useProject() || {};
   const canvasIntegration = useCanvasFileIntegration();
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -4350,8 +4351,17 @@ function FlowchartCanvasInner() {
   ]);
 
   // save/load diagram as JSON
-  const saveDiagram = () => {
-    const payload = { nodes, edges, viewport: rf.getViewport() };
+  const saveDiagram = async () => {
+    const projId = activeProjectId || ctxProjectId;
+    const payload = await buildDiagramExportPayload({
+      nodes,
+      edges,
+      viewport: rf.getViewport(),
+      projectId: projId,
+      projectName: activeProjectName,
+      productId: activeProductId,
+      productName: activeProductName
+    });
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: 'application/json',
     });
@@ -4374,9 +4384,12 @@ function FlowchartCanvasInner() {
       reader.onload = () => {
         try {
           const parsed = JSON.parse(reader.result);
-          setNodes(parsed.nodes || []);
-          setEdges(parsed.edges || []);
-          if (parsed.viewport) rf.setViewport(parsed.viewport);
+          const targetNodes = parsed.nodes || parsed.canvas?.nodes || [];
+          const targetEdges = parsed.edges || parsed.canvas?.edges || [];
+          const targetViewport = parsed.viewport || parsed.canvas?.viewport;
+          setNodes(targetNodes);
+          setEdges(targetEdges);
+          if (targetViewport) rf.setViewport(targetViewport);
           pushSnapshot();
         } catch (err) {
           console.error('Invalid diagram JSON', err);

@@ -111,6 +111,7 @@ import { useCanvasFileIntegration } from "../hooks/useCanvasFileIntegration";
 import axios from "axios";
 import { baseURL } from "../utilities";
 import { loadSequenceDiagram } from "../utils/sequenceDiagramLoader";
+import { buildDiagramExportPayload } from "../utils/projectProductExportHelper";
 
 // Helper hook for updating node data via Redux
 // This ensures changes persist even when the controlled flow is re-rendered from the store
@@ -4546,6 +4547,7 @@ function DiagramEditor() {
     activeProjectId,
     activeProjectName,
     activeProductId,
+    activeProductName,
     setActiveProjectId,
     diagramData,
     setDiagramData,
@@ -4556,6 +4558,8 @@ function DiagramEditor() {
     hasFetchedOnce,
     transitionError
   } = useProject?.() ?? {};
+
+  const userId = user?.userId || user?._id || user?.id;
 
   const rf = useReactFlow();
   const hydratingRef = useRef(false);
@@ -4659,20 +4663,18 @@ function DiagramEditor() {
     }
   }, [activeProjectId, activeProductId, fetchFlowchart]);
 
-  // Initialize first tab if none exists
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
+  const currentProjectIdRef = useRef(null);
+  const isSwitchingProjectRef = useRef(false);
+
   useEffect(() => {
-    if (tabs.length === 0) {
-      const newId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      dispatch(
-        addTab({
-          id: newId,
-          name: "Tab 1",
-          state: createFlowchartState(),
-          dirty: true,
-        }),
-      );
-    }
-  }, [tabs.length, dispatch]);
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
 
   const createTab = useCallback(() => {
     const newId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -4702,35 +4704,156 @@ function DiagramEditor() {
   // Canvas auto-save REMOVED from backend sync - kept only for local persistence if needed
   // We will now rely on explicit Save button
 
-  // --- Sync Redux Tabs with Central Project Data ---
+  // --- Project-Scoped Tab Lifecycle & Switching ---
   useEffect(() => {
-    // GUARD: If a file was just loaded from the explorer, SKIP this sync to prevent overwrite
-    if (lastLoadedFilePathRef.current !== null) {
-      console.log("[Flowchart] Sync skipped: Manual file load in progress");
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    if (!effectiveProjectId) return;
+
+    const prevProjectId = currentProjectIdRef.current;
+    
+    // Detect project switch or stale initial tabs belonging to a different project
+    const isProjectSwitch = prevProjectId !== null && prevProjectId !== effectiveProjectId;
+    const isStaleInitialProject = prevProjectId === null && tabsRef.current && tabsRef.current.length > 0 &&
+      activeProjectName && tabsRef.current.some(t => t.name && t.name !== activeProjectName && t.name.toLowerCase() !== activeProjectName.toLowerCase());
+
+    if (!isProjectSwitch && prevProjectId === effectiveProjectId && !isStaleInitialProject) {
       return;
     }
 
-    const data = diagramData?.flowchart?.data;
-    if (data && Array.isArray(data) && data.length > 0) {
-      // ONLY hydrate from context if Redux is currently empty
-      // This prevents switching screens from overwriting local unsaved changes with stale backend data
-      if (tabs.length === 0) {
-        console.log("[Flowchart] Hydrating Redux tabs from central data:", data.length, "tabs");
-        hydratingRef.current = true;
-        dispatch(setTabs(data));
+    console.log(`[Flowchart] Project switch detected: ${prevProjectId} -> ${effectiveProjectId} (Project: ${activeProjectName})`);
 
-        // Set active tab if it's not set
-        const firstTabId = data[0].id;
-        if (!activeTabId || !data.find(t => t.id === activeTabId)) {
-          dispatch(setActiveTab(firstTabId));
-        }
-
-        setTimeout(() => hydratingRef.current = false, 100);
+    // 1. Save previous project tabs if available
+    const projectToSave = prevProjectId || (isStaleInitialProject ? (tabsRef.current[0]?.name || 'previous') : null);
+    if (projectToSave && tabsRef.current && tabsRef.current.length > 0) {
+      try {
+        const payloadToSave = {
+          tabs: tabsRef.current,
+          activeTabId: activeTabIdRef.current,
+          projectId: projectToSave,
+          projectName: isStaleInitialProject ? tabsRef.current[0]?.name : activeProjectName,
+          savedAt: new Date().toISOString()
+        };
+        localStorage.setItem(`innoide:flowchart_tabs:${userId || 'default'}:${projectToSave}`, JSON.stringify(payloadToSave));
+        localStorage.setItem(`innoide:flowchart_tabs:${projectToSave}`, JSON.stringify(payloadToSave));
+      } catch (saveErr) {
+        console.warn("[Flowchart] Failed to cache previous project tabs:", saveErr);
       }
     }
-  }, [diagramData?.flowchart?.data, dispatch, tabs.length]);
 
-  const userId = user?.userId || user?._id || user?.id;
+    currentProjectIdRef.current = effectiveProjectId;
+    isSwitchingProjectRef.current = true;
+
+    // 2. Load tabs for effectiveProjectId
+    let loadedTabs = null;
+    let loadedActiveId = null;
+
+    // Source A: localStorage project tabs cache
+    try {
+      const stored = localStorage.getItem(`innoide:flowchart_tabs:${userId || 'default'}:${effectiveProjectId}`)
+        || localStorage.getItem(`innoide:flowchart_tabs:${effectiveProjectId}`)
+        || (activeProjectName ? localStorage.getItem(`innoide:flowchart_tabs:${activeProjectName}`) : null);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.tabs && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
+          loadedTabs = parsed.tabs;
+          loadedActiveId = parsed.activeTabId || parsed.tabs[0]?.id;
+        }
+      }
+    } catch (e) {
+      console.warn("[Flowchart] Error reading project tabs from storage:", e);
+    }
+
+    // Source B: Central diagramData (from backend) if populated for this project
+    if (!loadedTabs && diagramData?.flowchart?.data && Array.isArray(diagramData.flowchart.data) && diagramData.flowchart.data.length > 0) {
+      loadedTabs = diagramData.flowchart.data;
+      loadedActiveId = loadedTabs[0]?.id;
+    }
+
+    // Source C: projectFileManager
+    if (!loadedTabs) {
+      try {
+        const fileContent = projectFileManager.loadFile(effectiveProjectId, 'Flowchart/main_flow.json');
+        if (fileContent) {
+          const parsed = typeof fileContent === 'string' ? JSON.parse(fileContent) : fileContent;
+          if (parsed && (parsed.nodes?.length > 0 || parsed.edges?.length > 0)) {
+            const newTabId = `tab_${Date.now()}`;
+            loadedTabs = [{
+              id: newTabId,
+              name: activeProjectName || "Main Flow",
+              state: {
+                nodes: parsed.nodes || [],
+                edges: parsed.edges || [],
+                viewport: parsed.viewport || null,
+              },
+              dirty: false,
+            }];
+            loadedActiveId = newTabId;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. Commit tabs or initialize fresh tab for the new project
+    if (loadedTabs && loadedTabs.length > 0) {
+      console.log(`[Flowchart] Loading ${loadedTabs.length} tabs for ${activeProjectName || effectiveProjectId}`);
+      dispatch(setTabs(loadedTabs));
+      dispatch(setActiveTab(loadedActiveId || loadedTabs[0].id));
+    } else {
+      const projName = activeProjectName || localStorage.getItem("activeProjectName") || "Tab 1";
+      console.log(`[Flowchart] Initializing clean tab for ${projName}`);
+      const freshTab = {
+        id: `tab_${Date.now()}`,
+        name: projName,
+        state: createFlowchartState(),
+        dirty: false,
+      };
+      dispatch(setTabs([freshTab]));
+      dispatch(setActiveTab(freshTab.id));
+    }
+
+    setTimeout(() => {
+      isSwitchingProjectRef.current = false;
+      if (rf && rf.fitView) {
+        rf.fitView({ padding: 0.2, duration: 300, maxZoom: 1 });
+      }
+    }, 100);
+  }, [activeProjectId, activeProjectName, dispatch, userId, diagramData?.flowchart?.data, rf]);
+
+  // Persist current project tabs on modification
+  useEffect(() => {
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    if (!effectiveProjectId || !tabs || tabs.length === 0 || isSwitchingProjectRef.current) return;
+
+    try {
+      const payload = {
+        tabs,
+        activeTabId,
+        projectId: effectiveProjectId,
+        projectName: activeProjectName,
+        savedAt: new Date().toISOString()
+      };
+      localStorage.setItem(`innoide:flowchart_tabs:${userId || 'default'}:${effectiveProjectId}`, JSON.stringify(payload));
+      localStorage.setItem(`innoide:flowchart_tabs:${effectiveProjectId}`, JSON.stringify(payload));
+      if (activeProjectName) {
+        localStorage.setItem(`innoide:flowchart_tabs:${activeProjectName}`, JSON.stringify(payload));
+      }
+    } catch (e) {}
+  }, [tabs, activeTabId, activeProjectId, activeProjectName, userId]);
+
+  // Fallback: If tabs are closed to 0, recreate a fresh tab for the current project
+  useEffect(() => {
+    if (tabs.length === 0 && !isSwitchingProjectRef.current) {
+      const projName = activeProjectName || localStorage.getItem("activeProjectName") || "Tab 1";
+      const freshTab = {
+        id: `tab_${Date.now()}`,
+        name: projName,
+        state: createFlowchartState(),
+        dirty: false,
+      };
+      dispatch(setTabs([freshTab]));
+      dispatch(setActiveTab(freshTab.id));
+    }
+  }, [tabs.length, activeProjectName, dispatch]);
 
   // History & snapshots
   const HISTORY_LIMIT = 100;
@@ -5670,54 +5793,50 @@ function DiagramEditor() {
   const [isSaving, setIsSaving] = useState(false);
 
   const saveDiagram = async () => {
-    if (!activeTabId || !activeTab) return;
-
     setIsSaving(true);
-    const payloadContent = {
-      nodes,
-      edges,
-      viewport: rf.getViewport(),
+
+    // 1. Resolve active tab safely so it never silently returns without saving
+    const effectiveTabId = activeTabId || tabs[0]?.id || 'default_tab';
+    const effectiveTab = activeTab || tabs.find(t => t?.id === effectiveTabId) || {
+      id: effectiveTabId,
+      name: activeProjectName || 'Untitled Project'
     };
+
+    // 2. Resolve viewport safely
+    let viewport = { x: 0, y: 0, zoom: 1 };
+    try {
+      if (typeof rf?.getViewport === 'function') {
+        viewport = rf.getViewport();
+      }
+    } catch (e) {}
+
+    // 3. Build enriched export payload with project and product creation details
+    const payloadContent = buildDiagramExportPayload({
+      nodes: nodes || [],
+      edges: edges || [],
+      viewport,
+      projectId: activeProjectId,
+      projectName: activeProjectName || effectiveTab?.name || 'Untitled Project',
+      productId: activeProductId,
+      productName: activeProductName || activeProjectName || 'Product'
+    });
 
     console.log("------------------------------------------");
     console.log("[Flowchart] EXPLICIT SAVE TRIGGERED");
-    console.log("[Flowchart] Nodes Count:", nodes.length);
-    console.log("[Flowchart] Edges Count:", edges.length);
+    console.log("[Flowchart] Effective Tab:", effectiveTab?.name);
+    console.log("[Flowchart] Nodes Count:", (nodes || []).length);
+    console.log("[Flowchart] Edges Count:", (edges || []).length);
+    console.log("[Flowchart] Project Details:", payloadContent.projectDetails);
+    console.log("[Flowchart] Product Details:", payloadContent.productDetails);
     console.log("------------------------------------------");
 
+    // 4. TRIGGER IMMEDIATE JSON DOWNLOAD (synchronously within user click gesture)
+    const tabName = effectiveTab?.name || activeProjectName || "Flowchart";
+    const sanitizedName = sanitizeSegment ? sanitizeSegment(tabName) : tabName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const fileName = `${sanitizedName}.json`;
+    const jsonStr = JSON.stringify(payloadContent, null, 2);
+
     try {
-      // 1. Save to the specialized Flowchart backend API
-      // Update Redux tabs state first to ensure consistency
-      const latestTabs = tabs.map(t =>
-        t.id === activeTabId
-          ? { ...t, state: payloadContent }
-          : t
-      );
-
-      await saveDiagramData(payloadContent, 'flowchart');
-
-      // 2. Save to the individual project file
-      if (activeProjectId) {
-        const tabName = activeTab.name || "flow_diagram";
-        const sanitizedName = sanitizeSegment(tabName);
-        const fileName = `${sanitizedName}.json`;
-
-        await canvasIntegration.saveCanvasToFile(
-          payloadContent,
-          `Flowchart/${fileName}`,
-          activeProjectId,
-        );
-        console.log(`[Flowchart] Saved to project file: Flowchart/${fileName}`);
-      }
-
-      // 3. Mark tab as clean in Redux
-      dispatch(markTabClean(activeTabId));
-
-      // 4. Save JSON file locally on the user's computer for reference
-      const tabName = activeTab.name || "flowchart";
-      const sanitizedName = sanitizeSegment ? sanitizeSegment(tabName) : tabName.replace(/[^a-zA-Z0-9_-]/g, "_");
-      const fileName = `${sanitizedName}.json`;
-      const jsonStr = JSON.stringify(payloadContent, null, 2);
       const jsonBlob = new Blob([jsonStr], { type: "application/json" });
       const dlUrl = URL.createObjectURL(jsonBlob);
       const dlAnchor = document.createElement("a");
@@ -5726,33 +5845,50 @@ function DiagramEditor() {
       document.body.appendChild(dlAnchor);
       dlAnchor.click();
       document.body.removeChild(dlAnchor);
-      URL.revokeObjectURL(dlUrl);
+      setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 
       // If running inside Electron, also persist locally to disk via filesystem bridge
       if (window.electronAPI?.filesystem?.writeFile) {
-        try {
-          await window.electronAPI.filesystem.writeFile(fileName, jsonStr, "utf8");
-        } catch (e) { }
+        window.electronAPI.filesystem.writeFile(fileName, jsonStr, "utf8").catch(() => {});
       }
 
       toast({
-        title: "Flowchart Saved Locally",
-        description: `"${activeTab.name}" has been saved locally as ${fileName} and synced to project.`,
+        title: "JSON Saved Successfully",
+        description: `"${tabName}" flowchart and project/product details exported as ${fileName}.`,
         status: "success",
         duration: 3000,
         isClosable: true,
         position: "top-right",
       });
-    } catch (error) {
-      console.error("[Flowchart] Save failed:", error);
-      toast({
-        title: "Save Failed",
-        description: error.message || "An error occurred while saving.",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-        position: "top-right",
-      });
+    } catch (dlErr) {
+      console.error("[Flowchart] Download failed:", dlErr);
+    }
+
+    // 5. Background sync to Redux, project file, and backend without blocking download
+    try {
+      if (effectiveTabId) {
+        dispatch(markTabClean(effectiveTabId));
+      }
+
+      if (activeProjectId) {
+        canvasIntegration.saveCanvasToFile(
+          payloadContent,
+          `Flowchart/${fileName}`,
+          activeProjectId
+        ).catch(err => console.warn("[Flowchart] Background file save warning:", err));
+      }
+
+      const latestTabs = tabs.map(t =>
+        t.id === effectiveTabId
+          ? { ...t, state: payloadContent }
+          : t
+      );
+
+      saveDiagramData(payloadContent, 'flowchart').catch(err =>
+        console.warn("[Flowchart] Background saveDiagramData warning:", err)
+      );
+    } catch (bgErr) {
+      console.warn("[Flowchart] Background sync error:", bgErr);
     } finally {
       setIsSaving(false);
     }
@@ -5769,9 +5905,25 @@ function DiagramEditor() {
       reader.onload = () => {
         try {
           const parsed = JSON.parse(reader.result);
-          setNodes(parsed.nodes || []);
-          setEdges(parsed.edges || []);
-          if (parsed.viewport) rf.setViewport(parsed.viewport);
+          const targetNodes = parsed.nodes || parsed.canvas?.nodes || [];
+          const targetEdges = parsed.edges || parsed.canvas?.edges || [];
+          const targetViewport = parsed.viewport || parsed.canvas?.viewport;
+          setNodes(targetNodes);
+          setEdges(targetEdges);
+          if (targetViewport) rf.setViewport(targetViewport);
+
+          if (parsed.projectDetails && (parsed.projectDetails.projectId || activeProjectId)) {
+            try {
+              const pId = parsed.projectDetails.projectId || activeProjectId;
+              localStorage.setItem(`innoide:project_details_${pId}`, JSON.stringify(parsed.projectDetails));
+            } catch (storageErr) {}
+          }
+          if (parsed.productDetails && (parsed.productDetails.productId || activeProductId || activeProjectId)) {
+            try {
+              const prId = parsed.productDetails.productId || activeProductId || activeProjectId;
+              localStorage.setItem(`innoide:product_details_${prId}`, JSON.stringify(parsed.productDetails));
+            } catch (storageErr) {}
+          }
         } catch (err) {
           console.error("Invalid diagram JSON", err);
         }

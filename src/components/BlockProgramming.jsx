@@ -2510,6 +2510,7 @@ import projectFileManager from '../utils/projectFileManager';
 import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
 import ProjectFileExplorer from './ProjectFileExplorer';
 import { useResizableSidebar } from '../hooks/useResizableSidebar';
+import { buildDiagramExportPayload } from '../utils/projectProductExportHelper';
 
 // Sound effect paths (Blockly inspired)
 const SOUND_PATHS = {
@@ -2744,7 +2745,7 @@ function BlockProgrammingCanvas() {
   const rf = useReactFlow();
   const hydratingRef = useRef(false);
   const navigate = useNavigate();
-  const { user, activeProjectId, activeProjectName, setActiveProjectId } = useProject?.() ?? {};
+  const { user, activeProjectId, activeProjectName, activeProductId, activeProductName, setActiveProjectId } = useProject?.() ?? {};
   const userId = user?.userId || user?._id || user?.id;
 
   // Refs for stable state tracking
@@ -3385,12 +3386,16 @@ function BlockProgrammingCanvas() {
     [navigate],
   );
 
-  const saveDiagram = useCallback(() => {
-    const snapshot = {
+  const saveDiagram = useCallback(async () => {
+    const snapshot = await buildDiagramExportPayload({
       nodes: nodesRef.current,
       edges: edgesRef.current,
       viewport: rf.getViewport(),
-    };
+      projectId: activeProjectId,
+      projectName: activeProjectName,
+      productId: activeProductId,
+      productName: activeProductName
+    });
     if (activeTabIdRef.current) {
       dispatch(markTabClean(activeTabIdRef.current));
     }
@@ -3401,7 +3406,7 @@ function BlockProgrammingCanvas() {
     link.download = 'block-programming.json';
     link.click();
     URL.revokeObjectURL(url);
-  }, [rf, dispatch]);
+  }, [rf, dispatch, activeProjectId, activeProjectName, activeProductId, activeProductName]);
 
   const loadDiagram = useCallback(() => {
     const input = document.createElement('input');
@@ -3414,10 +3419,13 @@ function BlockProgrammingCanvas() {
       reader.onload = () => {
         try {
           const parsed = JSON.parse(reader.result);
-          setNodes(parsed.nodes || []);
-          setEdges(parsed.edges || []);
-          if (parsed.viewport) {
-            rf.setViewport(parsed.viewport);
+          const targetNodes = parsed.nodes || parsed.canvas?.nodes || [];
+          const targetEdges = parsed.edges || parsed.canvas?.edges || [];
+          const targetViewport = parsed.viewport || parsed.canvas?.viewport;
+          setNodes(targetNodes);
+          setEdges(targetEdges);
+          if (targetViewport) {
+            rf.setViewport(targetViewport);
           }
           scheduleSnapshot();
         } catch (error) {

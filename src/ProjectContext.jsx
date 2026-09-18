@@ -267,10 +267,19 @@ export function ProjectProvider({ children }) {
           // We use setTimeout to ensure the restoration flag stays true 
           // until AFTER the subsequent re-render triggered by setDiagramData
           setTimeout(() => setIsRestoring(false), 0);
+        } else {
+          setDiagramData({
+            blockDiagram: { data: [], id: null, version: 0 },
+            flowchart: { data: [], id: null, version: 0 },
+            simulation: { data: [], id: null, version: 0 }
+          });
         }
         setHasFetchedOnce(true);
         setIsHydrated(true);
         setIsSwitchingProject(false);
+        window.dispatchEvent(new CustomEvent("project-switched", {
+          detail: { projectId, projectName, productId, productName }
+        }));
         console.log(`[ProjectContext] Switch to ${projectName} (ID: ${projectId}) completed successfully.`);
       }
     } catch (err) {
@@ -467,129 +476,98 @@ export function ProjectProvider({ children }) {
         const userId = user?.userId || user?._id || user?.id;
         
         if (!userId || !activeProjectId) {
-          console.log("[ProjectContext] Skipping syncProductWithBackend: Missing userId or activeProjectId");
           return;
         }
-
-        console.log("[ProjectContext] syncProductWithBackend executing...", { 
-          userId, 
-          activeProjectId,
-          fullUser: user 
-        });
-
-        console.log(`[ProjectContext] STARTING multi-server product sync for userId: ${userId}`);
-        
-        let products = [];
-        
-        // Try various endpoints to find products (they might be on different servers/microservices)
-        const endpoints = [
-          `${baseURL}/getProductIds/${userId}`,
-          `${baseURL}/api/v1/getProductIds/${userId}`,
-          `${baseURL}/api/v2/getProductIds/${userId}`,
-          `${productAPIBase}/getProductIds/${userId}`,
-          `${productAPIBase}/api/v1/getProductIds/${userId}`,
-          `${productAPIBase}/api/v2/getProductIds/${userId}`,
-          `${productAPIBase}/products/${userId}`,
-          `${productAPIBase}/product/all/${userId}`
-        ];
-
-        for (const url of endpoints) {
-          try {
-            console.log(`[ProjectContext] Fetching products from: ${url}`);
-            const res = await axios.get(url);
-            
-            // Handle various response structures (data.data, data, or status/data)
-            let rawList = [];
-            if (res.data?.data && Array.isArray(res.data.data)) {
-              rawList = res.data.data;
-            } else if (Array.isArray(res.data)) {
-              rawList = res.data;
-            } else if (res.data?.products && Array.isArray(res.data.products)) {
-              rawList = res.data.products;
-            }
-
-            if (rawList.length > 0) {
-              rawList.forEach(p => {
-                const pId = p.productId || p.productID || p._id || p.id || p.ID;
-                if (pId && !products.some(existing => (existing.productId || existing.productID || existing._id || existing.id || existing.ID) === pId)) {
-                  products.push(p);
-                }
-              });
-            }
-          } catch (e) {
-            // Ignore individual failures
-          }
-        }
-
-        console.log(`[ProjectContext] Aggregated unique products found: ${products.length}`);
 
         // 1. Check local mapping first (keyed by userId)
         const userMap = projectProductMap[userId] || {};
         const localMappedProductId = userMap[activeProjectId];
         
         if (localMappedProductId) {
-          console.log("[ProjectContext] Found product via local projectProductMap:", localMappedProductId);
           if (activeProductId !== localMappedProductId) {
             setActiveProductId(localMappedProductId);
           }
           return;
         }
 
-        // 2. Fallback to aggregated API scanning
-        const productForProject = products.find(p => {
-          // Check all possible fields for project ID and product ID
-          const remoteProjectId = p.projectId || p.projectID || p.fileORFolderId || p.folderId || p.ProjectID;
-          const remoteProductId = p.productId || p.productID || p._id || p.id || p.ID;
-          const remoteProductName = p.productName || p.name || p.ProductName || p.Name;
-
-          // A. Exact Project ID Match
-          if (remoteProjectId && activeProjectId && String(remoteProjectId) === String(activeProjectId)) {
-            return true;
-          }
-
-          // B. Name Match (with aggressive normalization as fallback for whitespace/special chars)
-          if (remoteProductName && activeProjectName) {
-            const clean = (s) => String(s).replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-            const normRemote = clean(remoteProductName);
-            const normActive = clean(activeProjectName);
-
-            if (normRemote === normActive && normRemote !== "") {
-              console.log(
-                `[ProjectContext] Found product via fuzzy name match: "${remoteProductName}" matches "${activeProjectName}" (ID: ${remoteProductId})`
-              );
-              return true;
+        // 2. Check localStorage cached product details
+        try {
+          const cachedByProj = localStorage.getItem(`innoide:product_details_${activeProjectId}`);
+          if (cachedByProj) {
+            const parsed = JSON.parse(cachedByProj);
+            const foundId = parsed.productId || parsed.productID || parsed._id;
+            if (foundId) {
+              if (activeProductId !== foundId) setActiveProductId(foundId);
+              if (parsed.productName && activeProductName !== parsed.productName) setActiveProductName(parsed.productName);
+              setProjectProductMap(prev => ({
+                ...prev,
+                [userId]: { ...(prev[userId] || {}), [activeProjectId]: foundId }
+              }));
+              return;
             }
           }
-          
-          return false;
-        });
 
-        if (productForProject) {
-          const remoteProdId = productForProject.productId || productForProject.productID || productForProject._id || productForProject.id || productForProject.ID;
-          const remoteProdName = productForProject.productName || productForProject.name || productForProject.ProductName || productForProject.Name;
+          if (activeProjectName) {
+            const cachedByName = localStorage.getItem(`innoide:product_details_${activeProjectName}`);
+            if (cachedByName) {
+              const parsed = JSON.parse(cachedByName);
+              const foundId = parsed.productId || parsed.productID || parsed._id;
+              if (foundId) {
+                if (activeProductId !== foundId) setActiveProductId(foundId);
+                setProjectProductMap(prev => ({
+                  ...prev,
+                  [userId]: { ...(prev[userId] || {}), [activeProjectId]: foundId }
+                }));
+                return;
+              }
+            }
+          }
 
-          if (activeProductId !== remoteProdId) {
-            console.log(`[ProjectContext] Updating activeProductId to ${remoteProdId}`);
-            setActiveProductId(remoteProdId);
-            if (remoteProdName) setActiveProductName(remoteProdName);
-            
-            // Update local mapping for future speed (keyed by userId)
+          const storedProdId = localStorage.getItem("activeProductId");
+          const storedProjId = localStorage.getItem("activeProjectId");
+          if (storedProdId && storedProjId === activeProjectId) {
+            if (activeProductId !== storedProdId) setActiveProductId(storedProdId);
             setProjectProductMap(prev => ({
               ...prev,
-              [userId]: { ...(prev[userId] || {}), [activeProjectId]: remoteProdId }
+              [userId]: { ...(prev[userId] || {}), [activeProjectId]: storedProdId }
             }));
+            return;
           }
-        } else {
-          console.log(`[ProjectContext] No product mapping found for project "${activeProjectName}" (${activeProjectId})`);
+        } catch (storageErr) {
+          console.warn("[ProjectContext] Storage check error:", storageErr);
+        }
+
+        // 3. Query the actual valid backend files/folders endpoint to locate product ID linked to project
+        try {
+          const filesUrl = `${baseURL}/api/v1/files/${userId}`;
+          const res = await axios.get(filesUrl);
+          if (res.data?.success && Array.isArray(res.data.files)) {
+            const matchingFolder = res.data.files.find(f => 
+              f.type === 'folder' && (f._id === activeProjectId || (activeProjectName && f.name === activeProjectName))
+            );
+            if (matchingFolder?.productId) {
+              console.log("[ProjectContext] Found product from project folder:", matchingFolder.productId);
+              if (activeProductId !== matchingFolder.productId) {
+                setActiveProductId(matchingFolder.productId);
+              }
+              setProjectProductMap(prev => ({
+                ...prev,
+                [userId]: { ...(prev[userId] || {}), [activeProjectId]: matchingFolder.productId }
+              }));
+              return;
+            }
+          }
+        } catch (filesErr) {
+          console.warn("[ProjectContext] Backend files sync warning:", filesErr.message);
         }
 
       } catch (globalError) {
-        console.error("[ProjectContext] CRITICAL ERROR in syncProductWithBackend:", globalError);
+        console.error("[ProjectContext] Error in syncProductWithBackend:", globalError);
       }
     };
 
     syncProductWithBackend();
-  }, [activeProjectId, user]); 
+  }, [activeProjectId, activeProjectName, user]); 
 
   // --- Initial Hydration Effect ---
   useEffect(() => {

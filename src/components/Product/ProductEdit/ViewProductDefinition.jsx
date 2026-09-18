@@ -99,6 +99,27 @@ const ViewProductDefinition = ({ productID, productName }) => {
       console.log("[ViewProductDefinition] Received Data:", response.data);
       const convertedComponents = convertDataFromApi(response.data);
 
+      const rawProd = response.data?.data || response.data;
+      try {
+        const prodDetails = {
+          productId: productID,
+          productName: rawProd.productName || productName || '',
+          basicInformation: {
+            noOfDevices: 1,
+            noOfComponents: convertedComponents.length,
+          },
+          noOfDevices: 1,
+          noOfComponents: convertedComponents.length,
+          components: convertedComponents,
+          note: rawProd.note || '',
+          urls: rawProd.urls || [],
+          createdAt: new Date().toISOString()
+        };
+        localStorage.setItem(`innoide:product_details_${productID}`, JSON.stringify(prodDetails));
+        if (productName) localStorage.setItem(`innoide:product_details_${productName}`, JSON.stringify(prodDetails));
+        localStorage.setItem('innoide:last_product_details', JSON.stringify(prodDetails));
+      } catch (storageErr) {}
+
       setInitialValues((prevValues) => ({
         ...prevValues,
         components: convertedComponents,

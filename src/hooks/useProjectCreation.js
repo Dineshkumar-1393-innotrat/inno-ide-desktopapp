@@ -52,6 +52,25 @@ export const useProjectCreation = () => {
         additionalOptions: projectData.additionalOptions || {}
       });
 
+      // Cache detailed project creation metadata for diagram exports
+      const projDetails = {
+        projectId: project.id,
+        projectName: project.name || projectData.projectName,
+        description: projectData.description || '',
+        projectCategory: projectData.category || 'Logistics',
+        projectType: projectData.projectType || 'Bare Metal',
+        board: projectData.board || 'STM32 U5',
+        boardType: projectData.board || 'STM32 U5',
+        features: projectData.selectedDiagramTypes || 'writeCode',
+        userId: userId,
+        createdAt: project.createdAt || new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(`innoide:project_details_${project.id}`, JSON.stringify(projDetails));
+        localStorage.setItem(`innoide:project_details_${project.name || projectData.projectName}`, JSON.stringify(projDetails));
+        localStorage.setItem('innoide:last_project_details', JSON.stringify(projDetails));
+      } catch (storageErr) {}
+
       // Set as active project
       if (setActiveProjectId) {
         setActiveProjectId(project.id);

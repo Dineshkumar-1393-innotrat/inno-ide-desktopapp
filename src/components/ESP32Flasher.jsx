@@ -122,7 +122,8 @@ import {
   FaPlus,
   FaTable,
   FaDatabase,
-  FaFolderPlus
+  FaFolderPlus,
+  FaGripVertical
 } from "react-icons/fa";
 import RuleBuilderModal from "./RuleBuilderModal";
 import EspIdfSetupModal from "./EspIdfSetupModal";
@@ -390,6 +391,13 @@ export default function ESP32Flasher({
 
   const [selectedWidgetId, setSelectedWidgetId] = useState(() => widgets[0]?.id || null);
   const activeWidget = widgets.find((w) => w.id === selectedWidgetId) || widgets[0] || null;
+
+  // Drag and Drop (DnD) State for App Builder Canvas & Palette
+  const [draggedPaletteItem, setDraggedPaletteItem] = useState(null);
+  const [draggedWidgetId, setDraggedWidgetId] = useState(null);
+  const [dropInsertIndex, setDropInsertIndex] = useState(null);
+  const [isDraggingOverPhone, setIsDraggingOverPhone] = useState(false);
+  const isDraggingActive = Boolean(draggedPaletteItem || draggedWidgetId || isDraggingOverPhone);
 
   // Visual Automation Logic Blocks State (loads saved rules or starts empty)
   const [logicBlocks, setLogicBlocks] = useState(() => {
@@ -1599,8 +1607,8 @@ export default function ESP32Flasher({
     }
   };
 
-  // Add Component to App Builder
-  const handleAddComponent = (type, title, defaultBinding) => {
+  // Add Component to App Builder (supports optional insertIndex for Drag & Drop)
+  const handleAddComponent = (type, title, defaultBinding, insertIndex = -1) => {
     const newId = `w-${Date.now()}`;
     const newWidget = {
       id: newId,
@@ -1611,7 +1619,15 @@ export default function ESP32Flasher({
             type === "left_button" ? "Left Button" :
               type === "right_button" ? "Right Button" :
                 type === "dpad" ? "Directional D-Pad" :
-                  type === "crud_table" ? "Data Records" : `New ${type}`
+                  type === "crud_table" ? "Data Records" :
+                    type === "divider" ? "Divider" :
+                      type === "fab" ? "Floating Action" :
+                        type === "card" ? "Info Card" :
+                          type === "image" ? "Camera / Image" :
+                            type === "progress" ? "Status Progress" :
+                              type === "textfield" ? "Input Field" :
+                                type === "label" ? "Text Label" :
+                                  type === "button" ? "Action Button" : `New ${type}`
       ),
       boundTarget: defaultBinding || (
         type === "top_button" ? "GPIO 13 (Motor A)" :
@@ -1619,7 +1635,14 @@ export default function ESP32Flasher({
             type === "left_button" ? "GPIO 12 (Steer Left)" :
               type === "right_button" ? "GPIO 15 (Steer Right)" :
                 type === "dpad" ? "GPIO Multi-Motor" :
-                  type === "crud_table" ? "Local Storage / Device Data" : "GPIO Pin"
+                  type === "crud_table" ? "Local Storage / Device Data" :
+                    type === "button" ? "GPIO 2 (Relay)" :
+                      type === "slider" ? "GPIO 18 (PWM)" :
+                        type === "gauge" ? "GPIO 34 (ADC Temp)" :
+                          type === "switch" ? "GPIO 4 (LED)" :
+                            type === "chart" ? "GPIO 35 (Sensor Stream)" :
+                              type === "textfield" ? "Serial TX" :
+                                type === "label" ? "Telemetry Stream" : "GPIO Pin"
       ),
       boundTargetName: `Bound → ${defaultBinding || (
         type === "top_button" ? "GPIO 13 (Motor A)" :
@@ -1627,7 +1650,14 @@ export default function ESP32Flasher({
             type === "left_button" ? "GPIO 12 (Steer Left)" :
               type === "right_button" ? "GPIO 15 (Steer Right)" :
                 type === "dpad" ? "GPIO Multi-Motor" :
-                  type === "crud_table" ? "Local Storage" : "GPIO Pin"
+                  type === "crud_table" ? "Local Storage" :
+                    type === "button" ? "GPIO 2 (Relay)" :
+                      type === "slider" ? "GPIO 18 (PWM)" :
+                        type === "gauge" ? "GPIO 34 (ADC)" :
+                          type === "switch" ? "GPIO 4 (LED)" :
+                            type === "chart" ? "GPIO 35 (Sensor)" :
+                              type === "textfield" ? "Serial TX" :
+                                type === "label" ? "Telemetry" : "GPIO Pin"
       )}`,
       action: (
         type === "switch" ? "Turn ON / OFF" :
@@ -1654,7 +1684,9 @@ export default function ESP32Flasher({
                   type === "left_button" ? "#7c3aed" :
                     type === "right_button" ? "#9333ea" :
                       type === "dpad" ? "#1e293b" :
-                        type === "crud_table" ? "#2563eb" : "#10b981"
+                        type === "crud_table" ? "#2563eb" :
+                          type === "button" ? "#ea580c" :
+                            type === "fab" ? "#2563eb" : "#10b981"
       ),
       cornerRadius: 16,
       visible: true,
@@ -1664,7 +1696,15 @@ export default function ESP32Flasher({
         { id: "rec-3", name: "GPIO Relay", value: "Closed", status: "Active", timestamp: "10:30 AM" }
       ] : undefined
     };
-    const updated = [...widgets, newWidget];
+
+    let updated;
+    if (typeof insertIndex === "number" && insertIndex >= 0 && insertIndex <= widgets.length) {
+      updated = [...widgets];
+      updated.splice(insertIndex, 0, newWidget);
+    } else {
+      updated = [...widgets, newWidget];
+    }
+
     setWidgets(updated);
     pushWidgetsToHistory(updated);
     setSelectedWidgetId(newId);
@@ -1761,6 +1801,69 @@ export default function ESP32Flasher({
     setWidgets(reordered);
     pushWidgetsToHistory(reordered);
     autoPersistApp(reordered);
+  };
+
+  // Reorder Component via Drag & Drop
+  const handleReorderWidget = (fromIndex, toIndex) => {
+    if (fromIndex === undefined || fromIndex === null || toIndex === undefined || toIndex === null) return;
+    if (fromIndex < 0 || fromIndex >= widgets.length) return;
+    if (fromIndex === toIndex || (fromIndex < toIndex && toIndex === fromIndex + 1)) return;
+
+    const reordered = [...widgets];
+    const [movedItem] = reordered.splice(fromIndex, 1);
+    const targetIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+    reordered.splice(targetIndex, 0, movedItem);
+
+    setWidgets(reordered);
+    pushWidgetsToHistory(reordered);
+    autoPersistApp(reordered);
+    setSelectedWidgetId(movedItem.id);
+  };
+
+  // Drag & Drop Handlers for Canvas & Widgets
+  const handleWidgetDragOver = (e, idx) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = draggedWidgetId ? "move" : "copy";
+    setIsDraggingOverPhone(true);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const targetIdx = e.clientY < midY ? idx : idx + 1;
+    if (dropInsertIndex !== targetIdx) {
+      setDropInsertIndex(targetIdx);
+    }
+  };
+
+  const handlePhoneDrop = (e, targetIndex = null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOverPhone(false);
+    const insertIdx = targetIndex !== null ? targetIndex : (dropInsertIndex !== null ? dropInsertIndex : widgets.length);
+    setDropInsertIndex(null);
+
+    try {
+      const rawData = e.dataTransfer.getData("application/json");
+      if (!rawData) return;
+      const data = JSON.parse(rawData);
+
+      if (data.source === "palette") {
+        handleAddComponent(data.type, data.title, data.defaultBinding, insertIdx);
+      } else if (data.source === "widget-reorder") {
+        handleReorderWidget(data.fromIndex, insertIdx);
+        toast({
+          title: "Component Reordered",
+          description: `Moved "${widgets[data.fromIndex]?.title || "Component"}" to new position.`,
+          status: "info",
+          duration: 1400,
+          isClosable: true
+        });
+      }
+    } catch (err) {
+      console.error("DnD Drop error:", err);
+    } finally {
+      setDraggedPaletteItem(null);
+      setDraggedWidgetId(null);
+    }
   };
 
   // Duplicate Component
@@ -3877,6 +3980,54 @@ Generated automatically by **InnoIDE App Companion Studio**.
     );
   };
 
+  // Visual Drop Indicator Line for Canvas & Hierarchy
+  const DropIndicator = ({ active }) => {
+    if (!active) return null;
+    return (
+      <Box
+        py={1}
+        px={0.5}
+        w="100%"
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+        transition="all 0.15s ease"
+        zIndex={25}
+      >
+        <Box
+          w="100%"
+          h="3px"
+          bg="#2563eb"
+          borderRadius="full"
+          position="relative"
+          boxShadow="0 0 10px rgba(37, 99, 235, 0.9)"
+          _before={{
+            content: '""',
+            position: "absolute",
+            left: "-4px",
+            top: "-3.5px",
+            w: "10px",
+            h: "10px",
+            borderRadius: "full",
+            bg: "#2563eb",
+            boxShadow: "0 0 8px rgba(37, 99, 235, 0.9)"
+          }}
+          _after={{
+            content: '""',
+            position: "absolute",
+            right: "-4px",
+            top: "-3.5px",
+            w: "10px",
+            h: "10px",
+            borderRadius: "full",
+            bg: "#2563eb",
+            boxShadow: "0 0 8px rgba(37, 99, 235, 0.9)"
+          }}
+        />
+      </Box>
+    );
+  };
+
   // ==========================================
   // SCREEN 14: FULL APP BUILDER VIEW
   // ==========================================
@@ -4242,47 +4393,79 @@ Generated automatically by **InnoIDE App Companion Studio**.
                       <Box flex="1" textAlign="left" fontWeight="bold" fontSize="xs" color="gray.500" letterSpacing="wider">
                         CONTROL PANEL({filteredPalette.length})
                       </Box>
+                      <Badge colorScheme="blue" variant="subtle" fontSize="9px" px={1.5} py={0.5} borderRadius="full" mr={2}>
+                        Drag & Drop
+                      </Badge>
                       <AccordionIcon />
                     </AccordionButton>
                     <AccordionPanel pb={3} px={1}>
                       <VStack align="stretch" spacing={1.5}>
-                        {filteredPalette.map((item) => (
-                          <HStack
-                            key={item.type}
-                            p={2}
-                            borderRadius="lg"
-                            border="1px solid"
-                            borderColor={useColorModeValue("gray.100", "gray.750")}
-                            bg={useColorModeValue("gray.50", "gray.800")}
-                            _hover={{
-                              borderColor: "blue.400",
-                              bg: useColorModeValue("blue.50", "gray.700"),
-                              transform: "translateY(-1px)",
-                              shadow: "xs"
-                            }}
-                            cursor="pointer"
-                            transition="all 0.15s"
-                            onClick={() => handleAddComponent(item.type, item.title, item.defaultBinding || "GPIO Pin")}
-                            justify="space-between"
-                          >
-                            <HStack spacing={2.5}>
-                              <Box color="blue.500" p={1} bg="whiteAlpha.800" borderRadius="md" shadow="xs">
-                                {item.icon}
-                              </Box>
-                              <VStack align="start" spacing={0}>
-                                <Text fontSize="xs" fontWeight="bold">
-                                  {item.title}
+                        {filteredPalette.map((item) => {
+                          const isBeingDragged = draggedPaletteItem?.type === item.type;
+                          return (
+                            <HStack
+                              key={item.type}
+                              p={2}
+                              borderRadius="lg"
+                              border="1px solid"
+                              borderColor={isBeingDragged ? "blue.400" : useColorModeValue("gray.100", "gray.750")}
+                              bg={isBeingDragged ? useColorModeValue("blue.50", "gray.700") : useColorModeValue("gray.50", "gray.800")}
+                              _hover={{
+                                borderColor: "blue.400",
+                                bg: useColorModeValue("blue.50", "gray.700"),
+                                transform: "translateY(-1px)",
+                                shadow: "xs"
+                              }}
+                              cursor="grab"
+                              _active={{ cursor: "grabbing" }}
+                              transition="all 0.15s"
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData(
+                                  "application/json",
+                                  JSON.stringify({
+                                    source: "palette",
+                                    type: item.type,
+                                    title: item.title,
+                                    defaultBinding: item.defaultBinding || "GPIO Pin"
+                                  })
+                                );
+                                e.dataTransfer.effectAllowed = "copy";
+                                setDraggedPaletteItem(item);
+                              }}
+                              onDragEnd={() => {
+                                setDraggedPaletteItem(null);
+                                setDropInsertIndex(null);
+                                setIsDraggingOverPhone(false);
+                              }}
+                              onClick={() => handleAddComponent(item.type, item.title, item.defaultBinding || "GPIO Pin")}
+                              justify="space-between"
+                              title="Drag onto phone screen or click + Add"
+                            >
+                              <HStack spacing={2.5}>
+                                <Box color="blue.500" p={1} bg="whiteAlpha.800" borderRadius="md" shadow="xs">
+                                  {item.icon}
+                                </Box>
+                                <VStack align="start" spacing={0}>
+                                  <Text fontSize="xs" fontWeight="bold">
+                                    {item.title}
+                                  </Text>
+                                  <Text fontSize="10px" color="gray.400">
+                                    {item.desc}
+                                  </Text>
+                                </VStack>
+                              </HStack>
+                              <HStack spacing={1.5}>
+                                <Text fontSize="12px" color="gray.400" opacity={0.6}>
+                                  + Add
                                 </Text>
-                                <Text fontSize="10px" color="gray.400">
-                                  {item.desc}
-                                </Text>
-                              </VStack>
+                                <Box color="gray.350" _hover={{ color: "blue.500" }} title="Drag to add">
+                                  <FaGripVertical size={11} />
+                                </Box>
+                              </HStack>
                             </HStack>
-                            <Text fontSize="12px" color="gray.400" opacity={0.6}>
-                              + Add
-                            </Text>
-                          </HStack>
-                        ))}
+                          );
+                        })}
                       </VStack>
                     </AccordionPanel>
                   </AccordionItem>
@@ -4296,43 +4479,72 @@ Generated automatically by **InnoIDE App Companion Studio**.
                     </AccordionButton>
                     <AccordionPanel pb={2} px={1}>
                       <VStack align="stretch" spacing={1.5}>
-                        {filteredLayoutPalette.map((item) => (
-                          <HStack
-                            key={item.type + item.title}
-                            p={2}
-                            borderRadius="lg"
-                            border="1px solid"
-                            borderColor={useColorModeValue("gray.100", "gray.750")}
-                            bg={useColorModeValue("gray.50", "gray.800")}
-                            _hover={{
-                              borderColor: "blue.400",
-                              bg: useColorModeValue("blue.50", "gray.700"),
-                              transform: "translateY(-1px)",
-                              shadow: "xs"
-                            }}
-                            cursor="pointer"
-                            transition="all 0.15s"
-                            onClick={() => handleAddComponent(item.type, item.title, item.defaultBinding || "Layout")}
-                            justify="space-between"
-                          >
-                            <HStack spacing={2.5}>
-                              <Box p={1} bg="whiteAlpha.800" borderRadius="md" shadow="xs">
-                                {item.icon}
-                              </Box>
-                              <VStack align="start" spacing={0}>
-                                <Text fontSize="xs" fontWeight="bold">
-                                  {item.title}
+                        {filteredLayoutPalette.map((item) => {
+                          const isBeingDragged = draggedPaletteItem?.type === item.type;
+                          return (
+                            <HStack
+                              key={item.type + item.title}
+                              p={2}
+                              borderRadius="lg"
+                              border="1px solid"
+                              borderColor={isBeingDragged ? "blue.400" : useColorModeValue("gray.100", "gray.750")}
+                              bg={isBeingDragged ? useColorModeValue("blue.50", "gray.700") : useColorModeValue("gray.50", "gray.800")}
+                              _hover={{
+                                borderColor: "blue.400",
+                                bg: useColorModeValue("blue.50", "gray.700"),
+                                transform: "translateY(-1px)",
+                                shadow: "xs"
+                              }}
+                              cursor="grab"
+                              _active={{ cursor: "grabbing" }}
+                              transition="all 0.15s"
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData(
+                                  "application/json",
+                                  JSON.stringify({
+                                    source: "palette",
+                                    type: item.type,
+                                    title: item.title,
+                                    defaultBinding: item.defaultBinding || "Layout"
+                                  })
+                                );
+                                e.dataTransfer.effectAllowed = "copy";
+                                setDraggedPaletteItem(item);
+                              }}
+                              onDragEnd={() => {
+                                setDraggedPaletteItem(null);
+                                setDropInsertIndex(null);
+                                setIsDraggingOverPhone(false);
+                              }}
+                              onClick={() => handleAddComponent(item.type, item.title, item.defaultBinding || "Layout")}
+                              justify="space-between"
+                              title="Drag onto phone screen or click + Add"
+                            >
+                              <HStack spacing={2.5}>
+                                <Box p={1} bg="whiteAlpha.800" borderRadius="md" shadow="xs">
+                                  {item.icon}
+                                </Box>
+                                <VStack align="start" spacing={0}>
+                                  <Text fontSize="xs" fontWeight="bold">
+                                    {item.title}
+                                  </Text>
+                                  <Text fontSize="10px" color="gray.400">
+                                    {item.desc}
+                                  </Text>
+                                </VStack>
+                              </HStack>
+                              <HStack spacing={1.5}>
+                                <Text fontSize="11px" color="blue.500" fontWeight="semibold">
+                                  + Add
                                 </Text>
-                                <Text fontSize="10px" color="gray.400">
-                                  {item.desc}
-                                </Text>
-                              </VStack>
+                                <Box color="gray.350" _hover={{ color: "blue.500" }} title="Drag to add">
+                                  <FaGripVertical size={11} />
+                                </Box>
+                              </HStack>
                             </HStack>
-                            <Text fontSize="11px" color="blue.500" fontWeight="semibold">
-                              + Add
-                            </Text>
-                          </HStack>
-                        ))}
+                          );
+                        })}
                       </VStack>
                     </AccordionPanel>
                   </AccordionItem>
@@ -4398,13 +4610,14 @@ Generated automatically by **InnoIDE App Companion Studio**.
                   minH="640px"
                   bg="white"
                   borderRadius="42px"
-                  border="10px solid #1e293b"
+                  border={isDraggingOverPhone ? "10px solid #2563eb" : "10px solid #1e293b"}
                   position="relative"
-                  shadow="2xl"
+                  shadow={isDraggingOverPhone ? "0 0 35px rgba(37, 99, 235, 0.45)" : "2xl"}
                   display="flex"
                   flexDirection="column"
                   overflow="hidden"
                   mb={8}
+                  transition="border 0.2s ease, box-shadow 0.2s ease"
                 >
                   {/* Dynamic Island / Speaker notch */}
                   <Box
@@ -4432,7 +4645,31 @@ Generated automatically by **InnoIDE App Companion Studio**.
                   </HStack>
 
                   {/* Mobile App Screen Content */}
-                  <Box flex="1" p={3.5} bg="#f8fafc" overflowY="auto">
+                  <Box
+                    flex="1"
+                    p={3.5}
+                    bg="#f8fafc"
+                    overflowY="auto"
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = draggedWidgetId ? "move" : "copy";
+                      setIsDraggingOverPhone(true);
+                      if (e.target === e.currentTarget) {
+                        setDropInsertIndex(widgets.length);
+                      }
+                    }}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      setIsDraggingOverPhone(true);
+                    }}
+                    onDragLeave={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget)) {
+                        setIsDraggingOverPhone(false);
+                        setDropInsertIndex(null);
+                      }
+                    }}
+                    onDrop={(e) => handlePhoneDrop(e, dropInsertIndex)}
+                  >
                     {/* App Title Header */}
                     <HStack justify="space-between" mb={3} mt={1}>
                       <HStack spacing={2}>
@@ -4455,108 +4692,198 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           justify="center"
                           h="260px"
                           border="2px dashed"
-                          borderColor="gray.300"
+                          borderColor={isDraggingOverPhone ? "blue.400" : "gray.300"}
+                          bg={isDraggingOverPhone ? "blue.50" : "transparent"}
                           borderRadius="2xl"
                           p={6}
                           textAlign="center"
                           my={4}
+                          transition="all 0.2s ease"
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "copy";
+                            setIsDraggingOverPhone(true);
+                            setDropInsertIndex(0);
+                          }}
+                          onDrop={(e) => handlePhoneDrop(e, 0)}
                         >
-                          <Box p={3} bg="blue.50" color="blue.500" borderRadius="full" mb={2.5}>
+                          <Box
+                            p={3}
+                            bg={isDraggingOverPhone ? "blue.100" : "blue.50"}
+                            color="blue.500"
+                            borderRadius="full"
+                            mb={2.5}
+                            transform={isDraggingOverPhone ? "scale(1.15)" : "scale(1)"}
+                            transition="all 0.2s"
+                          >
                             <FaPlus size={18} />
                           </Box>
-                          <Text fontSize="xs" fontWeight="bold" color="gray.700">
-                            Screen is Empty
+                          <Text fontSize="xs" fontWeight="bold" color={isDraggingOverPhone ? "blue.600" : "gray.700"}>
+                            {isDraggingOverPhone ? "Release to Drop Component Here" : "Screen is Empty"}
                           </Text>
                           <Text fontSize="11px" color="gray.400" mt={1} maxW="210px">
-                            Add components from the left palette to start building your mobile UI.
+                            {isDraggingOverPhone
+                              ? "The component will be added to your mobile app screen."
+                              : "Drag components from the left palette or click + Add to start building."}
                           </Text>
                         </Flex>
-                      ) : widgets.filter((w) => w.visible !== false).map((w) => {
-                        const isSelected = w.id === selectedWidgetId;
-                        return (
-                          <Box
-                            key={w.id}
-                            p={3}
-                            bg="white"
-                            borderRadius={`${w.cornerRadius || 16}px`}
-                            border="2px solid"
-                            borderColor={isSelected ? "#2563eb" : "transparent"}
-                            shadow="sm"
-                            _hover={{ borderColor: isSelected ? "#2563eb" : "gray.200" }}
-                            cursor="pointer"
-                            transition="all 0.15s"
-                            position="relative"
-                            onClick={() => setSelectedWidgetId(w.id)}
-                          >
-                            {/* Inline Widget Floating Action Bar on Selection */}
-                            {isSelected && (
-                              <HStack
-                                position="absolute"
-                                top="-12px"
-                                right="12px"
-                                bg="blue.600"
-                                color="white"
-                                px={2}
-                                py={0.5}
-                                borderRadius="full"
-                                shadow="md"
-                                spacing={1.5}
-                                zIndex={15}
-                              >
-                                <Tooltip label="Move Up" fontSize="10px">
-                                  <IconButton
-                                    icon={<FaArrowUp size={9} />}
-                                    size="xs"
-                                    h="18px"
-                                    minW="18px"
-                                    variant="ghost"
-                                    color="white"
-                                    _hover={{ bg: "blue.700" }}
-                                    onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "up"); }}
-                                    aria-label="Up"
-                                  />
-                                </Tooltip>
-                                <Tooltip label="Move Down" fontSize="10px">
-                                  <IconButton
-                                    icon={<FaArrowDown size={9} />}
-                                    size="xs"
-                                    h="18px"
-                                    minW="18px"
-                                    variant="ghost"
-                                    color="white"
-                                    _hover={{ bg: "blue.700" }}
-                                    onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "down"); }}
-                                    aria-label="Down"
-                                  />
-                                </Tooltip>
-                                <Tooltip label="Duplicate" fontSize="10px">
-                                  <IconButton
-                                    icon={<FaClone size={9} />}
-                                    size="xs"
-                                    h="18px"
-                                    minW="18px"
-                                    variant="ghost"
-                                    color="white"
-                                    _hover={{ bg: "blue.700" }}
-                                    onClick={(e) => { e.stopPropagation(); handleDuplicateWidget(w.id); }}
-                                    aria-label="Duplicate"
-                                  />
-                                </Tooltip>
-                                <Tooltip label="Delete" fontSize="10px">
-                                  <IconButton
-                                    icon={<FaTrashAlt size={9} />}
-                                    size="xs"
-                                    h="18px"
-                                    minW="18px"
-                                    variant="ghost"
-                                    color="red.200"
-                                    _hover={{ bg: "red.600", color: "white" }}
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteWidget(w.id); }}
-                                    aria-label="Delete"
-                                  />
-                                </Tooltip>
-                              </HStack>
-                            )}
+                      ) : (
+                        <>
+                          {isDraggingActive && dropInsertIndex === 0 && (
+                            <DropIndicator active />
+                          )}
+                          {widgets.filter((w) => w.visible !== false).map((w) => {
+                            const isSelected = w.id === selectedWidgetId;
+                            const realIndex = widgets.findIndex((item) => item.id === w.id);
+                            const isBeingDragged = draggedWidgetId === w.id;
+                            return (
+                              <React.Fragment key={w.id}>
+                                <Box
+                                  p={3}
+                                  bg="white"
+                                  borderRadius={`${w.cornerRadius || 16}px`}
+                                  border="2px solid"
+                                  borderColor={isSelected ? "#2563eb" : isBeingDragged ? "#3b82f6" : "transparent"}
+                                  borderStyle={isBeingDragged ? "dashed" : "solid"}
+                                  opacity={isBeingDragged ? 0.35 : 1}
+                                  shadow="sm"
+                                  _hover={{ borderColor: isSelected ? "#2563eb" : "gray.200" }}
+                                  cursor="pointer"
+                                  transition="all 0.15s"
+                                  position="relative"
+                                  draggable
+                                  onDragStart={(e) => {
+                                    if (
+                                      e.target.tagName === "INPUT" ||
+                                      e.target.tagName === "BUTTON" ||
+                                      e.target.closest("button") ||
+                                      e.target.closest(".chakra-switch") ||
+                                      e.target.closest(".chakra-slider")
+                                    ) {
+                                      e.preventDefault();
+                                      return;
+                                    }
+                                    e.dataTransfer.setData(
+                                      "application/json",
+                                      JSON.stringify({
+                                        source: "widget-reorder",
+                                        widgetId: w.id,
+                                        fromIndex: realIndex
+                                      })
+                                    );
+                                    e.dataTransfer.effectAllowed = "move";
+                                    setDraggedWidgetId(w.id);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDraggedWidgetId(null);
+                                    setDropInsertIndex(null);
+                                    setIsDraggingOverPhone(false);
+                                  }}
+                                  onDragOver={(e) => handleWidgetDragOver(e, realIndex)}
+                                  onDrop={(e) => handlePhoneDrop(e, dropInsertIndex)}
+                                  onClick={() => setSelectedWidgetId(w.id)}
+                                >
+                                  {/* Inline Widget Floating Action Bar on Selection */}
+                                  {isSelected && (
+                                    <HStack
+                                      position="absolute"
+                                      top="-12px"
+                                      right="12px"
+                                      bg="blue.600"
+                                      color="white"
+                                      px={2}
+                                      py={0.5}
+                                      borderRadius="full"
+                                      shadow="md"
+                                      spacing={1.5}
+                                      zIndex={15}
+                                    >
+                                      <Tooltip label="Drag to reorder" fontSize="10px">
+                                        <Box
+                                          px={1}
+                                          py={0.5}
+                                          cursor="grab"
+                                          _active={{ cursor: "grabbing" }}
+                                          color="whiteAlpha.800"
+                                          _hover={{ color: "white" }}
+                                          display="flex"
+                                          alignItems="center"
+                                        >
+                                          <FaGripVertical size={9} />
+                                        </Box>
+                                      </Tooltip>
+                                      <Tooltip label="Move Up" fontSize="10px">
+                                        <IconButton
+                                          icon={<FaArrowUp size={9} />}
+                                          size="xs"
+                                          h="18px"
+                                          minW="18px"
+                                          variant="ghost"
+                                          color="white"
+                                          _hover={{ bg: "blue.700" }}
+                                          onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "up"); }}
+                                          aria-label="Up"
+                                        />
+                                      </Tooltip>
+                                      <Tooltip label="Move Down" fontSize="10px">
+                                        <IconButton
+                                          icon={<FaArrowDown size={9} />}
+                                          size="xs"
+                                          h="18px"
+                                          minW="18px"
+                                          variant="ghost"
+                                          color="white"
+                                          _hover={{ bg: "blue.700" }}
+                                          onClick={(e) => { e.stopPropagation(); handleMoveWidget(w.id, "down"); }}
+                                          aria-label="Down"
+                                        />
+                                      </Tooltip>
+                                      <Tooltip label="Duplicate" fontSize="10px">
+                                        <IconButton
+                                          icon={<FaClone size={9} />}
+                                          size="xs"
+                                          h="18px"
+                                          minW="18px"
+                                          variant="ghost"
+                                          color="white"
+                                          _hover={{ bg: "blue.700" }}
+                                          onClick={(e) => { e.stopPropagation(); handleDuplicateWidget(w.id); }}
+                                          aria-label="Duplicate"
+                                        />
+                                      </Tooltip>
+                                      <Tooltip label="Delete" fontSize="10px">
+                                        <IconButton
+                                          icon={<FaTrashAlt size={9} />}
+                                          size="xs"
+                                          h="18px"
+                                          minW="18px"
+                                          variant="ghost"
+                                          color="red.200"
+                                          _hover={{ bg: "red.600", color: "white" }}
+                                          onClick={(e) => { e.stopPropagation(); handleDeleteWidget(w.id); }}
+                                          aria-label="Delete"
+                                        />
+                                      </Tooltip>
+                                    </HStack>
+                                  )}
+
+                                  <Flex align="center" w="100%">
+                                    <Tooltip label="Drag to reorder" fontSize="10px" placement="left">
+                                      <Box
+                                        cursor="grab"
+                                        _active={{ cursor: "grabbing" }}
+                                        color="gray.300"
+                                        _hover={{ color: "blue.500" }}
+                                        pr={2}
+                                        display="flex"
+                                        alignItems="center"
+                                        justifyContent="center"
+                                        alignSelf="stretch"
+                                      >
+                                        <FaGripVertical size={12} />
+                                      </Box>
+                                    </Tooltip>
+                                    <Box flex="1" minW="0">
 
                             {/* 1. LED Switch Widget */}
                             {w.type === "switch" && (
@@ -5105,8 +5432,78 @@ Generated automatically by **InnoIDE App Companion Studio**.
                               </VStack>
                             )}
 
+                            {/* 13. Image / Camera Stream Widget */}
+                            {w.type === "image" && (
+                              <VStack align="stretch" spacing={1.5}>
+                                <HStack justify="space-between">
+                                  <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                  <Badge colorScheme="blue" fontSize="9px">Image</Badge>
+                                </HStack>
+                                <Box
+                                  h="75px"
+                                  w="100%"
+                                  bg="gray.100"
+                                  borderRadius="xl"
+                                  display="flex"
+                                  alignItems="center"
+                                  justifyContent="center"
+                                  border="1px dashed"
+                                  borderColor="gray.300"
+                                  color="gray.400"
+                                >
+                                  <VStack spacing={1}>
+                                    <FaImage size={20} />
+                                    <Text fontSize="10px">Preview / Camera Feed</Text>
+                                  </VStack>
+                                </Box>
+                              </VStack>
+                            )}
+
+                            {/* 14. Card Container Widget */}
+                            {w.type === "card" && (
+                              <VStack align="stretch" spacing={1.5}>
+                                <HStack justify="space-between">
+                                  <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                  <Badge colorScheme="purple" fontSize="9px">Container</Badge>
+                                </HStack>
+                                <Box p={2.5} bg="gray.50" borderRadius="lg" border="1px dashed" borderColor="gray.300">
+                                  <Text fontSize="10px" color="gray.500">Flex Container Layout</Text>
+                                </Box>
+                              </VStack>
+                            )}
+
+                            {/* 15. Floating Action Button Widget */}
+                            {w.type === "fab" && (
+                              <HStack justify="space-between">
+                                <VStack align="start" spacing={0}>
+                                  <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                  <Text fontSize="10px" color="gray.400">Quick Trigger</Text>
+                                </VStack>
+                                <Box
+                                  w="36px"
+                                  h="36px"
+                                  bg={w.color || "blue.500"}
+                                  color="white"
+                                  borderRadius="full"
+                                  display="flex"
+                                  alignItems="center"
+                                  justifyContent="center"
+                                  shadow="md"
+                                >
+                                  <FaPlus size={13} />
+                                </Box>
+                              </HStack>
+                            )}
+
+                            {/* 16. Divider Widget */}
+                            {w.type === "divider" && (
+                              <Box py={2}>
+                                <Box h="1px" bg="gray.200" w="100%" />
+                              </Box>
+                            )}
+
                             {/* Other components fallback */}
-                            {!["switch", "slider", "gauge", "chart", "button", "colorpicker", "joystick", "textfield", "label", "device_card", "progress", "crud_table"].includes(w.type) && (
+                            {!["switch", "slider", "gauge", "chart", "button", "colorpicker", "joystick", "textfield", "label", "device_card", "progress", "crud_table", "image", "card", "fab", "divider", "top_button", "bottom_button", "left_button", "right_button", "dpad"].includes(w.type) && (
                               <HStack justify="space-between">
                                 <Text fontWeight="bold" fontSize="xs">
                                   {w.title}
@@ -5114,9 +5511,18 @@ Generated automatically by **InnoIDE App Companion Studio**.
                                 <Badge fontSize="9px">{w.type}</Badge>
                               </HStack>
                             )}
-                          </Box>
-                        );
-                      })}
+                                  </Box>
+                                </Flex>
+                              </Box>
+                              {/* Drop indicator after this widget */}
+                              {isDraggingActive && dropInsertIndex === realIndex + 1 && (
+                                <DropIndicator active />
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </>
+                    )}
                     </VStack>
                   </Box>
                 </Box>
@@ -5619,7 +6025,13 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           </Text>
                         </Flex>
                       ) : widgets.filter((w) => w.visible !== false).map((w) => (
-                        <Box key={w.id} p={3.5} bg="white" borderRadius="2xl" shadow="sm">
+                        <Box
+                          key={w.id}
+                          p={3.5}
+                          bg={w.bgColor || "white"}
+                          borderRadius={`${w.cornerRadius || 16}px`}
+                          shadow="sm"
+                        >
                           {w.type === "switch" && (
                             <HStack justify="space-between">
                               <VStack align="start" spacing={0}>
@@ -5877,6 +6289,201 @@ Generated automatically by **InnoIDE App Companion Studio**.
                               </VStack>
                             </VStack>
                           )}
+
+                          {/* Label Widget in Preview Mode */}
+                          {w.type === "label" && (
+                            <HStack justify="space-between" align="center">
+                              <HStack spacing={2.5}>
+                                <Box p={1.5} bg={w.bgColor ? "whiteAlpha.300" : "blue.50"} color={w.color || "blue.500"} borderRadius="md">
+                                  <FaTag size={13} />
+                                </Box>
+                                <Text
+                                  fontWeight="bold"
+                                  fontSize={w.fontSize ? `${w.fontSize}px` : "sm"}
+                                  color={w.color || "gray.800"}
+                                >
+                                  {w.title}
+                                </Text>
+                              </HStack>
+                              <Text fontSize="xs" color="gray.500" fontWeight="medium">
+                                {w.value !== undefined && w.value !== 0 && w.value !== ""
+                                  ? `${w.value}${w.unit || ""}`
+                                  : (w.boundTargetName || w.boundTarget || "Telemetry")}
+                              </Text>
+                            </HStack>
+                          )}
+
+                          {/* Text Field Widget in Preview Mode */}
+                          {w.type === "textfield" && (
+                            <VStack align="stretch" spacing={2}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="xs" color="gray.800">{w.title}</Text>
+                                <Badge fontSize="8px" colorScheme="blue">Input</Badge>
+                              </HStack>
+                              <HStack spacing={2}>
+                                <Input
+                                  size="sm"
+                                  placeholder="Enter message or command..."
+                                  borderRadius="lg"
+                                  bg="gray.50"
+                                  id={`preview-input-${w.id}`}
+                                />
+                                <Button
+                                  size="sm"
+                                  colorScheme="blue"
+                                  borderRadius="lg"
+                                  onClick={() => {
+                                    const inputEl = document.getElementById(`preview-input-${w.id}`);
+                                    if (inputEl && inputEl.value) {
+                                      handleUpdateWidget("value", inputEl.value, w.id);
+                                      inputEl.value = "";
+                                    }
+                                  }}
+                                >
+                                  Send
+                                </Button>
+                              </HStack>
+                            </VStack>
+                          )}
+
+                          {/* Chart / Graph Widget in Preview Mode */}
+                          {w.type === "chart" && (
+                            <VStack align="stretch" spacing={2}>
+                              <HStack justify="space-between">
+                                <HStack spacing={2}>
+                                  <FaChartLine color="#2563eb" />
+                                  <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                </HStack>
+                                <Badge colorScheme="blue" fontSize="9px">● Live Stream</Badge>
+                              </HStack>
+                              <Box h="50px" w="100%" bg="blue.50" borderRadius="lg" p={1} display="flex" alignItems="flex-end">
+                                <svg width="100%" height="100%" viewBox="0 0 200 40" preserveAspectRatio="none">
+                                  <path d="M0,35 Q30,10 60,25 T120,15 T180,30 T200,8" fill="none" stroke="#2563eb" strokeWidth="2.5" />
+                                </svg>
+                              </Box>
+                            </VStack>
+                          )}
+
+                          {/* Color Picker Widget in Preview Mode */}
+                          {w.type === "colorpicker" && (
+                            <VStack align="stretch" spacing={2}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Box w="14px" h="14px" borderRadius="full" bg={w.selectedColor || "#2563eb"} />
+                              </HStack>
+                              <HStack spacing={2} justify="center">
+                                {["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4"].map((c) => (
+                                  <Box
+                                    key={c}
+                                    w="24px"
+                                    h="24px"
+                                    borderRadius="full"
+                                    bg={c}
+                                    cursor="pointer"
+                                    border={w.selectedColor === c ? "2px solid black" : "none"}
+                                    onClick={() => handleUpdateWidget("selectedColor", c, w.id)}
+                                  />
+                                ))}
+                              </HStack>
+                            </VStack>
+                          )}
+
+                          {/* Joystick Widget in Preview Mode */}
+                          {w.type === "joystick" && (
+                            <VStack align="center" spacing={2}>
+                              <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                              <Box w="74px" h="74px" borderRadius="full" bg="gray.100" border="2px dashed" borderColor="gray.300" display="flex" alignItems="center" justifyContent="center">
+                                <Box w="32px" h="32px" borderRadius="full" bg="blue.500" shadow="md" />
+                              </Box>
+                            </VStack>
+                          )}
+
+                          {/* Image Widget in Preview Mode */}
+                          {w.type === "image" && (
+                            <VStack align="stretch" spacing={1.5}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Badge colorScheme="blue" fontSize="9px">Image Feed</Badge>
+                              </HStack>
+                              <Box
+                                h="85px"
+                                w="100%"
+                                bg="gray.100"
+                                borderRadius="xl"
+                                display="flex"
+                                alignItems="center"
+                                justifyContent="center"
+                                border="1px dashed"
+                                borderColor="gray.300"
+                                color="gray.400"
+                              >
+                                <VStack spacing={1}>
+                                  <FaImage size={24} />
+                                  <Text fontSize="10px">Live Camera Stream</Text>
+                                </VStack>
+                              </Box>
+                            </VStack>
+                          )}
+
+                          {/* Card Widget in Preview Mode */}
+                          {w.type === "card" && (
+                            <VStack align="stretch" spacing={1.5}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Badge colorScheme="purple" fontSize="9px">Container</Badge>
+                              </HStack>
+                              <Box p={3} bg="gray.50" borderRadius="lg" border="1px dashed" borderColor="gray.300">
+                                <Text fontSize="11px" color="gray.600">Container Card Content</Text>
+                              </Box>
+                            </VStack>
+                          )}
+
+                          {/* Progress Bar Widget in Preview Mode */}
+                          {w.type === "progress" && (
+                            <VStack align="stretch" spacing={1.5}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Text fontSize="xs" color="blue.600" fontWeight="bold">75%</Text>
+                              </HStack>
+                              <Progress value={75} size="xs" colorScheme="blue" borderRadius="full" />
+                            </VStack>
+                          )}
+
+                          {/* Floating Action Button Widget in Preview Mode */}
+                          {w.type === "fab" && (
+                            <HStack justify="space-between">
+                              <VStack align="start" spacing={0}>
+                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
+                                <Text fontSize="10px" color="gray.400">Quick Trigger</Text>
+                              </VStack>
+                              <Button
+                                size="sm"
+                                colorScheme="blue"
+                                borderRadius="full"
+                                w="38px"
+                                h="38px"
+                                p={0}
+                                onClick={() => handleTestHardwareSignal(w)}
+                              >
+                                <FaPlus size={13} />
+                              </Button>
+                            </HStack>
+                          )}
+
+                          {/* Divider Widget in Preview Mode */}
+                          {w.type === "divider" && (
+                            <Box py={2}>
+                              <Box h="1px" bg="gray.200" w="100%" />
+                            </Box>
+                          )}
+
+                          {/* Fallback for other components in Preview Mode */}
+                          {!["switch", "slider", "gauge", "button", "top_button", "bottom_button", "left_button", "right_button", "dpad", "crud_table", "label", "textfield", "chart", "colorpicker", "joystick", "image", "card", "progress", "fab", "divider"].includes(w.type) && (
+                            <HStack justify="space-between">
+                              <Text fontWeight="bold" fontSize="sm">{w.title}</Text>
+                              <Badge fontSize="9px">{w.type}</Badge>
+                            </HStack>
+                          )}
                         </Box>
                       ))}
                     </VStack>
@@ -5968,15 +6575,48 @@ Generated automatically by **InnoIDE App Companion Studio**.
                   </HStack>
                 </Box>
 
-                <VStack align="stretch" spacing={1.5} pl={2} borderLeft="2px solid" borderColor={useColorModeValue("gray.200", "gray.700")}>
+                <VStack
+                  align="stretch"
+                  spacing={1.5}
+                  pl={2}
+                  borderLeft="2px solid"
+                  borderColor={useColorModeValue("gray.200", "gray.700")}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = draggedWidgetId ? "move" : "copy";
+                    if (e.target === e.currentTarget) {
+                      setDropInsertIndex(widgets.length);
+                    }
+                  }}
+                  onDrop={(e) => handlePhoneDrop(e, dropInsertIndex)}
+                >
                   {widgets.length === 0 && (
-                    <Box py={6} px={2} textAlign="center">
-                      <Text fontSize="xs" fontWeight="medium" color="gray.400">No components in tree</Text>
-                      <Text fontSize="10px" color="gray.400" mt={0.5}>Add components from the left palette</Text>
+                    <Box
+                      py={6}
+                      px={2}
+                      textAlign="center"
+                      borderRadius="xl"
+                      border="1px dashed"
+                      borderColor={isDraggingActive ? "blue.400" : "gray.300"}
+                      bg={isDraggingActive ? "blue.50" : "transparent"}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                        setDropInsertIndex(0);
+                      }}
+                      onDrop={(e) => handlePhoneDrop(e, 0)}
+                    >
+                      <Text fontSize="xs" fontWeight="medium" color={isDraggingActive ? "blue.600" : "gray.400"}>
+                        {isDraggingActive ? "Drop component here" : "No components in tree"}
+                      </Text>
+                      <Text fontSize="10px" color="gray.400" mt={0.5}>
+                        Drag or add components from the left palette
+                      </Text>
                     </Box>
                   )}
                   {widgets.map((w, idx) => {
                     const isSelected = w.id === selectedWidgetId;
+                    const isBeingDragged = draggedWidgetId === w.id;
                     return (
                       <HStack
                         key={w.id}
@@ -5984,16 +6624,51 @@ Generated automatically by **InnoIDE App Companion Studio**.
                         borderRadius="xl"
                         bg={isSelected ? useColorModeValue("blue.50", "gray.800") : useColorModeValue("gray.50", "gray.850")}
                         border="1px solid"
-                        borderColor={isSelected ? "blue.400" : borderColor}
+                        borderColor={isSelected ? "blue.400" : isBeingDragged ? "blue.300" : borderColor}
+                        borderStyle={isBeingDragged ? "dashed" : "solid"}
+                        opacity={isBeingDragged ? 0.4 : 1}
                         justify="space-between"
                         cursor="pointer"
                         _hover={{ borderColor: "blue.300" }}
+                        draggable
+                        onDragStart={(e) => {
+                          if (e.target.tagName === "BUTTON" || e.target.closest("button")) {
+                            e.preventDefault();
+                            return;
+                          }
+                          e.dataTransfer.setData(
+                            "application/json",
+                            JSON.stringify({
+                              source: "widget-reorder",
+                              widgetId: w.id,
+                              fromIndex: idx
+                            })
+                          );
+                          e.dataTransfer.effectAllowed = "move";
+                          setDraggedWidgetId(w.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedWidgetId(null);
+                          setDropInsertIndex(null);
+                          setIsDraggingOverPhone(false);
+                        }}
+                        onDragOver={(e) => handleWidgetDragOver(e, idx)}
+                        onDrop={(e) => handlePhoneDrop(e, dropInsertIndex)}
                         onClick={() => {
                           setSelectedWidgetId(w.id);
                           setInspectorTab("properties");
                         }}
                       >
                         <HStack spacing={2}>
+                          <Box
+                            cursor="grab"
+                            _active={{ cursor: "grabbing" }}
+                            color="gray.400"
+                            _hover={{ color: "blue.500" }}
+                            title="Drag to reorder in tree"
+                          >
+                            <FaGripVertical size={10} />
+                          </Box>
                           <Box color={w.color || "blue.500"} fontSize="12px">
                             {w.type === "switch" ? <FaLightbulb /> : w.type === "slider" ? <FaSlidersH /> : w.type === "gauge" ? <FaTemperatureHigh /> : <FaTag />}
                           </Box>

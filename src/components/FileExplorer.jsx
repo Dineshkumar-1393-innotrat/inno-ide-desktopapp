@@ -88,6 +88,7 @@ const FileExplorer = ({ variant }) => {
     setActiveProjectName,
     setActiveProductId,
     setActiveProductName,
+    switchProject,
   } = useProject();
 
   const textColor = useColorModeValue("gray.800", "gray.100");
@@ -342,15 +343,47 @@ const FileExplorer = ({ variant }) => {
     );
 
     if (isTopLevelFolder && activeProjectId !== folder._id) {
+      if (typeof switchProject === 'function') {
+        switchProject({
+          projectId: folder._id,
+          projectName: folder.name,
+          productId: folder.productId,
+          productName: folder.name
+        });
+      }
       setActiveProjectId(folder._id);
       setActiveProjectName(folder.name);
       setActiveProductId(folder.productId);
       setActiveProductName(folder.name);
+      try {
+        localStorage.setItem("activeProjectId", folder._id);
+        localStorage.setItem("activeProjectName", folder.name);
+        if (folder.productId) localStorage.setItem("activeProductId", folder.productId);
+      } catch (e) {}
+
       dispatch(setWorkspaceMetadata({
         rootFolderId: folder._id,
         projectName: folder.name,
         runtimeState: "ready"
       }));
+
+      // Cache project details for diagram exports and quick lookup
+      const projDetails = {
+        projectId: folder._id,
+        projectName: folder.name,
+        description: folder.description || '',
+        projectCategory: folder.category || 'Logistics',
+        projectType: folder.projectType || 'Bare Metal',
+        board: folder.boardType || 'STM32 U5',
+        boardType: folder.boardType || 'STM32 U5',
+        features: folder.features || '',
+        createdAt: folder.createdAt || new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(`innoide:project_details_${folder._id}`, JSON.stringify(projDetails));
+        localStorage.setItem(`innoide:project_details_${folder.name}`, JSON.stringify(projDetails));
+        localStorage.setItem('innoide:last_project_details', JSON.stringify(projDetails));
+      } catch (storageErr) {}
     }
 
     setFileSystem(updatedFileSystem);
@@ -358,6 +391,14 @@ const FileExplorer = ({ variant }) => {
 
    const handleFileClick = (file, project) => {
     if (project && activeProjectId !== project._id) {
+      if (typeof switchProject === 'function') {
+        switchProject({
+          projectId: project._id,
+          projectName: project.name,
+          productId: project.productId,
+          productName: project.name
+        });
+      }
       setActiveProjectId(project._id);
       setActiveProjectName(project.name);
       setActiveProductId(project.productId);
@@ -370,6 +411,8 @@ const FileExplorer = ({ variant }) => {
 
       try {
         localStorage.setItem("activeProjectId", project._id);
+        localStorage.setItem("activeProjectName", project.name);
+        if (project.productId) localStorage.setItem("activeProductId", project.productId);
       } catch (err) {
         console.warn("Failed to save to localStorage:", err);
       }

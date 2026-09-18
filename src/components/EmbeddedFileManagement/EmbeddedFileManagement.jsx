@@ -104,6 +104,7 @@ export const buildTree = (flatArray) => {
   // First pass: create a map of all nodes and include the path if available
   flatArray.forEach((item) => {
     idMap[item._id] = {
+      ...item,
       _id: item._id,
       name: item.name,
       type: item.type,
