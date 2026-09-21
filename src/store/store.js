@@ -1,6 +1,5 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { persistStore, persistReducer } from "redux-persist";
-import storage from "redux-persist/lib/storage"; // defaults to localStorage for web
 import { combineReducers } from "redux";
 import simulationReducer from "./slices/simulationSlice";
 import flowchartReducer from "./slices/flowchartSlice";
@@ -15,6 +14,16 @@ import {
 import workspaceReducer from "../features/workspace/store/workspaceSlice";
 import { autoSaveManager } from "../utils/autoSaveManager";
 
+// ─── Project-aware storage adapter ─────────────────────────────────────────────
+// IMPORTANT: Import the adapter BEFORE creating the store so that
+// any initial context set by ProjectContext is already in place.
+import projectAwareStorage, {
+  updateProjectContext,
+  getCurrentContext,
+  buildPersistKey,
+} from "../utils/projectStorage";
+
+// ─── Root reducer ───────────────────────────────────────────────────────────────
 const rootReducer = combineReducers({
   simulation: simulationReducer,
   flowchart: flowchartReducer,
@@ -25,9 +34,19 @@ const rootReducer = combineReducers({
   workspace: workspaceReducer,
 });
 
+// ─── Persist config ─────────────────────────────────────────────────────────────
+//
+// KEY CHANGE from the previous implementation:
+//   - `storage` is now `projectAwareStorage` — a custom adapter that namespaces
+//     every read/write as `persist:ide:{userId}:{projectId}:{key}`.
+//   - The persist key itself is kept as "root" (so redux-persist's internal key
+//     management works the same way), but the ACTUAL localStorage key for each
+//     item is `persist:ide:{userId}:{projectId}:root` etc.
+//   - `workspace` is excluded from the whitelist because it holds runtime metadata.
+//
 const persistConfig = {
   key: "root",
-  storage,
+  storage: projectAwareStorage,
   whitelist: [
     "simulation",
     "flowchart",
@@ -35,10 +54,10 @@ const persistConfig = {
     "blockProgramming",
     "editor",
     "mathEditor",
-  ], // persist state for all relevant screens
+  ],
 };
 
-// Create auto-save middleware with custom configuration
+// ─── Auto-save middleware ───────────────────────────────────────────────────────
 const autoSaveMiddleware = createAutoSaveMiddleware({
   actions: [
     "simulation/setDroppedItems",
@@ -76,7 +95,37 @@ export const store = configureStore({
     }).concat(autoSaveMiddleware, autoSaveEventMiddleware),
 });
 
-// Register Redux store state with auto-save manager
+// ─── Persistor ──────────────────────────────────────────────────────────────────
+export const persistor = persistStore(store);
+
+// ─── Project persistence switching API ─────────────────────────────────────────
+//
+// This is the ONLY function that should be called to switch the active project
+// persistence bucket. It MUST be called by ProjectContext.switchProject()
+// in the correct order:
+//
+//   1. Flush pending saves for old project
+//   2. Dispatch RESET_WORKSPACE (clears in-memory state)
+//   3. Call switchPersistenceToProject(userId, newProjectId)
+//      → updates storage adapter context
+//      → calls persistor.persist() to trigger rehydration from new bucket
+//   4. Load backend data and merge
+//
+// This function does NOT delete any persisted data. It merely tells the adapter
+// which bucket to read from next.
+//
+export const switchPersistenceToProject = (userId, projectId) => {
+  // 1. Update the storage adapter context so future reads/writes target the new bucket
+  updateProjectContext(userId, projectId);
+
+  // 2. Trigger rehydration from the new bucket.
+  //    persistor.persist() re-runs the REHYDRATE sequence using the current adapter context.
+  persistor.persist();
+
+  console.log(`[Store] Persistence switched to ${userId}:${projectId}`);
+};
+
+// ─── Register Redux store state with auto-save manager ──────────────────────────
 autoSaveManager.registerSaveStrategy(
   "redux:global",
   () => {
@@ -89,17 +138,20 @@ autoSaveManager.registerSaveStrategy(
   { priority: 2, skipEmpty: true },
 );
 
-// Listen for auto-save events from the manager
+// ─── Listen for auto-save events from the manager ──────────────────────────────
 window.addEventListener("autosave:request", () => {
   store.dispatch({ type: "AUTO_SAVE_REQUEST" });
 });
 
-// Save Redux state before page unload
+// ─── Emergency save before page unload ─────────────────────────────────────────
 window.addEventListener("beforeunload", () => {
   const state = store.getState();
   try {
+    // Synchronously build the emergency key using the active project context
+    const { userId, projectId } = getCurrentContext();
+    const emergencyKey = buildPersistKey(userId, projectId, "emergency-save");
     localStorage.setItem(
-      "innoide:redux:emergency-save",
+      emergencyKey,
       JSON.stringify({
         simulation: state.simulation,
         timestamp: Date.now(),
@@ -110,23 +162,9 @@ window.addEventListener("beforeunload", () => {
   }
 });
 
-// Restore emergency save on load if needed
-try {
-  const emergencySave = localStorage.getItem("innoide:redux:emergency-save");
-  if (emergencySave) {
-    const savedState = JSON.parse(emergencySave);
-    const savedAge = Date.now() - (savedState.timestamp || 0);
-    // Only restore if saved within last 5 minutes
-    if (savedAge < 5 * 60 * 1000) {
-      console.log(
-        "[Redux Store] Found recent emergency save, will be restored by persist",
-      );
-    }
-    // Clear emergency save after checking
-    localStorage.removeItem("innoide:redux:emergency-save");
-  }
-} catch (e) {
-  console.error("Failed to check emergency save:", e);
-}
+// ─── Restore emergency save on load if needed ──────────────────────────────────
+// Emergency saves are now keyed per project, so they are naturally isolated.
+// The restore logic is handled by redux-persist's normal rehydration from the
+// project-scoped bucket on startup.
 
-export const persistor = persistStore(store);
+export { updateProjectContext };

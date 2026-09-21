@@ -216,6 +216,7 @@ const EmbeddedFileManagement = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
 
   const {
+    switchProject,
     setActiveProductId,
     setActiveProductName,
     setActiveProjectName,
@@ -408,10 +409,19 @@ const EmbeddedFileManagement = () => {
 
     // Only update active project & product when a different top-level folder is selected
     if (isTopLevelFolder && activeProjectId !== folder._id) {
-      setActiveProjectId(folder._id);
-      setActiveProjectName(folder.name);
-      setActiveProductId(folder.productId);
-      setActiveProductName(folder.name);
+      if (typeof switchProject === "function") {
+        switchProject({
+          projectId: folder._id,
+          projectName: folder.name,
+          productId: folder.productId,
+          productName: folder.name,
+        });
+      } else {
+        setActiveProjectId(folder._id);
+        setActiveProjectName(folder.name);
+        setActiveProductId(folder.productId);
+        setActiveProductName(folder.name);
+      }
     }
 
     setFileSystem(updatedFileSystem);
@@ -636,6 +646,9 @@ const EmbeddedFileManagement = () => {
   }, []);
 
   useEffect(() => {
+    // Reset open editor tabs when project changes to prevent cross-project tab leaks
+    setOpenFiles([]);
+    setActiveTab(null);
     checkProductDefinition(activeProductId, setIsProductDefined, activeProjectId);
   }, [activeProjectId]);
 

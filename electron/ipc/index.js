@@ -63,6 +63,14 @@ let globalGetMainWindow = null;
 function saveTunnelStatus(active, url, provider) {
   try {
     const statusFile = path.join(__dirname, '../../scratch/active_tunnel.json');
+    if (!active && fs.existsSync(statusFile)) {
+      try {
+        const cur = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+        if (cur && cur.active === false && cur.url === '') {
+          return;
+        }
+      } catch {}
+    }
     fs.writeFileSync(statusFile, JSON.stringify({
       url: active ? url : '',
       timestamp: Date.now(),

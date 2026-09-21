@@ -1,4 +1,5 @@
 import { createSlice } from '@reduxjs/toolkit';
+import { RESET_WORKSPACE } from '../resetAction';
 
 const initialState = {
     tabs: [
@@ -112,6 +113,9 @@ const simulationSlice = createSlice({
             }
         }
     },
+  extraReducers: (builder) => {
+    builder.addCase(RESET_WORKSPACE, () => ({ ...initialState }));
+  },
 });
 
 export const {

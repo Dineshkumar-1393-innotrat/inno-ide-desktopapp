@@ -2695,6 +2695,35 @@ function LogicBlockNode({ id, data, selected }) {
 
 const nodeTypes = { logic: LogicBlockNode };
 
+const DiagramLoader = () => (
+  <div style={{
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255, 255, 255, 0.8)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+    backdropFilter: "blur(2px)",
+  }}>
+    <div style={{
+      width: "40px",
+      height: "40px",
+      border: "4px solid #f3f3f3",
+      borderTop: "4px solid #3182ce",
+      borderRadius: "50%",
+      animation: "spin 1s linear infinite",
+    }} />
+    <span style={{ marginTop: "12px", fontSize: "14px", color: "#4a5568", fontWeight: 500 }}>
+      Switching project...
+    </span>
+  </div>
+);
+
 function BlockProgrammingCanvas() {
   const { isOpen: isSidebarOpen, onToggle: onToggleSidebar, onClose: onCloseSidebar } = useDisclosure({ defaultIsOpen: true });
   const { sidebarWidth, startResizing } = useResizableSidebar(240, 160, 480);
@@ -2745,7 +2774,16 @@ function BlockProgrammingCanvas() {
   const rf = useReactFlow();
   const hydratingRef = useRef(false);
   const navigate = useNavigate();
-  const { user, activeProjectId, activeProjectName, activeProductId, activeProductName, setActiveProjectId } = useProject?.() ?? {};
+  const {
+    user,
+    activeProjectId,
+    activeProjectName,
+    activeProductId,
+    activeProductName,
+    setActiveProjectId,
+    switchProject,
+    isSwitchingProject,
+  } = useProject?.() ?? {};
   const userId = user?.userId || user?._id || user?.id;
 
   // Refs for stable state tracking
@@ -2762,8 +2800,9 @@ function BlockProgrammingCanvas() {
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
 
-  // Default tab fallback
+  // Default tab fallback - do not trigger while project switch is in flight
   useEffect(() => {
+    if (isSwitchingProject) return;
     if (tabs.length === 0) {
       console.log("[BlockProgramming] No tabs found, creating default");
       const defaultTab = {
@@ -2775,7 +2814,7 @@ function BlockProgrammingCanvas() {
       dispatch(addTab(defaultTab));
       dispatch(setActiveTab(defaultTab.id));
     }
-  }, [tabs.length, dispatch]);
+  }, [tabs.length, dispatch, isSwitchingProject]);
 
   // Base snapshot utility
   const pushSnapshot = useCallback(() => {
@@ -2902,12 +2941,20 @@ function BlockProgrammingCanvas() {
       const projects = Object.values(allProjects);
       setHasProjects(projects.length > 0);
 
-      if (projects.length > 0 && !activeProjectId && setActiveProjectId) {
+      if (projects.length > 0 && !activeProjectId) {
         const activeProject = projectFileManager.getActiveProject();
         if (activeProject) {
-          setActiveProjectId(activeProject.id);
+          if (typeof switchProject === 'function') {
+            switchProject({ projectId: activeProject.id, projectName: activeProject.name });
+          } else if (setActiveProjectId) {
+            setActiveProjectId(activeProject.id);
+          }
         } else {
-          setActiveProjectId(projects[0].id);
+          if (typeof switchProject === 'function') {
+            switchProject({ projectId: projects[0].id, projectName: projects[0].name });
+          } else if (setActiveProjectId) {
+            setActiveProjectId(projects[0].id);
+          }
           projectFileManager.setActiveProject(projects[0].id);
         }
       }
@@ -3832,7 +3879,17 @@ return (
               </div>
             </div>
           </div>
-          <div className="canvas-frame" onDrop={onDrop} onDragOver={onDragOver}>
+          <div
+            className="canvas-frame"
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            style={{
+              position: 'relative',
+              opacity: isSwitchingProject ? 0.6 : 1,
+              pointerEvents: isSwitchingProject ? 'none' : 'auto'
+            }}
+          >
+            {isSwitchingProject && <DiagramLoader />}
             <div
               className="rf-wrapper"
               ref={reactFlowWrapper}

@@ -9,6 +9,14 @@ let consecutiveFailures = 0;
 
 function cleanupStatus() {
   try {
+    if (fs.existsSync(STATUS_FILE)) {
+      try {
+        const cur = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
+        if (cur && cur.active === false && cur.url === '') {
+          return;
+        }
+      } catch {}
+    }
     fs.writeFileSync(STATUS_FILE, JSON.stringify({
       url: '',
       timestamp: Date.now(),

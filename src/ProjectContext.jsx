@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback } f
 import { getUserInfo, baseURL, productAPIBase } from "./utilities";
 import axios from "axios";
 import { autoSaveManager } from "./utils/autoSaveManager";
+import { store, switchPersistenceToProject } from "./store/store";
+import { resetWorkspace } from "./store/resetAction";
 
 const ProjectContext = globalThis.__ProjectContext || createContext();
 if (import.meta.env?.DEV) {
@@ -188,14 +190,14 @@ export function ProjectProvider({ children }) {
   // --- Atomic Switch Function ---
   const switchProject = useCallback(async ({ projectId, projectName, productId, productName }) => {
     const switchId = ++switchIdRef.current;
-    
+
     // 0. Avoid redundant switches, but allow product updates if provided
     if (projectId === activeProjectId && activeProjectId !== null) {
       if (productId && productId !== activeProductId) {
         console.log("[ProjectContext] Updating productId for current project:", productId);
         setActiveProductId(productId);
         if (productName) setActiveProductName(productName);
-        
+
         // Update mapping (keyed by userId for session isolation)
         const userId = user?.userId || user?._id || user?.id;
         if (userId) {
@@ -215,19 +217,38 @@ export function ProjectProvider({ children }) {
     setIsHydrated(false);
     setTransitionError(null);
 
-    // 2. Flush pending changes instead of just abandoning them!
+    // 2. Flush all pending auto-saves for the CURRENT project BEFORE resetting.
+    //    This ensures no in-progress changes for Project A are lost.
     await autoSaveManager.saveAll({ parallel: true });
-    autoSaveManager.clearAll();
-    cancelAllRequests();
+    autoSaveManager.clearAll(); // Cancel pending debounce timers
+    cancelAllRequests();       // Abort any in-flight HTTP requests
+
+    const userId = user?.userId || user?._id || user?.id || 'anonymous';
 
     try {
-      // 3. Clear Stale Product Data to prevent cross-project contamination
+      // 3. RESET in-memory Redux workspace state.
+      //    This does NOT delete any localStorage data — it only clears the
+      //    active tab/node/edge state so the new project loads into a clean slate.
+      store.dispatch(resetWorkspace());
+
+      // 4. Switch the persistence bucket BEFORE updating React state.
+      //    From this point forward, redux-persist reads/writes target
+      //    persist:ide:{userId}:{projectId}:*
+      if (projectId) {
+        switchPersistenceToProject(userId, projectId);
+      }
+
+      // 5. Update autoSaveManager context so any future scheduled saves
+      //    correctly use the new project's namespace.
+      autoSaveManager.setProjectContext(userId, projectId || 'default');
+
+      // 6. Clear stale product data to prevent cross-project contamination
       setActiveProductId(null);
       setActiveProductName(null);
       localStorage.removeItem("activeProductId");
       localStorage.removeItem("activeProductName");
 
-      // 4. Update Sync State (Local Storage)
+      // 7. Update React identity state + localStorage
       if (projectId) {
         setActiveProjectId(projectId);
         localStorage.setItem("activeProjectId", projectId);
@@ -236,14 +257,13 @@ export function ProjectProvider({ children }) {
         setActiveProjectName(projectName);
         localStorage.setItem("activeProjectName", projectName);
       }
-      
+
       // Only set if explicitly provided (e.g. from sidebar folder metadata)
       if (productId) {
         setActiveProductId(productId);
         localStorage.setItem("activeProductId", productId);
-        
+
         // Update mapping (keyed by userId)
-        const userId = user?.userId || user?._id || user?.id;
         if (userId) {
           setProjectProductMap(prev => ({
             ...prev,
@@ -256,15 +276,16 @@ export function ProjectProvider({ children }) {
         localStorage.setItem("activeProductName", productName);
       }
 
-      // 4. Preload Data (using explicit IDs, never trust React state yet)
+      // 8. Fetch backend diagram data for the new project.
+      //    Uses the switchId guard to discard results if a newer switch started.
       const data = await fetchDiagramData(projectId, productId, switchId);
 
-      // 5. Atomic Commit
+      // 9. Atomic Commit — only if this switch is still the latest one
       if (switchId === switchIdRef.current) {
         if (data) {
           setIsRestoring(true); // Silent hydration guard
           setDiagramData(data);
-          // We use setTimeout to ensure the restoration flag stays true 
+          // We use setTimeout to ensure the restoration flag stays true
           // until AFTER the subsequent re-render triggered by setDiagramData
           setTimeout(() => setIsRestoring(false), 0);
         } else {
@@ -289,7 +310,7 @@ export function ProjectProvider({ children }) {
         setIsSwitchingProject(false);
       }
     }
-  }, [cancelAllRequests, fetchDiagramData]);
+  }, [cancelAllRequests, fetchDiagramData, activeProjectId, activeProductId, user]);
 
   const saveDiagramData = useCallback(async (content, type = 'blockDiagram') => {
     try {

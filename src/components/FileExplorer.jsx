@@ -344,6 +344,10 @@ const FileExplorer = ({ variant }) => {
 
     if (isTopLevelFolder && activeProjectId !== folder._id) {
       if (typeof switchProject === 'function') {
+        // switchProject() is the SINGLE AUTHORITY for project identity.
+        // It handles: RESET_WORKSPACE, persistence bucket switch, autoSaveManager
+        // context update, localStorage writes, and React state updates.
+        // Do NOT duplicate any of those operations here.
         switchProject({
           projectId: folder._id,
           projectName: folder.name,
@@ -351,15 +355,6 @@ const FileExplorer = ({ variant }) => {
           productName: folder.name
         });
       }
-      setActiveProjectId(folder._id);
-      setActiveProjectName(folder.name);
-      setActiveProductId(folder.productId);
-      setActiveProductName(folder.name);
-      try {
-        localStorage.setItem("activeProjectId", folder._id);
-        localStorage.setItem("activeProjectName", folder.name);
-        if (folder.productId) localStorage.setItem("activeProductId", folder.productId);
-      } catch (e) {}
 
       dispatch(setWorkspaceMetadata({
         rootFolderId: folder._id,
@@ -368,6 +363,7 @@ const FileExplorer = ({ variant }) => {
       }));
 
       // Cache project details for diagram exports and quick lookup
+      // (these are non-identity details, not project state)
       const projDetails = {
         projectId: folder._id,
         projectName: folder.name,
@@ -392,6 +388,9 @@ const FileExplorer = ({ variant }) => {
    const handleFileClick = (file, project) => {
     if (project && activeProjectId !== project._id) {
       if (typeof switchProject === 'function') {
+        // switchProject() is the SINGLE AUTHORITY for project identity.
+        // It handles: RESET_WORKSPACE, persistence bucket switch, autoSaveManager
+        // context update, localStorage writes, and React state updates.
         switchProject({
           projectId: project._id,
           projectName: project.name,
@@ -399,23 +398,12 @@ const FileExplorer = ({ variant }) => {
           productName: project.name
         });
       }
-      setActiveProjectId(project._id);
-      setActiveProjectName(project.name);
-      setActiveProductId(project.productId);
-      setActiveProductName(project.name);
+
       dispatch(setWorkspaceMetadata({
         rootFolderId: project._id,
         projectName: project.name,
         runtimeState: "ready"
       }));
-
-      try {
-        localStorage.setItem("activeProjectId", project._id);
-        localStorage.setItem("activeProjectName", project.name);
-        if (project.productId) localStorage.setItem("activeProductId", project.productId);
-      } catch (err) {
-        console.warn("Failed to save to localStorage:", err);
-      }
     }
 
     const lowerName = file.name.toLowerCase();
@@ -829,8 +817,12 @@ const FileExplorer = ({ variant }) => {
         onClose={onUploadModalClose} 
         onSuccess={(newProjectId, newProjectName) => {
           if (newProjectId && newProjectName) {
-            setActiveProjectId(newProjectId);
-            setActiveProjectName(newProjectName);
+            if (typeof switchProject === 'function') {
+              switchProject({ projectId: newProjectId, projectName: newProjectName });
+            } else {
+              setActiveProjectId(newProjectId);
+              setActiveProjectName(newProjectName);
+            }
           }
           handleRefresh();
         }} 

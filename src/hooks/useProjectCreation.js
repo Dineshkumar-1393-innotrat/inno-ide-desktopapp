@@ -8,7 +8,7 @@ import { useProject } from '../ProjectContext';
 export const useProjectCreation = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [creationError, setCreationError] = useState(null);
-  const { user, setActiveProjectId } = useProject();
+  const { user, setActiveProjectId, switchProject } = useProject();
 
   const createProject = useCallback(async (projectData) => {
     setIsCreating(true);
@@ -72,7 +72,12 @@ export const useProjectCreation = () => {
       } catch (storageErr) {}
 
       // Set as active project
-      if (setActiveProjectId) {
+      if (typeof switchProject === 'function') {
+        await switchProject({
+          projectId: project.id,
+          projectName: project.name || projectData.projectName,
+        });
+      } else if (setActiveProjectId) {
         setActiveProjectId(project.id);
       }
 
@@ -91,7 +96,7 @@ export const useProjectCreation = () => {
     } finally {
       setIsCreating(false);
     }
-  }, [user, setActiveProjectId]);
+  }, [user, setActiveProjectId, switchProject]);
 
   const parseFormData = useCallback((formData) => {
     // Parse form data into structured format

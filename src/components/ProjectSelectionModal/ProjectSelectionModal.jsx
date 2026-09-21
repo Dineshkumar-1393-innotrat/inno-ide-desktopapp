@@ -17,6 +17,7 @@ const ProjectSelectionModal = ({ onProjectSelect, fileSystem }) => {
   const [selectedProject, setSelectedProject] = useState(null);
 
   const {
+    switchProject,
     setActiveProjectId,
     setActiveProductId,
     setActiveProjectName,
@@ -30,6 +31,18 @@ const ProjectSelectionModal = ({ onProjectSelect, fileSystem }) => {
 
   const handleSelect = () => {
     if (selectedProject) {
+      if (typeof switchProject === 'function') {
+        switchProject({
+          projectId: selectedProject._id,
+          projectName: selectedProject.name,
+          productId: selectedProject.productId,
+          productName: selectedProject.name,
+        });
+      } else {
+        if (setActiveProductId) setActiveProductId(selectedProject.productId);
+        if (setActiveProjectId) setActiveProjectId(selectedProject._id);
+        if (setActiveProjectName) setActiveProjectName(selectedProject.name);
+      }
       onProjectSelect(selectedProject);
       onClose(); // Close modal after selection
     }
@@ -53,9 +66,6 @@ const ProjectSelectionModal = ({ onProjectSelect, fileSystem }) => {
 
               console.log("projectObj", projectObj);
               setSelectedProject(projectObj); // Store the full project object
-              setActiveProductId(projectObj.productId);
-              setActiveProjectId(projectObj._id);
-              setActiveProjectName(projectObj.name);
             }}
           >
             {fileSystem?.children?.map((project) => (

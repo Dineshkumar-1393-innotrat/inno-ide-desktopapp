@@ -1591,13 +1591,21 @@ const BlockDiagram = () => {
     });
   };
 
+  const getSimulationStorageKey = () => {
+    const uid = user?.userId || user?._id || user?.id || "anon";
+    const pid = activeProjectId || "default";
+    return `innoide:simulation:savedDesign:${uid}:${pid}`;
+  };
+
   const handleSaveDesign = () => {
-    localStorage.setItem("savedDesign", JSON.stringify(droppedItems));
+    const key = getSimulationStorageKey();
+    localStorage.setItem(key, JSON.stringify(droppedItems));
     alert("Design saved successfully!");
   };
 
   const handleLoadDesign = () => {
-    const savedData = localStorage.getItem("savedDesign");
+    const key = getSimulationStorageKey();
+    const savedData = localStorage.getItem(key);
     if (savedData) {
       const parsedData = JSON.parse(savedData);
       dispatch(
@@ -1616,7 +1624,7 @@ const BlockDiagram = () => {
       );
       alert("Design loaded successfully!");
     } else {
-      alert("No saved design found.");
+      alert("No saved design found for this project.");
     }
   };
 

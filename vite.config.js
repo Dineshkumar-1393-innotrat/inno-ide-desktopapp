@@ -8,6 +8,19 @@ import tailwindcss from "@tailwindcss/vite";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function suppressExternalReloads() {
+  return {
+    name: 'suppress-external-reloads',
+    handleHotUpdate({ file }) {
+      const normalized = file.replace(/\\/g, '/');
+      // Only allow HMR for files inside /src/ or the root index.html
+      if (!normalized.includes('/src/') && !normalized.endsWith('/index.html')) {
+        return [];
+      }
+    }
+  };
+}
+
 export default defineConfig({
   base: "./",
   resolve: {
@@ -15,18 +28,39 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), suppressExternalReloads()],
   server: {
     watch: {
       ignored: [
-        '**/sdkconfig*',
+        '**/scratch/**',
+        '**/electron/**',
+        '**/python/**',
+        '**/flash/**',
         '**/build/**',
         '**/main/**',
         '**/CMakeLists.txt',
         '**/managed_components/**',
         '**/dependencies.lock',
         '**/flash_config.json',
-        '**/.espressif/**'
+        '**/compile_commands.json',
+        '**/.espressif/**',
+        '**/.cache/**',
+        '**/.git/**',
+        '**/.vscode/**',
+        '**/dist/**',
+        '**/dist-desktop/**',
+        '**/release/**',
+        '**/docs/**',
+        '**/*.log',
+        '**/*.pdf',
+        '**/*.apk',
+        '**/*.txt',
+        '**/*.bin',
+        '**/*.elf',
+        '**/*.map',
+        '**/*.pyc',
+        '**/__pycache__/**',
+        '**/*.json'
       ]
     },
     headers: {

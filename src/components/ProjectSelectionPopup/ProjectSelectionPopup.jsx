@@ -6,7 +6,7 @@ const ProjectChangePopup = ({
   onProjectChange,
   fileSystem,
 }) => {
-  const { setActiveProjectId, setActiveProductId, setActiveProjectName } =
+  const { switchProject, setActiveProjectId, setActiveProductId, setActiveProjectName } =
     useProject();
 
   console.log("fileSystem:", fileSystem);
@@ -24,9 +24,18 @@ const ProjectChangePopup = ({
 
           if (selected) {
             onProjectChange(selected);
-            setActiveProductId(selected.productId);
-            setActiveProjectId(selected._id);
-            setActiveProjectName(selected.name);
+            if (typeof switchProject === 'function') {
+              switchProject({
+                projectId: selected._id,
+                projectName: selected.name,
+                productId: selected.productId,
+                productName: selected.name,
+              });
+            } else {
+              setActiveProductId(selected.productId);
+              setActiveProjectId(selected._id);
+              setActiveProjectName(selected.name);
+            }
 
             console.log("selected at popup:", selected);
           }

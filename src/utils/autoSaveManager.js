@@ -9,9 +9,16 @@ class AutoSaveManager {
     this.saveStrategies = new Map();
     this.activeScreens = new Set();
     this.autoSaveTimers = new Map();
+    // Each timer entry stores { timer, capturedUserId, capturedProjectId }
     this.isInitialized = false;
     this.globalSaveTimer = null;
     this.lastSaveTime = new Map();
+
+    // Explicit project context — updated by ProjectContext.switchProject()
+    // These are used by getStorageKey() instead of reading localStorage directly,
+    // which can be stale during a project switch.
+    this._userId = null;
+    this._projectId = null;
 
     // Configuration
     this.config = {
@@ -188,32 +195,46 @@ class AutoSaveManager {
    * Clear all pending auto-save timers
    */
   clearAll() {
-    for (const timer of this.autoSaveTimers.values()) {
-      clearTimeout(timer);
+    for (const entry of this.autoSaveTimers.values()) {
+      clearTimeout(entry?.timer ?? entry);
     }
     this.autoSaveTimers.clear();
     this.log('All pending auto-saves cleared');
   }
 
   /**
-   * Schedule a debounced save for a specific screen
+   * Schedule a debounced save for a specific screen.
+   * IMPORTANT: The project context (userId, projectId) is captured NOW,
+   * not when the timer fires. This prevents a delayed save from Project A
+   * from writing to Project B's bucket after a project switch.
    * @param {string} screenKey - Screen to save
    * @param {number} delay - Debounce delay in milliseconds
    */
   scheduleSave(screenKey, delay = this.config.debounceDelay) {
+    // Capture the context at schedule time
+    const capturedUserId = this._userId || this.getCurrentUserId();
+    const capturedProjectId = this._projectId || this.getCurrentProjectId();
+
     // Clear existing timer
     if (this.autoSaveTimers.has(screenKey)) {
-      clearTimeout(this.autoSaveTimers.get(screenKey));
+      clearTimeout(this.autoSaveTimers.get(screenKey)?.timer);
     }
 
-    // Schedule new save
+    // Schedule new save with captured context
     const timer = setTimeout(async () => {
+      // Guard: only fire if the project hasn't changed since scheduling
+      const currentProjectId = this._projectId || this.getCurrentProjectId();
+      if (capturedProjectId !== currentProjectId) {
+        this.log(`[AutoSave] Skipping stale save for ${screenKey} (was ${capturedProjectId}, now ${currentProjectId})`, 'warn');
+        this.autoSaveTimers.delete(screenKey);
+        return;
+      }
       await this.saveScreen(screenKey);
       this.autoSaveTimers.delete(screenKey);
     }, delay);
 
-    this.autoSaveTimers.set(screenKey, timer);
-    this.log(`Scheduled save for ${screenKey} in ${delay}ms`);
+    this.autoSaveTimers.set(screenKey, { timer, capturedUserId, capturedProjectId });
+    this.log(`Scheduled save for ${screenKey} in ${delay}ms (context: ${capturedUserId}:${capturedProjectId})`);
   }
 
   /**
@@ -415,13 +436,26 @@ class AutoSaveManager {
   }
 
   /**
+   * Set the explicit project context for key generation.
+   * MUST be called by ProjectContext.switchProject() after updating activeProjectId.
+   * This ensures saves scheduled after a switch correctly target the new project.
+   * @param {string} userId
+   * @param {string} projectId
+   */
+  setProjectContext(userId, projectId) {
+    this._userId = userId || 'anonymous';
+    this._projectId = projectId || 'default';
+    this.log(`Project context set: ${this._userId}:${this._projectId}`);
+  }
+
+  /**
    * Generate storage key for a screen
    * @param {string} screenKey - Screen identifier
    * @returns {string} - Storage key
    */
   getStorageKey(screenKey) {
-    const userId = this.getCurrentUserId();
-    const projectId = this.getCurrentProjectId();
+    const userId = this._userId || this.getCurrentUserId();
+    const projectId = this._projectId || this.getCurrentProjectId();
     return `innoide:autosave:${userId}:${projectId}:${screenKey}`;
   }
 
