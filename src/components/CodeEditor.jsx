@@ -458,7 +458,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   const { saveAll: saveAllScreens } = useGlobalAutoSave();
 
-  const [language, setLanguage] = useState("Select Languages");
+  const [language, setLanguage] = useState("c");
   const [searchQuery, setSearchQuery] = useState("");
   const [sidebarMode, setSidebarMode] = useState("explorer");
   const [activeToolPanel, setActiveToolPanel] = useState(null);
@@ -969,6 +969,9 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
+    if (typeof window !== "undefined") {
+      window.monaco = monaco;
+    }
     editor.focus();
   };
 

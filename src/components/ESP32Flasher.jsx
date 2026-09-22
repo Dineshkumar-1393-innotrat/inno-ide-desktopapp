@@ -738,7 +738,7 @@ export default function ESP32Flasher({
   const [selectedDeviceType, setSelectedDeviceType] = useState("");
   const [customDeviceTypeInput, setCustomDeviceTypeInput] = useState("");
   const [isEditingDeviceConfig, setIsEditingDeviceConfig] = useState(false);
-  const [qrPayloadMode, setQrPayloadMode] = useState("bundle"); // "bundle" (UI + Logics JSON Schema) | "webapp" (Phone Camera Web QR)
+  const [qrPayloadMode, setQrPayloadMode] = useState("webapp"); // "webapp" (Phone Camera Web QR) | "bundle" (UI + Logics JSON Schema)
   const [customDeviceId, setCustomDeviceId] = useState("");
   const [customDeviceName, setCustomDeviceName] = useState("");
   const [liveLedToggle, setLiveLedToggle] = useState(false); // Hardware LED state toggle (OFF / ON-Blink)
@@ -2155,11 +2155,7 @@ export default function ESP32Flasher({
     .header h1 { font-size: 18px; font-weight: 800; color: #fff; margin-top: 2px; }
     .badge { font-size: 11px; padding: 4px 10px; border-radius: 9999px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 700; display: flex; align-items: center; gap: 5px; }
     .badge-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
-    .tabs { display: flex; background: #090d16; padding: 4px; border-radius: 12px; border: 1px solid var(--border); gap: 4px; }
-    .tab-btn { flex: 1; padding: 8px 4px; background: transparent; border: none; border-radius: 8px; color: var(--subtext); font-size: 12px; font-weight: 700; cursor: pointer; text-align: center; }
-    .tab-btn.active { background: #1e293b; color: #fff; border-bottom: 2px solid #38bdf8; }
-    .tab-content { display: none; flex-direction: column; gap: 14px; }
-    .tab-content.active { display: flex; }
+    .controls-list { display: flex; flex-direction: column; gap: 14px; }
     .card { background: var(--card); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--border); }
     .card.glow-blue { border-color: #2563eb; background: #101a38; }
     .card.glow-red { border-color: #ef4444; background: #261214; }
@@ -2180,15 +2176,7 @@ export default function ESP32Flasher({
     .gauge-big { font-size: 36px; font-weight: 900; text-align: center; color: #38bdf8; margin: 6px 0; }
     .live-pill { font-size: 10px; font-weight: 800; background: #082f49; color: #38bdf8; padding: 3px 8px; border-radius: 6px; }
     .live-pill.alert { background: #7f1d1d; color: #fca5a5; }
-    .logic-card { background: var(--card); border-radius: 16px; padding: 14px; border: 1px solid var(--border); border-left: 4px solid #10b981; display: flex; flex-direction: column; gap: 10px; }
-    .logic-details { background: #090d16; border-radius: 10px; padding: 10px; font-size: 11px; display: flex; flex-direction: column; gap: 5px; }
-    .logic-row { display: flex; align-items: center; gap: 6px; }
-    .logic-label { color: #64748b; font-weight: 700; width: 75px; }
-    .logic-val { color: #e2e8f0; font-weight: 600; flex: 1; }
-    .logic-code { color: #38bdf8; font-family: monospace; font-weight: 700; }
     .test-btn { background: #1e293b; color: #38bdf8; border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
-    .pin-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
-    .log-box { font-family: monospace; font-size: 11px; padding: 12px; border-radius: 14px; background: #090d16; color: #38bdf8; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
   </style>
 </head>
 <body>
@@ -2209,14 +2197,8 @@ export default function ESP32Flasher({
       <button onclick="document.getElementById('scannerNotice').style.display='none'" style="background:transparent; border:none; color:#94a3b8; font-size:16px; cursor:pointer; padding:0 4px; line-height:1;">&times;</button>
     </div>
 
-    <div class="tabs">
-      <button class="tab-btn active" onclick="setTab('controls')">🎛️ Controls</button>
-      <button class="tab-btn" onclick="setTab('logic')">⚡ Logic Rules</button>
-      <button class="tab-btn" onclick="setTab('hardware')">📡 Hardware & Logs</button>
-    </div>
-
-    <!-- TAB 1: UI CONTROLS -->
-    <div id="tab-controls" class="tab-content active">
+    <!-- UI CONTROLS ONLY -->
+    <div id="tab-controls" class="controls-list">
       ${widgets.filter(w => w.visible !== false).length === 0 ? `
         <div class="card" style="text-align: center; padding: 32px 16px; color: var(--subtext);">
           <div style="font-size: 24px; margin-bottom: 8px;">📱</div>
@@ -2326,64 +2308,6 @@ export default function ESP32Flasher({
       return '';
     }).join('')}
     </div>
-
-    <!-- TAB 2: FUNCTIONAL LOGIC -->
-    <div id="tab-logic" class="tab-content">
-      <div style="font-size: 12px; color: var(--subtext);">Autonomous trigger-action rules executed on ESP32 & bridge:</div>
-      ${logicBlocks.length === 0 ? `
-        <div class="card" style="text-align: center; padding: 32px 16px; color: var(--subtext);">
-          <div style="font-size: 24px; margin-bottom: 8px;">⚡</div>
-          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No Automation Rules</div>
-          <div style="font-size: 12px;">Configure automation rules in InnoIDE App Designer.</div>
-        </div>
-      ` : logicBlocks.map(rule => `
-        <div class="logic-card" id="rule-card-${rule.id}">
-          <div class="row">
-            <div>
-              <div style="font-weight: 800; font-size: 15px; color: #fff;">${rule.name}</div>
-              <div class="meta">Target: ${rule.targetHardware || rule.target || 'Hardware Pin'}</div>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="rule-toggle-${rule.id}" ${rule.enabled ? 'checked' : ''} onchange="toggleRule('${rule.id}', this.checked)">
-              <span class="slider-toggle"></span>
-            </label>
-          </div>
-          <div class="logic-details">
-            <div class="logic-row"><span class="logic-label">🔄 Trigger:</span><span class="logic-val">${rule.triggerName || rule.trigger || 'Trigger'} (${rule.event || 'on_toggle'})</span></div>
-            <div class="logic-row"><span class="logic-label">⚖️ Condition:</span><span class="logic-val" style="color: #fbbf24;">${rule.condition || 'Always'}</span></div>
-            <div class="logic-row"><span class="logic-label">🚀 Action:</span><span class="logic-val" style="color: #38bdf8;">${rule.action}</span></div>
-            <div class="logic-row"><span class="logic-label">📦 Payload:</span><span class="logic-code">${rule.payload}</span></div>
-          </div>
-          <div class="row" style="margin-top: 4px;">
-            <div class="meta" id="rule-exec-${rule.id}">Executions: 0</div>
-            <button class="test-btn" onclick="testRule('${rule.id}')">▶ Test Trigger</button>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-
-    <!-- TAB 3: HARDWARE & LOGS -->
-    <div id="tab-hardware" class="tab-content">
-      <div class="card">
-        <div class="title" style="margin-bottom: 6px;">ESP32 GPIO Assignments</div>
-        ${widgets.filter(w => w.boundTarget && w.type !== 'device_card').length > 0 ? widgets.filter(w => w.boundTarget && w.type !== 'device_card').map(w => {
-      const pinMatch = (w.boundTarget || '').match(/GPIO\\s*\\d+/i);
-      return `<div class="pin-row"><span style="color: #38bdf8; font-weight: 800; font-family: monospace;">${pinMatch ? pinMatch[0].toUpperCase() : 'PIN'}</span><span>${w.title} (${w.boundTarget})</span></div>`;
-    }).join('') : `
-        <div class="pin-row"><span style="color: #38bdf8; font-weight: 800; font-family: monospace;">GPIO 2</span><span>LED Output (Digital Out)</span></div>
-        `}
-      </div>
-      <div class="card">
-        <div class="row">
-          <div class="title">Serial & Telemetry Stream</div>
-          <button class="test-btn" onclick="document.getElementById('logConsole').innerHTML=''">Clear</button>
-        </div>
-        <div class="log-box" id="logConsole">
-          <div>[ESP32] Bridge initialized. Telemetry active.</div>
-          <div>[RULES] Loaded ${logicBlocks.length} functional logic blocks.</div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <script>
@@ -2391,15 +2315,12 @@ export default function ESP32Flasher({
     const widgetValues = {};
     const execCounts = {};
 
-    function setTab(tab) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      event.target.classList.add('active');
-      document.getElementById('tab-' + tab).classList.add('active');
-    }
+    function setTab(tab) {}
 
     function addLog(msg) {
+      console.log(msg);
       const el = document.getElementById('logConsole');
+      if (!el) return;
       const time = new Date().toLocaleTimeString();
       el.innerHTML += '<div>[' + time + '] ' + msg + '</div>';
       el.scrollTop = el.scrollHeight;

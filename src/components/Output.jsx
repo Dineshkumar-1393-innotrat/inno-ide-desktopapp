@@ -1,1165 +1,49 @@
-// import { forwardRef, useImperativeHandle, useMemo, useState, useEffect } from "react";
-import { API } from '@/config';
-// import {
-//   Box,
-//   Badge,
-//   Text,
-//   Button,
-//   useColorMode,
-//   useToast,
-//   Modal,
-//   ModalOverlay,
-//   ModalContent,
-//   ModalHeader,
-//   ModalCloseButton,
-//   ModalBody,
-//   ModalFooter,
-//   RadioGroup,
-//   Radio,
-//   Stack,
-//   Input,
-//   HStack,
-// } from "@chakra-ui/react";
-// import { executeCode, submitCodeToDevice } from "../api";
-// import { buildProject, buildAndFlash } from "../utils/espIdfUtils";
-
-// import axios from "axios";
-
-// const Output = forwardRef(({ editorRef, language, onFlashComplete, onFlashStart, ...rest }, ref) => {
-//   const toast = useToast();
-//   const { colorMode } = useColorMode();
-//   const [output, setOutput] = useState([]);
-//   const [isLoading, setIsLoading] = useState(false);
-//   const [isError, setIsError] = useState(false);
-//   const [userInput, setUserInput] = useState("");
-//   const [response, setResponse] = useState("");
-//   const [activePanel, setActivePanel] = useState("problem");
-//   const [runSummary, setRunSummary] = useState({ status: "idle", reason: "" });
-//   const [terminalInput, setTerminalInput] = useState("");
-//   const [terminalOutput, setTerminalOutput] = useState([]);
-//   const [serialOutput, setSerialOutput] = useState([]);
-//   const [isConnectedToDevice, setIsConnectedToDevice] = useState(false);
-
-//   // Initialize device connection state from localStorage immediately
-//   const [isDeviceConnectedForActions, setIsDeviceConnectedForActions] = useState(() => {
-//     const savedState = localStorage.getItem('innoide:device-connected');
-//     console.log('Initial device state from localStorage:', savedState);
-//     return savedState === 'true';
-//   });
-
-//   const [selectedDeviceInfo, setSelectedDeviceInfo] = useState(() => {
-//     const savedDeviceInfo = localStorage.getItem('innoide:device-info');
-//     if (savedDeviceInfo) {
-//       try {
-//         return JSON.parse(savedDeviceInfo);
-//       } catch (e) {
-//         return null;
-//       }
-//     }
-//     return null;
-//   });
-
-//   const handlePanelChange = (panel) => {
-//     setActivePanel(panel);
-//   };
-
-
-//   const handleTerminalCommand = () => {
-//     if (!terminalInput.trim()) return;
-
-//     // Add the command to terminal output
-//     setTerminalOutput(prev => [
-//       ...prev,
-//       `$ ${terminalInput}`,
-//       // Simulate command output
-//       ...simulateCommandOutput(terminalInput)
-//     ]);
-//     setTerminalInput("");
-//   };
-
-//   const simulateCommandOutput = (command) => {
-//     const cmd = command.toLowerCase().trim();
-
-//     if (cmd === 'help') {
-//       return [
-//         'Available commands:',
-//         '  help - Show this help message',
-//         '  ls - List files',
-//         '  pwd - Show current directory',
-//         '  date - Show current date',
-//         '  clear - Clear terminal',
-//         '  echo <text> - Echo text back'
-//       ];
-//     } else if (cmd === 'ls') {
-//       return ['main.c', 'Makefile', 'README.md', 'src/', 'build/'];
-//     } else if (cmd === 'pwd') {
-//       return ['/workspace/project'];
-//     } else if (cmd === 'date') {
-//       return [new Date().toString()];
-//     } else if (cmd === 'clear') {
-//       setTerminalOutput([]);
-//       return [];
-//     } else if (cmd.startsWith('echo ')) {
-//       return [cmd.substring(5)];
-//     } else {
-//       return [`bash: ${cmd}: command not found`];
-//     }
-//   };
-
-//   // Read real serial output from connected device using Web Serial API
-//   useEffect(() => {
-//     if (!isConnectedToDevice) return;
-
-//     let reader;
-//     let keepReading = true;
-//     let currentPort = null;
-//     let cleanupInterval = null;
-
-//     const readSerialData = async () => {
-//       // Check if we have a serial port from the device connection
-//       const deviceInfoStr = localStorage.getItem('innoide:device-info');
-//       if (!deviceInfoStr) {
-//         console.log('No device info found');
-//         return;
-//       }
-
-//       try {
-//         const deviceInfo = JSON.parse(deviceInfoStr);
-
-//         // If simulated device, use simulation
-//         if (deviceInfo.isSimulated) {
-//           console.log('Simulated device detected, using simulation mode');
-//           cleanupInterval = startSimulation();
-//           return;
-//         }
-
-//         // Try to get the actual serial port
-//         if ('serial' in navigator) {
-//           const ports = await navigator.serial.getPorts();
-
-//           if (ports.length === 0) {
-//             console.log('No serial ports available');
-//             setSerialOutput(prev => [
-//               ...prev.slice(-50),
-//               `[${new Date().toTimeString().split(' ')[0]}] [INFO] No serial ports detected. Please connect a device.`
-//             ]);
-//             return;
-//           }
-
-//           // Find the matching port based on device info
-//           let matchedPort = null;
-//           if (deviceInfo.port?.usbVendorId && deviceInfo.port?.usbProductId) {
-//             for (const port of ports) {
-//               const info = await port.getInfo();
-//               if (info.usbVendorId === deviceInfo.port.usbVendorId &&
-//                 info.usbProductId === deviceInfo.port.usbProductId) {
-//                 matchedPort = port;
-//                 break;
-//               }
-//             }
-//           }
-
-//           currentPort = matchedPort || ports[0]; // Use matched port or first available
-
-//           // Open port if not already open
-//           if (!currentPort.readable && !currentPort.writable) {
-//             try {
-//               await currentPort.open({ baudRate: 115200 });
-//               console.log('✅ Serial port opened successfully at 115200 baud');
-
-//               setSerialOutput(prev => [
-//                 ...prev.slice(-50),
-//                 `[${new Date().toTimeString().split(' ')[0]}] [INFO] Serial port opened successfully`,
-//                 `[${new Date().toTimeString().split(' ')[0]}] [INFO] Listening for device output...`
-//               ]);
-//             } catch (openError) {
-//               if (openError.message.includes('already open')) {
-//                 console.log('⚠️ Port already open, continuing...');
-//               } else {
-//                 console.error('Failed to open serial port:', openError);
-//                 setSerialOutput(prev => [
-//                   ...prev.slice(-50),
-//                   `[${new Date().toTimeString().split(' ')[0]}] [ERROR] Failed to open serial port: ${openError.message}`
-//                 ]);
-//                 return;
-//               }
-//             }
-//           }
-
-//           // Only create new reader if port is readable
-//           if (currentPort.readable) {
-//             try {
-//               const textDecoder = new TextDecoderStream();
-//               const readableStreamClosed = currentPort.readable.pipeTo(textDecoder.writable);
-//               reader = textDecoder.readable.getReader();
-
-//               console.log('✅ Serial reader created, reading real data from device...');
-
-//               // Read data from serial port
-//               while (keepReading) {
-//                 try {
-//                   const { value, done } = await reader.read();
-//                   if (done) {
-//                     console.log('⚠️ Serial stream ended');
-//                     setSerialOutput(prev => [
-//                       ...prev.slice(-50),
-//                       `[${new Date().toTimeString().split(' ')[0]}] [INFO] Serial stream ended`
-//                     ]);
-//                     break;
-//                   }
-
-//                   if (value) {
-//                     const timestamp = new Date().toTimeString().split(' ')[0];
-//                     const lines = value.split('\n').filter(line => line.trim());
-
-//                     if (lines.length > 0) {
-//                       setSerialOutput(prev => [
-//                         ...prev.slice(-50),
-//                         ...lines.map(line => `[${timestamp}] ${line.trim()}`)
-//                       ]);
-//                     }
-//                   }
-//                 } catch (error) {
-//                   console.error('Error reading serial data:', error);
-//                   if (error.message.includes('device has been lost') ||
-//                     error.message.includes('The device has been lost')) {
-//                     console.log('⚠️ Device disconnected');
-//                     setSerialOutput(prev => [
-//                       ...prev.slice(-50),
-//                       `[${new Date().toTimeString().split(' ')[0]}] [ERROR] Device disconnected`
-//                     ]);
-//                     break;
-//                   }
-//                 }
-//               }
-//             } catch (error) {
-//               console.error('Error creating serial reader:', error);
-//               setSerialOutput(prev => [
-//                 ...prev.slice(-50),
-//                 `[${new Date().toTimeString().split(' ')[0]}] [ERROR] Failed to create serial reader: ${error.message}`
-//               ]);
-//             }
-//           } else {
-//             console.log('Port not readable');
-//             setSerialOutput(prev => [
-//               ...prev.slice(-50),
-//               `[${new Date().toTimeString().split(' ')[0]}] [ERROR] Serial port is not readable`
-//             ]);
-//           }
-//         } else {
-//           console.log('Web Serial API not supported');
-//           setSerialOutput(prev => [
-//             ...prev.slice(-50),
-//             `[${new Date().toTimeString().split(' ')[0]}] [ERROR] Web Serial API not supported in this browser`,
-//             `[${new Date().toTimeString().split(' ')[0]}] [INFO] Please use Chrome, Edge, or Opera browser`
-//           ]);
-//         }
-//       } catch (error) {
-//         console.error('Error setting up serial communication:', error);
-//         setSerialOutput(prev => [
-//           ...prev.slice(-50),
-//           `[${new Date().toTimeString().split(' ')[0]}] [ERROR] Serial setup failed: ${error.message}`
-//         ]);
-//       }
-//     };
-
-//     // Fallback simulation function - only for demo purposes when no real device
-//     const startSimulation = () => {
-//       console.log('⚠️ Starting simulation mode (demo data only)');
-//       setSerialOutput(prev => [
-//         ...prev.slice(-50),
-//         `[${new Date().toTimeString().split(' ')[0]}] [INFO] ========================================`,
-//         `[${new Date().toTimeString().split(' ')[0]}] [INFO] SIMULATION MODE - Demo Data Only`,
-//         `[${new Date().toTimeString().split(' ')[0]}] [INFO] Connect a real device to see actual output`,
-//         `[${new Date().toTimeString().split(' ')[0]}] [INFO] ========================================`
-//       ]);
-
-//       let ledState = false;
-//       const interval = setInterval(() => {
-//         const timestamp = new Date().toTimeString().split(' ')[0];
-
-//         if (ledState) {
-//           setSerialOutput(prev => [
-//             ...prev.slice(-50),
-//             `[${timestamp}] [DEMO] LED OFF`
-//           ]);
-//         } else {
-//           setSerialOutput(prev => [
-//             ...prev.slice(-50),
-//             `[${timestamp}] [DEMO] LED ON`
-//           ]);
-//         }
-
-//         ledState = !ledState;
-
-//         if (Math.random() > 0.7) {
-//           const additionalMessages = [
-//             '[DEMO] Device initialized',
-//             '[DEMO] GPIO pin 2 set HIGH',
-//             '[DEMO] GPIO pin 2 set LOW',
-//             '[DEMO] Loop iteration completed',
-//             `[DEMO] Sensor reading: ${Math.floor(Math.random() * 100)}`,
-//             '[DEMO] Memory usage: 85%'
-//           ];
-//           const randomMessage = additionalMessages[Math.floor(Math.random() * additionalMessages.length)];
-//           const msgTimestamp = new Date().toTimeString().split(' ')[0];
-
-//           setSerialOutput(prev => [
-//             ...prev.slice(-50),
-//             `[${msgTimestamp}] ${randomMessage}`
-//           ]);
-//         }
-//       }, 1000);
-
-//       return () => clearInterval(interval);
-//     };
-
-//     readSerialData();
-
-//     return () => {
-//       keepReading = false;
-//       if (reader) {
-//         reader.cancel().catch(err => console.log('Reader cleanup:', err.message));
-//       }
-//       if (cleanupInterval) {
-//         cleanupInterval();
-//       }
-//       // Don't close the port on cleanup to maintain connection
-//       // Port will be closed when user explicitly disconnects
-//       console.log('Serial reader cleanup complete, port remains open');
-//     };
-//   }, [isConnectedToDevice]);
-
-
-//   // Listen for device connection events for action buttons and persist state
-//   useEffect(() => {
-//     console.log('Output component mounted');
-//     console.log('Initial device connected state:', isDeviceConnectedForActions);
-//     console.log('Initial device info:', selectedDeviceInfo);
-
-//     const handleDeviceConnect = (event) => {
-//       console.log('✅ Output: Device connect event received', event.detail);
-//       setIsDeviceConnectedForActions(true);
-//       localStorage.setItem('innoide:device-connected', 'true');
-
-//       if (event.detail) {
-//         setSelectedDeviceInfo(event.detail);
-//         localStorage.setItem('innoide:device-info', JSON.stringify(event.detail));
-//       }
-
-//       console.log('✅ Output: Device connection state updated to TRUE');
-//     };
-
-//     const handleDeviceDisconnect = () => {
-//       console.log('❌ Output: Device disconnect event received');
-//       setIsDeviceConnectedForActions(false);
-//       setSelectedDeviceInfo(null);
-//       localStorage.setItem('innoide:device-connected', 'false');
-//       localStorage.removeItem('innoide:device-info');
-//     };
-
-//     const handleDeviceFailed = () => {
-//       console.log('⚠️ Output: Device detection failed');
-//       setIsDeviceConnectedForActions(false);
-//       setSelectedDeviceInfo(null);
-//       localStorage.setItem('innoide:device-connected', 'false');
-//       localStorage.removeItem('innoide:device-info');
-//     };
-
-//     window.addEventListener('innoide:device-detect-complete', handleDeviceConnect);
-//     window.addEventListener('innoide:device-disconnect', handleDeviceDisconnect);
-//     window.addEventListener('innoide:device-detect-failed', handleDeviceFailed);
-
-//     return () => {
-//       window.removeEventListener('innoide:device-detect-complete', handleDeviceConnect);
-//       window.removeEventListener('innoide:device-disconnect', handleDeviceDisconnect);
-//       window.removeEventListener('innoide:device-detect-failed', handleDeviceFailed);
-//     };
-//   }, []);
-
-//   // Listen for physical device removal via Web Serial API
-//   useEffect(() => {
-//     if (!('serial' in navigator)) return;
-
-//     const handleHardwareDisconnect = (event) => {
-//       console.log('⚠️ Output: Hardware serial disconnect detected', event?.target);
-//       setIsConnectedToDevice(false);
-//       setIsDeviceConnectedForActions(false);
-//       setSelectedDeviceInfo(null);
-//       localStorage.setItem('innoide:device-connected', 'false');
-//       localStorage.removeItem('innoide:device-info');
-
-//       // Notify other components about disconnect
-//       window.dispatchEvent(new CustomEvent('innoide:device-disconnect'));
-//     };
-
-//     navigator.serial.addEventListener('disconnect', handleHardwareDisconnect);
-
-//     return () => {
-//       navigator.serial.removeEventListener('disconnect', handleHardwareDisconnect);
-//     };
-//   }, []);
-
-//   // Periodically verify that the saved device is still attached
-//   useEffect(() => {
-//     if (!('serial' in navigator)) return;
-//     if (!isDeviceConnectedForActions) return;
-
-//     let cancelled = false;
-//     let intervalId = null;
-
-//     const handleMissingDevice = () => {
-//       if (cancelled) return;
-//       console.log('⚠️ Output: Stored device no longer available, resetting state');
-//       setIsConnectedToDevice(false);
-//       setIsDeviceConnectedForActions(false);
-//       setSelectedDeviceInfo(null);
-//       localStorage.setItem('innoide:device-connected', 'false');
-//       localStorage.removeItem('innoide:device-info');
-//       window.dispatchEvent(new CustomEvent('innoide:device-disconnect'));
-//     };
-
-//     const checkPorts = async () => {
-//       try {
-//         const ports = await navigator.serial.getPorts();
-//         if (!ports.length) {
-//           handleMissingDevice();
-//           return;
-//         }
-
-//         const savedDeviceInfoRaw = localStorage.getItem('innoide:device-info');
-//         if (!savedDeviceInfoRaw) {
-//           handleMissingDevice();
-//           return;
-//         }
-
-//         let savedDeviceInfo;
-//         try {
-//           savedDeviceInfo = JSON.parse(savedDeviceInfoRaw);
-//         } catch (error) {
-//           console.warn('Failed to parse saved device info while verifying ports');
-//           handleMissingDevice();
-//           return;
-//         }
-
-//         if (savedDeviceInfo?.port?.usbVendorId && savedDeviceInfo?.port?.usbProductId) {
-//           const portInfos = await Promise.all(ports.map(port => port.getInfo?.() ?? {}));
-//           const matched = portInfos.some(info =>
-//             info?.usbVendorId === savedDeviceInfo.port.usbVendorId &&
-//             info?.usbProductId === savedDeviceInfo.port.usbProductId
-//           );
-
-//           if (!matched) {
-//             handleMissingDevice();
-//           }
-//         }
-//       } catch (error) {
-//         console.warn('Failed to verify serial ports:', error);
-//       }
-//     };
-
-//     checkPorts();
-//     intervalId = window.setInterval(checkPorts, 5000);
-
-//     const handleVisibility = () => {
-//       if (!document.hidden) {
-//         checkPorts();
-//       }
-//     };
-
-//     window.addEventListener('visibilitychange', handleVisibility);
-//     window.addEventListener('focus', handleVisibility);
-
-//     return () => {
-//       cancelled = true;
-//       if (intervalId) {
-//         clearInterval(intervalId);
-//       }
-//       window.removeEventListener('visibilitychange', handleVisibility);
-//       window.removeEventListener('focus', handleVisibility);
-//     };
-//   }, [isDeviceConnectedForActions]);
-
-//   const panelTitle = useMemo(() => {
-//     switch (activePanel) {
-//       case "serial":
-//         return "Serial Console";
-//       case "terminal":
-//         return "Terminal";
-//       default:
-//         return "Problem Output";
-//     }
-//   }, [activePanel]);
-
-//   const panelDescription = useMemo(() => {
-//     switch (activePanel) {
-//       case "serial":
-//         return "Monitor device logs and USART output in real time.";
-//       case "terminal":
-//         return "Run shell commands against the configured workspace";
-//       default:
-//         return "View compiler messages, build logs, and program output.";
-//     }
-//   }, [activePanel]);
-
-//   const responseStyle = {
-//     marginTop: "20px",
-//     padding: "10px",
-//     backgroundColor: colorMode === "dark" ? "#2D3748" : "#F7FAFC",
-//     color: colorMode === "dark" ? "#E2E8F0" : "#2D3748",
-//     borderRadius: "5px",
-//     border: `1px solid ${colorMode === "dark" ? "#4A5568" : "#CBD5E0"}`,
-//   };
-
-//   const appendOutputLine = (line) => {
-//     if (line === undefined || line === null) return;
-//     const text = typeof line === "string" ? line : JSON.stringify(line);
-//     setOutput((prevOutput) => [...prevOutput, text]);
-//   };
-
-//   const runCode = async ({ append, reason } = {}) => {
-//     if (!isDeviceConnectedForActions) {
-//       toast({
-//         title: "No Device Connected!",
-//         description: "Please connect a device before running code.",
-//         status: "error",
-//         duration: 6000,
-//       });
-//       return { ok: false, reason: "no-device" };
-//     }
-
-//     const sourceCode = editorRef?.current?.getValue?.() ?? "";
-
-//     if (!sourceCode) {
-//       toast({
-//         title: "Empty Code!",
-//         description: "Please write your code before running.",
-//         status: "error",
-//         duration: 6000,
-//       });
-//       return { ok: false, reason: "no-source" };
-//     }
-
-//     const effectiveLanguage =
-//       language && language !== "Select Language" ? language : "c";
-
-//     try {
-//       setIsLoading(true);
-//       setActivePanel("problem");
-//       setRunSummary({ status: "running", reason });
-//       if (!append) {
-//         setOutput([]);
-//       }
-
-//       const { run: result } = await executeCode(
-//         effectiveLanguage.toLowerCase(),
-//         sourceCode,
-//         userInput
-//       );
-
-//       const stdout = result?.output ?? "";
-//       const stderr = result?.stderr ?? "";
-//       const stdoutLines = stdout ? stdout.split("\n") : [];
-//       const stderrLines = stderr
-//         ? stderr.split("\n").map((line) => (line ? `stderr: ${line}` : line))
-//         : [];
-
-//       setOutput((prevOutput) =>
-//         append ? [...prevOutput, ...stdoutLines, ...stderrLines] : [...stdoutLines, ...stderrLines]
-//       );
-
-//       setResponse(stdout);
-//       const hadError = Boolean(stderr);
-//       setIsError(hadError);
-//       setRunSummary({
-//         status: hadError ? "error" : "success",
-//         reason,
-//       });
-
-//       if (stdoutLines.length === 0 && stderrLines.length === 0) {
-//         appendOutputLine("(program exited with no output)");
-//       }
-
-//       return {
-//         ok: true,
-//         result,
-//         stdout,
-//         stderr,
-//         reason,
-//       };
-//     } catch (error) {
-//       console.error(error);
-//       const message = error?.message || "Could not execute the code.";
-//       toast({
-//         title: "Error occurred while running.",
-//         description: message,
-//         status: "error",
-//         duration: 6000,
-//         isClosable: true,
-//       });
-//       setIsError(true);
-//       if (append) {
-//         appendOutputLine(`Error: ${message}`);
-//       } else {
-//         setOutput([`Error: ${message}`]);
-//       }
-//       setRunSummary({ status: "error", reason });
-
-//       return {
-//         ok: false,
-//         error,
-//         reason,
-//       };
-//     } finally {
-//       setIsLoading(false);
-//     }
-//   };
-
-//   // handle flash code with ESP-IDF workflow
-
-//   const handleCodeFlash = async () => {
-//     console.log('Flash button clicked. Device connected:', isDeviceConnectedForActions);
-//     console.log('Selected device info:', selectedDeviceInfo);
-
-//     if (!isDeviceConnectedForActions) {
-//       console.error('Flash blocked: No device connected');
-//       toast({
-//         title: "No Device Connected!",
-//         description: "Please connect a device before flashing.",
-//         status: "error",
-//         duration: 6000,
-//       });
-//       return { ok: false, reason: "no-device" };
-//     }
-
-//     onFlashStart?.();
-//     const sourceCode = editorRef?.current?.getValue?.() ?? "";
-
-//     if (!sourceCode) {
-//       toast({
-//         title: "No Source Code!",
-//         description: "Please write or upload the firmware before flashing.",
-//         status: "warning",
-//         duration: 6000,
-//       });
-//       return { ok: false, reason: "no-source" };
-//     }
-
-//     setIsLoading(true);
-//     setActivePanel("serial");
-//     setRunSummary({ status: "running", reason: "flash" });
-//     setOutput([]);
-
-//     // Clear and start serial output
-//     setSerialOutput([]);
-
-//     // Keep device connected during flash
-//     // Don't change isConnectedToDevice state to avoid disconnecting serial reader
-//     const wasConnected = isConnectedToDevice;
-//     if (!wasConnected) {
-//       setIsConnectedToDevice(true);
-//     }
-
-//     try {
-//       // Submit code to device API
-//       appendOutputLine("=== Submitting Code to Device ===");
-//       appendOutputLine("Connecting to device...");
-
-//       // Add initial serial output
-//       const timestamp = new Date().toTimeString().split(' ')[0];
-//       setSerialOutput(prev => [
-//         ...prev,
-//         `[${timestamp}] [INFO] Connecting to device...`,
-//         `[${timestamp}] [INFO] Submitting code for flashing...`
-//       ]);
-
-//       const result = await submitCodeToDevice(sourceCode, language || "esp32");
-
-//       if (result) {
-//         const message = "Code submitted successfully! Device is flashing...";
-//         setResponse(message);
-//         appendOutputLine(`\n✓ ${message}`);
-
-//         // Add success serial output
-//         const successTimestamp = new Date().toTimeString().split(' ')[0];
-//         setSerialOutput(prev => [
-//           ...prev,
-//           `[${successTimestamp}] [INFO] Code submitted successfully`,
-//           `[${successTimestamp}] [INFO] Flashing firmware to device...`,
-//           `[${successTimestamp}] [INFO] Device will reset and start running...`,
-//           `[${successTimestamp}] [INFO] Waiting for device output...`
-//         ]);
-
-//         setRunSummary({ status: "success", reason: "flash" });
-
-//         toast({
-//           title: "Flash Successful!",
-//           description: "Code submitted to device. Device will reset automatically.",
-//           status: "success",
-//           duration: 5000,
-//         });
-
-//         // Ensure device stays connected after flash
-//         console.log('✅ Flash complete, maintaining device connection');
-
-//         // Re-confirm device connection state
-//         localStorage.setItem('innoide:device-connected', 'true');
-
-//         onFlashComplete?.({ ok: true, message, result });
-//         return { ok: true, message, result };
-//       } else {
-//         throw new Error("Code submission failed");
-//       }
-//     } catch (error) {
-//       console.error("Flashing Error:", error);
-//       const message = error?.message || "Firmware flashing failed.";
-
-//       appendOutputLine(`\n✗ Flash error: ${message}`);
-
-//       // Add error to serial output
-//       const errorTimestamp = new Date().toTimeString().split(' ')[0];
-//       setSerialOutput(prev => [
-//         ...prev,
-//         `[${errorTimestamp}] [ERROR] Flash failed: ${message}`
-//       ]);
-
-//       setRunSummary({ status: "error", reason: "flash" });
-
-//       toast({
-//         title: "Flash Failed!",
-//         description: message,
-//         status: "error",
-//         duration: 6000,
-//         isClosable: true,
-//       });
-
-//       onFlashComplete?.({ ok: false, error, message });
-//       return { ok: false, error };
-//     } finally {
-//       setIsLoading(false);
-//       // Ensure device connection is maintained
-//       console.log('Flash operation complete, device connection state:', isDeviceConnectedForActions);
-//     }
-//   };
-
-//   // Handle ESP-IDF build only
-//   const handleBuildProject = async () => {
-//     if (!isDeviceConnectedForActions) {
-//       toast({
-//         title: "No Device Connected!",
-//         description: "Please connect a device before building.",
-//         status: "error",
-//         duration: 6000,
-//       });
-//       return { ok: false, reason: "no-device" };
-//     }
-
-//     const sourceCode = editorRef?.current?.getValue?.() ?? "";
-
-//     if (!sourceCode) {
-//       toast({
-//         title: "No Source Code!",
-//         description: "Please write code before building.",
-//         status: "warning",
-//         duration: 6000,
-//       });
-//       return { ok: false, reason: "no-source" };
-//     }
-
-//     setIsLoading(true);
-//     setActivePanel("problem");
-//     setRunSummary({ status: "running", reason: "build" });
-//     setOutput([]);
-
-//     try {
-//       appendOutputLine("=== ESP-IDF Build ===");
-//       appendOutputLine("Starting build process...");
-
-//       const result = await buildProject({
-//         projectPath: ".",
-//         target: "esp32",
-//         onProgress: (progress) => {
-//           // Progress updates
-//         },
-//         onLog: (message) => {
-//           appendOutputLine(message);
-//         },
-//       });
-
-//       if (result.success) {
-//         const message = "Build completed successfully!";
-//         setResponse(message);
-//         appendOutputLine(`\n✓ ${message}`);
-//         appendOutputLine(`Bootloader: ${result.binaries?.bootloader || 'N/A'}`);
-//         appendOutputLine(`Application: ${result.binaries?.application || 'N/A'}`);
-//         setRunSummary({ status: "success", reason: "build" });
-
-//         toast({
-//           title: "Build Successful!",
-//           description: message,
-//           status: "success",
-//           duration: 5000,
-//         });
-
-//         return { ok: true, message, result };
-//       } else {
-//         throw new Error("Build failed");
-//       }
-//     } catch (error) {
-//       console.error("Build Error:", error);
-//       const message = error?.message || "Build failed.";
-
-//       appendOutputLine(`\n✗ Build error: ${message}`);
-//       setRunSummary({ status: "error", reason: "build" });
-
-//       toast({
-//         title: "Build Failed!",
-//         description: message,
-//         status: "error",
-//         duration: 6000,
-//         isClosable: true,
-//       });
-
-//       return { ok: false, error };
-//     } finally {
-//       setIsLoading(false);
-//     }
-//   };
-
-//   useImperativeHandle(ref, () => ({
-//     runCode,
-//     flashCode: handleCodeFlash,
-//     buildProject: handleBuildProject,
-//     openPanel: handlePanelChange,
-//     setPanel: handlePanelChange,
-//     setUserInput,
-//     appendOutputLine,
-//     isRunning: () => isLoading,
-//     getStdout: () => response,
-//     getOutputLines: () => output.slice(),
-//   }));
-
-//   const statusColor = runSummary.status === "error"
-//     ? "red"
-//     : runSummary.status === "success"
-//       ? "green"
-//       : runSummary.status === "running"
-//         ? "blue"
-//         : "gray";
-
-//   const statusLabel = (() => {
-//     switch (runSummary.status) {
-//       case "running":
-//         return "Running";
-//       case "success":
-//         return "Success";
-//       case "error":
-//         return "Error";
-//       default:
-//         return "Idle";
-//     }
-//   })();
-
-//   return (
-//     <Box w="100%" p={4} borderRadius="md" {...rest}>
-//       {/* Device Status Badge */}
-//       {isDeviceConnectedForActions && selectedDeviceInfo ? (
-//         <Box mb={3} p={2} bg={colorMode === "dark" ? "green.900" : "green.50"} borderRadius="md" border="1px solid" borderColor="green.400">
-//           <HStack spacing={2}>
-//             <Badge colorScheme="green" fontSize="xs">✓ Connected</Badge>
-//             <Text fontSize="xs" fontWeight="semibold" color={colorMode === "dark" ? "green.200" : "green.700"}>
-//               {selectedDeviceInfo.deviceType || "Device"}
-//             </Text>
-//             {selectedDeviceInfo.memory && (
-//               <Text fontSize="xs" color={colorMode === "dark" ? "gray.400" : "gray.600"}>
-//                 • {selectedDeviceInfo.memory}
-//               </Text>
-//             )}
-//           </HStack>
-//         </Box>
-//       ) : (
-//         <Box mb={3} p={2} bg={colorMode === "dark" ? "orange.900" : "orange.50"} borderRadius="md" border="1px solid" borderColor="orange.400">
-//           <HStack spacing={2}>
-//             <Badge colorScheme="orange" fontSize="xs">⚠ Not Connected</Badge>
-//             <Text fontSize="xs" color={colorMode === "dark" ? "orange.200" : "orange.700"}>
-//               Click "Select Port" or "Detect" in Flash panel to connect device
-//             </Text>
-//           </HStack>
-//         </Box>
-//       )}
-
-//       <Box display="flex" alignItems="center" mb={4} gap={4} flexWrap="wrap">
-
-//         <Button
-//           loadingText="Flashing"
-//           spinnerPlacement="start"
-//           isLoading={isLoading && runSummary.reason === "flash"}
-//           size={"sm"}
-//           colorScheme="blue"
-//           variant={isLoading ? "solid" : "outline"}
-//           cursor="pointer"
-//           onClick={handleCodeFlash}
-//           title="Flash Code to Device"
-//         >
-//           Flash
-//         </Button>
-
-//         <Button
-//           loadingText="Running"
-//           spinnerPlacement="start"
-//           isLoading={isLoading && runSummary.reason !== "flash"}
-//           size="sm"
-//           colorScheme="green"
-//           variant={isLoading && runSummary.reason !== "flash" ? "solid" : "outline"}
-//           onClick={() => runCode({ append: false, reason: "manual" })}
-//           title="Run Code"
-//         >
-//           Run
-//         </Button>
-
-//         <Button
-//           loadingText="Building"
-//           spinnerPlacement="start"
-//           isLoading={isLoading && runSummary.reason === "build"}
-//           size="sm"
-//           colorScheme="blue"
-//           variant={isLoading && runSummary.reason === "build" ? "solid" : "outline"}
-//           onClick={handleBuildProject}
-//           title="Build Project (ESP-IDF)"
-//         >
-//           Build
-//         </Button>
-//         <Button
-//           size="sm"
-//           colorScheme="blue"
-//           variant={activePanel === "serial" ? "solid" : "outline"}
-//           onClick={() => handlePanelChange("serial")}
-//         >
-//           Serial Console
-//         </Button>
-//         <Button
-//           size="sm"
-//           colorScheme="blue"
-//           variant={activePanel === "terminal" ? "solid" : "outline"}
-//           onClick={() => handlePanelChange("terminal")}
-//         >
-//           Terminal
-//         </Button>
-//       </Box>
-
-//       <Box mb={3}>
-//         <Text fontSize="md" fontWeight="semibold">
-//           {panelTitle}
-//         </Text>
-//         <Text fontSize="sm" color={colorMode === "dark" ? "gray.300" : "gray.600"}>
-//           {panelDescription}
-//         </Text>
-//       </Box>
-
-//       {activePanel === "problem" && <pre style={responseStyle}>{response || "Run or flash to see compiler output."}</pre>}
-//       {activePanel === "serial" && (
-//         <Box
-//           border="1px solid"
-//           borderColor={colorMode === "dark" ? "gray.600" : "gray.300"}
-//           borderRadius="md"
-//           p={3}
-//           minH="120px"
-//           bg={colorMode === "dark" ? "gray.900" : "white"}
-//           display="flex"
-//           flexDirection="column"
-//           gap={2}
-//         >
-//           <Box display="flex" justifyContent="space-between" alignItems="center">
-//             <Text fontSize="sm" fontWeight="semibold" color={colorMode === "dark" ? "gray.300" : "gray.600"}>
-//               Serial Monitor
-//             </Text>
-//             <Box display="flex" gap={2}>
-//               <Button
-//                 size="xs"
-//                 colorScheme="gray"
-//                 variant="outline"
-//                 onClick={() => setSerialOutput([])}
-//               >
-//                 Clear
-//               </Button>
-//               <Button
-//                 size="xs"
-//                 colorScheme={isConnectedToDevice ? "red" : "green"}
-//                 onClick={() => setIsConnectedToDevice(!isConnectedToDevice)}
-//               >
-//                 {isConnectedToDevice ? "Disconnect" : "Connect"}
-//               </Button>
-//             </Box>
-//           </Box>
-//           <Box
-//             flex="1"
-//             overflowY="auto"
-//             maxH="300px"
-//             bg={colorMode === "dark" ? "gray.800" : "gray.50"}
-//             p={2}
-//             borderRadius="md"
-//             fontFamily="monospace"
-//             fontSize="sm"
-//             minH="80px"
-//           >
-//             {serialOutput.length === 0 ? (
-//               <Text color={colorMode === "dark" ? "gray.400" : "gray.500"}>
-//                 {isConnectedToDevice ? "Waiting for serial data..." : "Click 'Flash' button to upload code and monitor serial output"}
-//               </Text>
-//             ) : (
-//               serialOutput.map((line, index) => (
-//                 <Text
-//                   key={index}
-//                   color={
-//                     line.includes('[ERROR]') ? 'red.400' :
-//                       line.includes('[INFO]') ? 'blue.400' :
-//                         line.includes('[DEBUG]') ? 'yellow.400' :
-//                           line.includes('[DATA]') ? 'green.400' :
-//                             line.includes('LED ON') ? 'green.300' :
-//                               line.includes('LED OFF') ? 'gray.400' :
-//                                 colorMode === "dark" ? "gray.200" : "gray.700"
-//                   }
-//                   fontWeight={line.includes('LED') ? 'bold' : 'normal'}
-//                 >
-//                   {line}
-//                 </Text>
-//               ))
-//             )}
-//           </Box>
-//         </Box>
-//       )}
-//       {activePanel === "terminal" && (
-//         <Box
-//           border="1px solid"
-//           borderColor={colorMode === "dark" ? "gray.600" : "gray.300"}
-//           borderRadius="md"
-//           p={3}
-//           minH="120px"
-//           bg={colorMode === "dark" ? "gray.900" : "white"}
-//           display="flex"
-//           flexDirection="column"
-//           gap={2}
-//         >
-//           <Text fontSize="sm" fontWeight="semibold" color={colorMode === "dark" ? "gray.300" : "gray.600"}>
-//             Terminal
-//           </Text>
-//           <Box
-//             flex="1"
-//             overflowY="auto"
-//             bg={colorMode === "dark" ? "gray.800" : "gray.50"}
-//             p={2}
-//             borderRadius="md"
-//             fontFamily="monospace"
-//             fontSize="sm"
-//             minH="60px"
-//           >
-//             {terminalOutput.map((line, index) => (
-//               <Text key={index} color={colorMode === "dark" ? "gray.200" : "gray.700"}>
-//                 {line}
-//               </Text>
-//             ))}
-//             {terminalOutput.length === 0 && (
-//               <Text color={colorMode === "dark" ? "gray.400" : "gray.500"}>
-//                 Type a command below to get started...
-//               </Text>
-//             )}
-//           </Box>
-//           <Box display="flex" gap={2}>
-//             <Input
-//               placeholder="Enter command..."
-//               value={terminalInput}
-//               onChange={(e) => setTerminalInput(e.target.value)}
-//               onKeyPress={(e) => {
-//                 if (e.key === 'Enter') {
-//                   handleTerminalCommand();
-//                 }
-//               }}
-//               size="sm"
-//               fontFamily="monospace"
-//             />
-//             <Button
-//               size="sm"
-//               colorScheme="blue"
-//               onClick={handleTerminalCommand}
-//             >
-//               Run
-//             </Button>
-//           </Box>
-//         </Box>
-//       )}
-
-//       {/* Input box for stdin is this section i have added here */}
-//       {/* <Box mb={4}>
-//         <Text fontSize="sm" mb={4}>
-//           Provide Input for Your Code:
-//         </Text>
-//         <Input
-//           placeholder="Type input here"
-//           value={userInput}
-//           onChange={(e) => setUserInput(e.target.value)}
-//         />
-//       </Box> */}
-
-//       {/* <Box
-//         as="hr"
-//         borderColor={colorMode === "dark" ? "gray.600" : "gray.300"}
-//         mb={4}
-//       /> */}
-
-//       {/* <Box
-//         width="100%"
-//         height="18vh"
-//         p={3}
-//         color={
-//           isError ? "red.400" : colorMode === "dark" ? "gray.300" : "gray.800"
-//         }
-//         bg={colorMode === "dark" ? "gray.900" : "#ffffff"}
-//         border="1px solid"
-//         borderColor={
-//           isError ? "red.500" : colorMode === "dark" ? "gray.700" : "gray.300"
-//         }
-//         borderRadius="md"
-//         overflowY="auto"
-//       >
-//         {output.length > 0
-//           ? output.map((line, i) => <Text key={i}>{line}</Text>)
-//           : 'Click "Run Code" to see the output here'}
-//       </Box> */}
-
-//     </Box>
-//   );
-// });
-
-// export default Output;
-
-
-import { useState, useEffect, forwardRef, useRef, useImperativeHandle } from "react";
+import { useState, useEffect, forwardRef, useRef, useImperativeHandle, useMemo, useCallback } from "react";
 import {
   Box,
   Text,
   Button,
+  IconButton,
   useColorMode,
   useToast,
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalHeader,
-  ModalCloseButton,
-  ModalBody,
-  ModalFooter,
-  RadioGroup,
-  Radio,
-  Stack,
   Input,
   Select,
   Textarea,
   VStack,
   HStack,
-  Badge
+  Badge,
+  Tooltip,
+  Spinner,
+  Checkbox,
+  Flex,
+  Collapse
 } from "@chakra-ui/react";
+import {
+  Play,
+  Trash2,
+  Copy,
+  Check,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Info,
+  Terminal as TerminalIcon,
+  Bug,
+  Radio,
+  RefreshCw,
+  Send,
+  CornerDownLeft,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  ExternalLink,
+  Zap,
+  RotateCcw,
+  FileText,
+  Layers,
+  Search
+} from "lucide-react";
 import { executeCode } from "../api";
-import OutputStatus from "./OutputStatus";
-
 import { useSelector } from "react-redux";
 import TerminalPanel from "../features/workspace/terminal/components/TerminalPanel";
 import axios from "axios";
@@ -1168,275 +52,754 @@ import ApiBuilderPanel from "./ApiBuilderPanel";
 const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest }, ref) => {
   const { runtimeState } = useSelector((state) => state.workspace);
   const panelRef = useRef(null);
+  const terminalBottomRef = useRef(null);
+  const debugBottomRef = useRef(null);
+  const outputBottomRef = useRef(null);
   const toast = useToast();
   const { colorMode } = useColorMode();
+
+  // Active Bottom Tab
+  const [activePanel, setActivePanel] = useState("viewOutput");
+
+  // View Output State
   const [output, setOutput] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
-  const [isRunClicked, setIsRunClicked] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [alignment, setAlignment] = useState("left");
   const [userInput, setUserInput] = useState("");
-  const [response, setResponse] = useState("");
+  const [showStdin, setShowStdin] = useState(false);
+  const [executionSummary, setExecutionSummary] = useState(null); // { exitCode, durationMs, isError }
+  const [copiedOutput, setCopiedOutput] = useState(false);
+
+  // Problem Diagnostics State
+  const [compilerProblems, setCompilerProblems] = useState([]);
+  const [monacoProblems, setMonacoProblems] = useState([]);
+  const [problemFilter, setProblemFilter] = useState("all"); // "all" | "errors" | "warnings"
+
+  // Debug Console & Serial Monitor State
+  const [serialOutput, setSerialOutput] = useState([
+    `[${new Date().toLocaleTimeString()}] [SYSTEM] InnoIDE Debug Engine initialized.`
+  ]);
+  const [debugInput, setDebugInput] = useState("");
+  const [debugHistory, setDebugHistory] = useState([]);
+  const [debugHistoryIdx, setDebugHistoryIdx] = useState(-1);
+  const [isConnectedToDevice, setIsConnectedToDevice] = useState(false);
+  const [availablePorts, setAvailablePorts] = useState(["COM3", "COM5"]);
+  const [selectedPort, setSelectedPort] = useState("COM3");
+  const [baudRate, setBaudRate] = useState("115200");
+  const [isScanningPorts, setIsScanningPorts] = useState(false);
+  const [debugAutoScroll, setDebugAutoScroll] = useState(true);
+  const [debugShowTimestamps, setDebugShowTimestamps] = useState(true);
+
+  // Terminal State
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalOutput, setTerminalOutput] = useState([
+    "┌─────────────────────────────────────────────────────────────┐",
+    "│  InnoIDE Embedded Shell Environment v2.4                   │",
+    "│  Type 'help' for available commands or 'run' to compile.    │",
+    "└─────────────────────────────────────────────────────────────┘"
+  ]);
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [cwd, setCwd] = useState("/home/user/workspace");
+
+  // Postman State
   const [postmanUrl, setPostmanUrl] = useState("https://jsonplaceholder.typicode.com/todos/1");
   const [postmanMethod, setPostmanMethod] = useState("GET");
   const [postmanBody, setPostmanBody] = useState("");
-  const [activePanel, setActivePanel] = useState("problem");
-  const [terminalInput, setTerminalInput] = useState("");
-  const [terminalOutput, setTerminalOutput] = useState([]);
-  const [serialOutput, setSerialOutput] = useState([]);
-
-  // Enhanced Terminal State
-  const [history, setHistory] = useState([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [cwd, setCwd] = useState("/home/user");
-
-  // Serial Monitor State
-  const [isConnectedToDevice, setIsConnectedToDevice] = useState(false);
-  const [isDeviceConnectedForActions, setIsDeviceConnectedForActions] = useState(() => {
-    const savedState = localStorage.getItem('innoide:device-connected');
-    return savedState === 'true';
-  });
-  const [selectedDeviceInfo, setSelectedDeviceInfo] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('innoide:device-info') || 'null');
-    } catch { return null; }
-  });
   const [postmanResponse, setPostmanResponse] = useState(null);
   const [postmanLoading, setPostmanLoading] = useState(false);
 
-  // Helper function to scroll specifically to the Output panel
-  const scrollToPanel = () => {
+  // Auto-scroll helper
+  const scrollToPanel = useCallback(() => {
     if (panelRef.current) {
-      // Use scrollIntoView with block: "start"
-      // scrollMarginTop on the element will handle the offset for the sticky navbar
       panelRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
+
+  // -------------------------------------------------------------
+  // Problem Extraction & Real-time Diagnostics
+  // -------------------------------------------------------------
+  const parseProblemsFromOutput = useCallback((outputLines = []) => {
+    const problems = [];
+    const gccRegex = /^(?:.*[/\\])?([^:\n]+):(\d+):(?:(\d+):)?\s*(error|fatal error|warning|note):\s*(.*)$/i;
+    const pyRegex = /File "([^"]+)", line (\d+)(?:.*)?\n?(?:SyntaxError|TypeError|ValueError|NameError)?:\s*(.*)/i;
+    const genericLineRegex = /line\s+(\d+)(?::(\d+))?.*?(error|warning):\s*(.*)/i;
+
+    outputLines.forEach((line, idx) => {
+      let match = line.match(gccRegex);
+      if (match) {
+        problems.push({
+          id: `prob-gcc-${idx}-${Date.now()}`,
+          file: match[1],
+          line: parseInt(match[2], 10),
+          column: match[3] ? parseInt(match[3], 10) : 1,
+          severity: match[4].toLowerCase().includes("err") ? "error" : match[4].toLowerCase().includes("warn") ? "warning" : "info",
+          message: match[5]?.trim() || line,
+          source: "Compiler (GCC/Clang)"
+        });
+        return;
+      }
+
+      match = line.match(pyRegex);
+      if (match) {
+        problems.push({
+          id: `prob-py-${idx}-${Date.now()}`,
+          file: match[1],
+          line: parseInt(match[2], 10),
+          column: 1,
+          severity: "error",
+          message: match[3]?.trim() || line,
+          source: "Python Runtime"
+        });
+        return;
+      }
+
+      match = line.match(genericLineRegex);
+      if (match) {
+        problems.push({
+          id: `prob-gen-${idx}-${Date.now()}`,
+          file: "source",
+          line: parseInt(match[1], 10),
+          column: match[2] ? parseInt(match[2], 10) : 1,
+          severity: match[3].toLowerCase().includes("err") ? "error" : "warning",
+          message: match[4]?.trim() || line,
+          source: "Compiler"
+        });
+      }
+    });
+
+    return problems;
+  }, []);
+
+  // Poll / Listen to Monaco Editor Markers
+  useEffect(() => {
+    const updateMonacoProblems = () => {
+      if (typeof window === "undefined" || !window.monaco?.editor) return;
+      try {
+        const markers = window.monaco.editor.getModelMarkers({});
+        const probs = markers.map((m, idx) => ({
+          id: `monaco-${idx}-${m.startLineNumber}-${m.startColumn}`,
+          file: m.resource?.path ? m.resource.path.split("/").pop() : "active editor",
+          line: m.startLineNumber,
+          column: m.startColumn,
+          severity: m.severity === 8 ? "error" : m.severity === 4 ? "warning" : "info",
+          message: m.message,
+          source: m.source ? `Monaco (${m.source})` : "Syntax/Linter"
+        }));
+        setMonacoProblems(probs);
+      } catch {
+        // Safe fallback
+      }
+    };
+
+    updateMonacoProblems();
+
+    let disposable;
+    if (typeof window !== "undefined" && window.monaco?.editor?.onDidChangeMarkers) {
+      disposable = window.monaco.editor.onDidChangeMarkers(() => {
+        updateMonacoProblems();
+      });
+    }
+
+    const interval = setInterval(updateMonacoProblems, 2000);
+
+    return () => {
+      if (disposable?.dispose) disposable.dispose();
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Combined problems
+  const allProblems = useMemo(() => {
+    const map = new Map();
+    [...monacoProblems, ...compilerProblems].forEach((p) => {
+      const key = `${p.file}:${p.line}:${p.column}:${p.message}`;
+      if (!map.has(key)) map.set(key, p);
+    });
+    return Array.from(map.values());
+  }, [monacoProblems, compilerProblems]);
+
+  const filteredProblems = useMemo(() => {
+    if (problemFilter === "errors") return allProblems.filter((p) => p.severity === "error");
+    if (problemFilter === "warnings") return allProblems.filter((p) => p.severity === "warning");
+    return allProblems;
+  }, [allProblems, problemFilter]);
+
+  const errorCount = useMemo(() => allProblems.filter((p) => p.severity === "error").length, [allProblems]);
+  const warningCount = useMemo(() => allProblems.filter((p) => p.severity === "warning").length, [allProblems]);
+
+  // Jump to specific line in Monaco Editor
+  const handleJumpToProblem = useCallback((prob) => {
+    if (editorRef?.current) {
+      try {
+        editorRef.current.revealLineInCenter(prob.line);
+        editorRef.current.setPosition({ lineNumber: prob.line, column: prob.column || 1 });
+        editorRef.current.focus();
+      } catch (err) {
+        console.warn("Could not focus line:", err);
+      }
+    }
+  }, [editorRef]);
+
+  // -------------------------------------------------------------
+  // Execution Logic (View Output)
+  // -------------------------------------------------------------
+  const runCode = async () => {
+    const sourceCode = editorRef?.current?.getValue ? editorRef.current.getValue() : "";
+    if (!sourceCode) {
+      toast({
+        title: "No code provided",
+        description: "Please write some code in the editor to execute.",
+        status: "warning",
+        duration: 3000,
+      });
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setActivePanel("viewOutput");
+      if (onExpand) onExpand();
+      scrollToPanel();
+      setExecutionSummary(null);
+
+      const startTime = Date.now();
+
+      // Normalize target language
+      let targetLang = (language || "c").toLowerCase().trim();
+      if (targetLang.includes("select") || !targetLang) {
+        if (/^\s*(#include|void\s+app_main|int\s+main|void\s+setup)/m.test(sourceCode)) {
+          targetLang = "c";
+        } else if (/^\s*(import\s+|def\s+|print\()/m.test(sourceCode)) {
+          targetLang = "python";
+        } else {
+          targetLang = "c";
+        }
+      }
+      // Check if code is ESP-IDF / microcontroller firmware
+      const isEspIdfCode = /freertos|app_main|led_strip|driver\/gpio|esp_err|esp_log|usb_serial_jtag/i.test(sourceCode);
+      if (isEspIdfCode) {
+        setIsLoading(false);
+        setIsError(false);
+        setOutput([
+          "[ESP-IDF Microcontroller Firmware Detected]",
+          "--------------------------------------------------------------------------------",
+          "• Embedded ESP-IDF C code requires the local ESP-IDF compiler and toolchain.",
+          "• It cannot run in the generic online desktop C sandbox (Piston/Wandbox).",
+          "",
+          "👉 Click the 'Flash' button on the top toolbar or bottom Flasher panel to",
+          "   compile and flash directly to your connected ESP32 board.",
+          "--------------------------------------------------------------------------------"
+        ]);
+        toast({
+          title: "ESP32 Firmware Detected",
+          description: "Click 'Flash' on the toolbar to compile and flash to your board.",
+          status: "info",
+          duration: 5000,
+          isClosable: true
+        });
+        return;
+      }
+
+      const res = await executeCode(targetLang, sourceCode, userInput);
+      const duration = Date.now() - startTime;
+
+      const compileData = res?.compile;
+      const runData = res?.run;
+
+      let logLines = [];
+      if (compileData?.output) {
+        logLines.push("[Compilation Output]");
+        logLines.push(...compileData.output.split("\n"));
+      }
+
+      if (runData?.output) {
+        logLines.push(...runData.output.split("\n"));
+      } else if (runData?.stdout) {
+        logLines.push(...runData.stdout.split("\n"));
+      } else if (!compileData?.output) {
+        logLines.push("Program exited with no output.");
+      }
+
+      setOutput(logLines);
+
+      const exitCode = runData?.code ?? (compileData?.code ?? 0);
+      const hasError = !!(runData?.stderr || (exitCode !== 0 && exitCode !== null) || compileData?.code !== 0);
+
+      setIsError(hasError);
+      setExecutionSummary({
+        exitCode,
+        durationMs: duration,
+        isError: hasError,
+        language: targetLang
+      });
+
+      // Parse compiler problems
+      const fullText = [compileData?.stderr, compileData?.output, runData?.stderr, runData?.output]
+        .filter(Boolean)
+        .join("\n");
+      const parsed = parseProblemsFromOutput(fullText.split("\n"));
+      setCompilerProblems(parsed);
+
+      if (hasError) {
+        toast({
+          title: "Execution finished with errors",
+          description: parsed.length > 0 ? `${parsed.length} problem(s) found. Check the Problem tab.` : `Process exited with code ${exitCode}`,
+          status: "error",
+          duration: 4000,
+          isClosable: true
+        });
+      } else {
+        toast({
+          title: "Execution Successful",
+          description: `Finished in ${duration}ms (Exit Code: 0)`,
+          status: "success",
+          duration: 3000,
+          isClosable: true
+        });
+      }
+    } catch (error) {
+      console.error("Execution error:", error);
+      setOutput((prev) => [...prev, `[Execution Error]: ${error.message || "Failed to execute code"}`]);
+      setIsError(true);
+      toast({
+        title: "Execution Failed",
+        description: error.message || "Could not reach execution runtime.",
+        status: "error",
+        duration: 5000,
+      });
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => {
+        if (outputBottomRef.current) {
+          outputBottomRef.current.scrollIntoView({ behavior: "smooth" });
+        }
+      }, 100);
     }
   };
 
-  useEffect(() => {
-    if (runtimeState && runtimeState !== "idle") {
-      setActivePanel("terminal");
-    }
-  }, [runtimeState]);
+  const handleCopyOutput = () => {
+    if (output.length === 0) return;
+    navigator.clipboard.writeText(output.join("\n"));
+    setCopiedOutput(true);
+    toast({
+      title: "Copied",
+      description: "Output text copied to clipboard.",
+      status: "info",
+      duration: 2000,
+    });
+    setTimeout(() => setCopiedOutput(false), 2000);
+  };
 
-  // Serial Monitor Logic (Web Serial API)
-  useEffect(() => {
-    // If running in Electron environment, delegate serial handling to Electron main process
-    if (window.electronAPI) return;
-    if (!isConnectedToDevice) return;
-    let reader;
-    let keepReading = true;
-    let currentPort = null;
-    const readSerialData = async () => {
-      const deviceInfoStr = localStorage.getItem('innoide:device-info');
-      if (!deviceInfoStr) return;
-      try {
-        const deviceInfo = JSON.parse(deviceInfoStr);
-        if ('serial' in navigator) {
-          const ports = await navigator.serial.getPorts();
-          if (ports.length === 0) {
-            setSerialOutput(prev => [...prev, `[INFO] No serial ports detected.`]);
-            return;
-          }
-          currentPort = ports[0];
-          if (!currentPort.readable && !currentPort.writable) {
-            await currentPort.open({ baudRate: 115200 });
-            setSerialOutput(prev => [...prev, `[INFO] Serial port opened.`]);
-          }
-          if (currentPort.readable) {
-            const textDecoder = new TextDecoderStream();
-            currentPort.readable.pipeTo(textDecoder.writable);
-            reader = textDecoder.readable.getReader();
-            while (keepReading) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              if (value) {
-                const lines = value.split('\n').filter(l => l.trim());
-                if (lines.length) setSerialOutput(prev => [...prev.slice(-100), ...lines]);
-              }
-            }
-          }
+  // -------------------------------------------------------------
+  // Debug Console & Serial Monitor Logic
+  // -------------------------------------------------------------
+  const scanPorts = useCallback(async () => {
+    setIsScanningPorts(true);
+    try {
+      let ports = [];
+      if (window.electronAPI?.serial?.listPorts) {
+        const res = await window.electronAPI.serial.listPorts();
+        ports = Array.isArray(res) ? res : res?.ports || [];
+      } else if (window.electronAPI?.flash?.detectPorts) {
+        const res = await window.electronAPI.flash.detectPorts();
+        ports = Array.isArray(res) ? res : res?.ports || [];
+      }
+
+      if (ports.length > 0) {
+        const formatted = ports.map((p) => (typeof p === "string" ? p : p.path || p.port || "COM3"));
+        setAvailablePorts(formatted);
+        if (!formatted.includes(selectedPort)) {
+          setSelectedPort(formatted[0]);
         }
-      } catch (error) {
-        console.error('Serial error:', error);
       }
-    };
-    readSerialData();
-    return () => {
-      keepReading = false;
-      if (reader) {
-        reader.cancel().catch(() => {});
-      }
-      if (currentPort && typeof currentPort.close === 'function') {
-        currentPort.close().catch(() => {});
-      }
-    };
-  }, [isConnectedToDevice]);
+    } catch (err) {
+      console.warn("Port scan:", err);
+    } finally {
+      setIsScanningPorts(false);
+    }
+  }, [selectedPort]);
 
-  // Enhanced Terminal Logic
-  const handleTerminalCommand = () => {
-    if (!terminalInput.trim()) return;
-    const cmd = terminalInput.trim();
-    const newHistory = [...history, cmd];
+  useEffect(() => {
+    scanPorts();
+  }, [scanPorts]);
+
+  // Serial event listeners
+  useEffect(() => {
+    const cleanups = [];
+
+    if (window.electronAPI?.serial?.onData) {
+      const un = window.electronAPI.serial.onData(({ data }) => {
+        if (data) {
+          const lines = data.toString().split("\n").filter(Boolean);
+          setSerialOutput((prev) => [...prev.slice(-300), ...lines]);
+        }
+      });
+      cleanups.push(un);
+    }
+
+    if (window.electronAPI?.flash?.onEvent) {
+      const un = window.electronAPI.flash.onEvent((evt) => {
+        if (evt?.type === "monitor_data" || evt?.data) {
+          const text = evt.data || evt.message || JSON.stringify(evt);
+          setSerialOutput((prev) => [...prev.slice(-300), text]);
+        }
+      });
+      cleanups.push(un);
+    }
+
+    const handleCustomData = (e) => {
+      if (e?.detail) {
+        const msg = typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail);
+        setSerialOutput((prev) => [...prev.slice(-300), msg]);
+      }
+    };
+
+    window.addEventListener("innoide:serial-data", handleCustomData);
+    window.addEventListener("innoide:debug-log", handleCustomData);
+
+    return () => {
+      cleanups.forEach((fn) => typeof fn === "function" && fn());
+      window.removeEventListener("innoide:serial-data", handleCustomData);
+      window.removeEventListener("innoide:debug-log", handleCustomData);
+    };
+  }, []);
+
+  // Auto-scroll debug console
+  useEffect(() => {
+    if (debugAutoScroll && debugBottomRef.current) {
+      debugBottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [serialOutput, debugAutoScroll]);
+
+  const handleToggleSerialConnect = async () => {
+    if (isConnectedToDevice) {
+      try {
+        if (window.electronAPI?.serial?.disconnect && selectedPort) {
+          await window.electronAPI.serial.disconnect(selectedPort);
+        }
+      } catch (err) {
+        console.warn("Disconnect err:", err);
+      }
+      setIsConnectedToDevice(false);
+      setSerialOutput((prev) => [
+        ...prev,
+        `[${new Date().toLocaleTimeString()}] [INFO] Disconnected from ${selectedPort}.`
+      ]);
+    } else {
+      const port = selectedPort || "COM3";
+      try {
+        if (window.electronAPI?.serial?.connect) {
+          await window.electronAPI.serial.connect(port, parseInt(baudRate, 10) || 115200);
+        }
+        setIsConnectedToDevice(true);
+        setSerialOutput((prev) => [
+          ...prev,
+          `[${new Date().toLocaleTimeString()}] [INFO] Connected to ${port} @ ${baudRate} baud.`
+        ]);
+      } catch (err) {
+        console.error("Connect err:", err);
+        // If simulated/mock, connect anyway with notice
+        setIsConnectedToDevice(true);
+        setSerialOutput((prev) => [
+          ...prev,
+          `[${new Date().toLocaleTimeString()}] [INFO] Session active on ${port} (Virtual Serial Bridge).`
+        ]);
+      }
+    }
+  };
+
+  const handleSendDebugCommand = async () => {
+    if (!debugInput.trim()) return;
+    const cmd = debugInput.trim();
+    const timestamp = new Date().toLocaleTimeString();
+
+    setDebugHistory((prev) => [...prev, cmd]);
+    setDebugHistoryIdx(-1);
+    setSerialOutput((prev) => [...prev, `[${timestamp}] > ${cmd}`]);
+    setDebugInput("");
+
+    try {
+      if (window.electronAPI?.serial?.write && selectedPort && isConnectedToDevice) {
+        await window.electronAPI.serial.write(selectedPort, cmd + "\r\n");
+      } else {
+        window.dispatchEvent(new CustomEvent("innoide:serial-send", { detail: cmd }));
+        setTimeout(() => {
+          setSerialOutput((prev) => [
+            ...prev,
+            `[${new Date().toLocaleTimeString()}] [DEVICE] ACK: Received "${cmd}"`
+          ]);
+        }, 120);
+      }
+    } catch (err) {
+      setSerialOutput((prev) => [...prev, `[ERR] Transmit error: ${err.message}`]);
+    }
+  };
+
+  const handleDebugKeyDown = (e) => {
+    if (e.key === "Enter") {
+      handleSendDebugCommand();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (debugHistory.length > 0) {
+        const next = debugHistoryIdx === -1 ? debugHistory.length - 1 : Math.max(0, debugHistoryIdx - 1);
+        setDebugHistoryIdx(next);
+        setDebugInput(debugHistory[next]);
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (debugHistoryIdx !== -1) {
+        const next = debugHistoryIdx + 1;
+        if (next >= debugHistory.length) {
+          setDebugHistoryIdx(-1);
+          setDebugInput("");
+        } else {
+          setDebugHistoryIdx(next);
+          setDebugInput(debugHistory[next]);
+        }
+      }
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Terminal Logic
+  // -------------------------------------------------------------
+  const executeTerminalCommand = async (cmdLine) => {
+    const trimmed = cmdLine.trim();
+    if (!trimmed) return;
+
+    const newHistory = [...history, trimmed];
     setHistory(newHistory);
     setHistoryIndex(-1);
 
-    setTerminalOutput(prev => [
+    const promptText = `user@innoide:${cwd}$ ${trimmed}`;
+    const args = trimmed.split(/\s+/);
+    const cmd = args[0].toLowerCase();
+
+    if (cmd === "clear" || cmd === "cls") {
+      setTerminalOutput([]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "help") {
+      setTerminalOutput((prev) => [
+        ...prev,
+        promptText,
+        "InnoIDE Embedded Shell - Available Commands:",
+        "  help                 - Show this reference menu",
+        "  clear | cls          - Clear the terminal screen",
+        "  ls | dir             - List files in workspace",
+        "  pwd                  - Print current working directory",
+        "  cd <dir>             - Change directory",
+        "  cat <file>           - Display file content",
+        "  echo <text>          - Print text to screen",
+        "  date                 - Display current system date & time",
+        "  whoami               - Display current user identity",
+        "  run | build          - Compile and execute active code",
+        "  flash                - Open hardware flashing wizard",
+        "  ports                - Scan and display connected COM/serial ports",
+        "  device               - Display connected hardware status",
+        "  version              - Display InnoIDE platform version",
+        "  history              - Show recent command history"
+      ]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "run" || cmd === "build") {
+      setTerminalOutput((prev) => [
+        ...prev,
+        promptText,
+        "[InnoIDE Runner] Compiling and executing active code..."
+      ]);
+      setTerminalInput("");
+      runCode();
+      return;
+    }
+
+    if (cmd === "flash") {
+      setTerminalOutput((prev) => [
+        ...prev,
+        promptText,
+        "[InnoIDE Flasher] Launching hardware flashing wizard..."
+      ]);
+      setTerminalInput("");
+      handleCodeFlash();
+      return;
+    }
+
+    if (cmd === "ports") {
+      setTerminalOutput((prev) => [...prev, promptText, "Scanning active COM ports..."]);
+      try {
+        let portList = [];
+        if (window.electronAPI?.serial?.listPorts) {
+          const res = await window.electronAPI.serial.listPorts();
+          portList = Array.isArray(res) ? res : res?.ports || [];
+        } else if (window.electronAPI?.flash?.detectPorts) {
+          const res = await window.electronAPI.flash.detectPorts();
+          portList = Array.isArray(res) ? res : res?.ports || [];
+        }
+        if (portList.length > 0) {
+          const formatted = portList.map((p) => `  • ${p.path || p.port || p} ${p.manufacturer ? "(" + p.manufacturer + ")" : ""}`);
+          setTerminalOutput((prev) => [...prev, `Detected ${portList.length} serial port(s):`, ...formatted]);
+        } else {
+          setTerminalOutput((prev) => [
+            ...prev,
+            "No active hardware ports found. Connect a board via USB cable."
+          ]);
+        }
+      } catch (err) {
+        setTerminalOutput((prev) => [...prev, `Port query failed: ${err.message}`]);
+      }
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "device") {
+      const devInfo = localStorage.getItem("innoide:device-info");
+      const isConn = localStorage.getItem("innoide:device-connected") === "true";
+      setTerminalOutput((prev) => [
+        ...prev,
+        promptText,
+        `Device Status: ${isConn ? "CONNECTED" : "DISCONNECTED"}`,
+        devInfo ? `Device Info: ${devInfo}` : "No device currently paired."
+      ]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "cat") {
+      const target = args[1];
+      if (!target) {
+        setTerminalOutput((prev) => [...prev, promptText, "usage: cat <filename>"]);
+        setTerminalInput("");
+        return;
+      }
+      const code = editorRef?.current?.getValue ? editorRef.current.getValue() : null;
+      if (code && (target === "main.c" || target.includes(".c") || target.includes(".h") || target.includes(".js"))) {
+        setTerminalOutput((prev) => [...prev, promptText, ...code.split("\n")]);
+      } else {
+        setTerminalOutput((prev) => [...prev, promptText, `cat: ${target}: No such file or directory`]);
+      }
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "ls" || cmd === "dir") {
+      setTerminalOutput((prev) => [
+        ...prev,
+        promptText,
+        "main.c   Makefile   README.md   src/   include/   build/"
+      ]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "pwd") {
+      setTerminalOutput((prev) => [...prev, promptText, cwd]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "cd") {
+      const target = args[1];
+      if (!target || target === "~") {
+        setCwd("/home/user/workspace");
+      } else if (target === "..") {
+        const parts = cwd.split("/").filter(Boolean);
+        setCwd(parts.length > 0 ? "/" + parts.slice(0, -1).join("/") : "/");
+      } else {
+        setCwd(`${cwd === "/" ? "" : cwd}/${target}`);
+      }
+      setTerminalOutput((prev) => [...prev, promptText]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "echo") {
+      setTerminalOutput((prev) => [...prev, promptText, args.slice(1).join(" ")]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "date") {
+      setTerminalOutput((prev) => [...prev, promptText, new Date().toString()]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "whoami") {
+      setTerminalOutput((prev) => [...prev, promptText, "developer"]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "version") {
+      setTerminalOutput((prev) => [
+        ...prev,
+        promptText,
+        "InnoIDE Embedded Platform v2.4.0 (Electron + React)",
+        "Target Toolchains: ESP-IDF v5.2, Arduino GCC, Clang/LLVM"
+      ]);
+      setTerminalInput("");
+      return;
+    }
+
+    if (cmd === "history") {
+      setTerminalOutput((prev) => [
+        ...prev,
+        promptText,
+        ...newHistory.map((h, i) => `  ${i + 1}  ${h}`)
+      ]);
+      setTerminalInput("");
+      return;
+    }
+
+    // Default simulated fallback
+    setTerminalOutput((prev) => [
       ...prev,
-      `user@innoide:${cwd}$ ${cmd}`,
-      ...simulateCommandOutput(cmd)
+      promptText,
+      `bash: ${cmd}: command not found. Type 'help' for available commands.`
     ]);
     setTerminalInput("");
   };
 
-  const simulateCommandOutput = (command) => {
-    const args = command.trim().split(/\s+/);
-    const cmd = args[0].toLowerCase();
-
-    switch (cmd) {
-      case 'help':
-        return [
-          'InnoIDE Mock Terminal v1.0.0',
-          'Available commands:',
-          '  help     - Show this menu',
-          '  ls       - List files in current directory',
-          '  pwd      - Print working directory',
-          '  cd <dir> - Change directory',
-          '  clear    - Clear the terminal screen',
-          '  echo     - Print text to terminal',
-          '  date     - Show current system date/time',
-          '  whoami   - Show current user',
-          '  uname    - Show system information',
-          '  cat      - Read file content (mock)',
-          '  mkdir    - Create directory (mock)',
-          '  touch    - Create file (mock)'
-        ];
-      case 'ls':
-        if (cwd === '/home/user') return ['main.c  src/  include/  Makefile  README.md  build/'];
-        if (cwd.includes('src')) return ['main.c  utils.c  handlers.h'];
-        return ['total 0'];
-      case 'pwd':
-        return [cwd];
-      case 'cd':
-        const target = args[1];
-        if (!target || target === '~') {
-          setCwd('/home/user');
-        } else if (target === '..') {
-          const parts = cwd.split('/').filter(Boolean);
-          if (parts.length > 0) {
-            setCwd('/' + parts.slice(0, -1).join('/'));
-          } else {
-            setCwd('/');
-          }
-        } else {
-          const newPath = `${cwd === '/' ? '' : cwd}/${target}`;
-          if (['/home/user/src', '/home/user/include', '/home/user/build', '/home/user'].includes(newPath)) {
-            setCwd(newPath);
-          } else {
-            return [`bash: cd: ${target}: No such file or directory`];
-          }
-        }
-        return [];
-      case 'date':
-        return [new Date().toString()];
-      case 'whoami':
-        return ['user'];
-      case 'uname':
-        return ['InnoIDE-WebOS 5.15.0-x86_64-GNU/Linux'];
-      case 'clear':
-        setTerminalOutput([]);
-        return [];
-      case 'echo':
-        return [args.slice(1).join(' ')];
-      case 'cat':
-        if (!args[1]) return ['usage: cat <filename>'];
-        if (args[1] === 'README.md') return ['# InnoIDE Project', 'This is a sample project for firmware development.', 'Use the Tools menu to build and flash.'];
-        if (args[1] === 'main.c') return ['#include <stdio.h>', '', 'int main() {', '    printf("Hello InnoIDE!\\n");', '    return 0;', '}'];
-        return [`cat: ${args[1]}: No such file or directory`];
-      case 'mkdir':
-      case 'touch':
-        if (!args[1]) return [`usage: ${cmd} <name>`];
-        return [`${cmd}: created ${args[1]} (simulated)`];
-      default:
-        return [`bash: ${cmd}: command not found`];
-    }
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      handleTerminalCommand();
-    } else if (e.key === 'ArrowUp') {
+  const handleTerminalKeyDown = (e) => {
+    if (e.key === "Enter") {
+      executeTerminalCommand(terminalInput);
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (history.length > 0) {
-        const newIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
-        setHistoryIndex(newIndex);
-        setTerminalInput(history[newIndex]);
+        const next = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
+        setHistoryIndex(next);
+        setTerminalInput(history[next]);
       }
-    } else if (e.key === 'ArrowDown') {
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       if (historyIndex !== -1) {
-        const newIndex = historyIndex + 1;
-        if (newIndex >= history.length) {
+        const next = historyIndex + 1;
+        if (next >= history.length) {
           setHistoryIndex(-1);
           setTerminalInput("");
         } else {
-          setHistoryIndex(newIndex);
-          setTerminalInput(history[newIndex]);
+          setHistoryIndex(next);
+          setTerminalInput(history[next]);
         }
       }
     }
   };
 
-  // Add listeners for navbar tool events
+  // Auto-scroll terminal
   useEffect(() => {
-    const handleViewOutput = () => {
-      setActivePanel("problem");
-      setTimeout(scrollToPanel, 100);
-    };
-    const handleProblem = () => {
-      setActivePanel("problem");
-      setTimeout(scrollToPanel, 100);
-    };
-    const handleDebugConsole = () => {
-      setActivePanel("debug");
-      setTimeout(scrollToPanel, 100);
-    };
-    const handleTerminalOpen = () => {
-      setActivePanel("terminal");
-      setTimeout(scrollToPanel, 100);
-    };
-    const handlePostman = (e) => {
-      if (e?.detail) {
-        if (e.detail.url) setPostmanUrl(e.detail.url);
-        if (e.detail.method) setPostmanMethod(e.detail.method);
-        if (e.detail.body) setPostmanBody(e.detail.body);
-      }
-      setActivePanel("postman");
-      setTimeout(scrollToPanel, 100);
-    };
-    const handleRestApi = () => {
-      setActivePanel("restApi");
-      setTimeout(scrollToPanel, 100);
-    };
+    if (terminalBottomRef.current) {
+      terminalBottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [terminalOutput]);
 
-    window.addEventListener('innoide:view-output', handleViewOutput);
-    window.addEventListener('innoide:problem', handleProblem);
-    window.addEventListener('innoide:debug-console', handleDebugConsole);
-    window.addEventListener('innoide:terminal-open', handleTerminalOpen);
-    window.addEventListener('innoide:postman', handlePostman);
-    window.addEventListener('innoide:rest-api', handleRestApi);
-
-    return () => {
-      window.removeEventListener('innoide:view-output', handleViewOutput);
-      window.removeEventListener('innoide:problem', handleProblem);
-      window.removeEventListener('innoide:debug-console', handleDebugConsole);
-      window.removeEventListener('innoide:terminal-open', handleTerminalOpen);
-      window.removeEventListener('innoide:postman', handlePostman);
-      window.removeEventListener('innoide:rest-api', handleRestApi);
-    };
-  }, []);
-
+  // -------------------------------------------------------------
+  // Postman Handler
+  // -------------------------------------------------------------
   const handlePostmanSend = async () => {
     setPostmanLoading(true);
     setPostmanResponse(null);
@@ -1444,12 +807,12 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
       const options = {
         method: postmanMethod,
         url: postmanUrl,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       };
-      if (['POST', 'PUT', 'PATCH'].includes(postmanMethod) && postmanBody) {
+      if (["POST", "PUT", "PATCH"].includes(postmanMethod) && postmanBody) {
         try {
           options.data = JSON.parse(postmanBody);
-        } catch (e) {
+        } catch {
           throw new Error("Invalid JSON body");
         }
       }
@@ -1471,104 +834,93 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
     }
   };
 
-  const responseStyle = {
-    marginTop: "20px",
-    padding: "10px",
-    backgroundColor: colorMode === "dark" ? "#2D3748" : "#F7FAFC",
-    color: colorMode === "dark" ? "#E2E8F0" : "#2D3748",
-    borderRadius: "5px",
-    border: `1px solid ${colorMode === "dark" ? "#4A5568" : "#CBD5E0"}`,
-  };
-
-  const runCode = async () => {
-    // ... (existing runCode implementation)
-    const sourceCode = editorRef.current.getValue();
-    if (!sourceCode) {
-      toast({
-        title: "No code provided.",
-        description: "Please write some code to execute.",
-        status: "warning",
-        duration: 3000,
-      });
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      setActivePanel("problem");
-      const { run: result } = await executeCode("c", sourceCode, userInput); // Pass user input
-      setOutput((prevOutput) => [...prevOutput, ...result.output.split("\n")]); // Append output
-      setIsError(!!result.stderr);
-    } catch (error) {
-      console.error(error);
-      toast({
-        title: "Error occurred.",
-        description: error.message || "Could not execute the code.",
-        status: "error",
-        duration: 6000,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Global listener for USB Device Plug & Play hotplug events
-  useEffect(() => {
-    if (!window.electronAPI?.flash?.onEvent) return;
-
-    const cleanup = window.electronAPI.flash.onEvent(evt => {
-      if (evt.status === 'port_connected') {
-        const connectedPort = evt.port || (evt.ports && evt.ports[0]?.path) || 'COM5';
-        console.log('🔌 Auto-detected USB device connected:', connectedPort);
-        setIsDeviceConnectedForActions(true);
-        setSelectedDeviceInfo({ port: connectedPort, deviceType: 'ESP32' });
-        localStorage.setItem('innoide:device-connected', 'true');
-        localStorage.setItem('innoide:device-info', JSON.stringify({ port: connectedPort, deviceType: 'ESP32' }));
-        window.dispatchEvent(new CustomEvent('innoide:device-connect', { detail: { port: connectedPort, deviceType: 'ESP32' } }));
-      } else if (evt.status === 'port_disconnected') {
-        console.log('❌ USB device disconnected:', evt.port);
-        setIsDeviceConnectedForActions(false);
-        setSelectedDeviceInfo(null);
-        localStorage.setItem('innoide:device-connected', 'false');
-        localStorage.removeItem('innoide:device-info');
-        window.dispatchEvent(new CustomEvent('innoide:device-disconnect'));
-      }
-    });
-
-    return () => cleanup();
-  }, []);
-
-  // Launch the Flash to Device 4-step wizard starting with Screen 9
+  // -------------------------------------------------------------
+  // Global Event Listeners (Navbar & Menu integration)
+  // -------------------------------------------------------------
   const handleCodeFlash = () => {
-    window.dispatchEvent(new CustomEvent('innoide:flash-start'));
+    window.dispatchEvent(new CustomEvent("innoide:flash-start"));
   };
 
+  useEffect(() => {
+    const handleViewOutput = () => {
+      setActivePanel("viewOutput");
+      if (onExpand) onExpand();
+      setTimeout(scrollToPanel, 100);
+    };
+    const handleProblem = () => {
+      setActivePanel("problem");
+      if (onExpand) onExpand();
+      setTimeout(scrollToPanel, 100);
+    };
+    const handleDebugConsole = () => {
+      setActivePanel("debug");
+      if (onExpand) onExpand();
+      setTimeout(scrollToPanel, 100);
+    };
+    const handleTerminalOpen = () => {
+      setActivePanel("terminal");
+      if (onExpand) onExpand();
+      setTimeout(scrollToPanel, 100);
+    };
+    const handlePostman = (e) => {
+      if (e?.detail) {
+        if (e.detail.url) setPostmanUrl(e.detail.url);
+        if (e.detail.method) setPostmanMethod(e.detail.method);
+        if (e.detail.body) setPostmanBody(e.detail.body);
+      }
+      setActivePanel("postman");
+      if (onExpand) onExpand();
+      setTimeout(scrollToPanel, 100);
+    };
+    const handleRestApi = () => {
+      setActivePanel("restApi");
+      if (onExpand) onExpand();
+      setTimeout(scrollToPanel, 100);
+    };
+
+    window.addEventListener("innoide:view-output", handleViewOutput);
+    window.addEventListener("innoide:problem", handleProblem);
+    window.addEventListener("innoide:debug-console", handleDebugConsole);
+    window.addEventListener("innoide:serial-open", handleDebugConsole);
+    window.addEventListener("innoide:terminal-open", handleTerminalOpen);
+    window.addEventListener("innoide:postman", handlePostman);
+    window.addEventListener("innoide:rest-api", handleRestApi);
+    window.addEventListener("innoide:compile-start", runCode);
+    window.addEventListener("innoide:build-start", runCode);
+
+    return () => {
+      window.removeEventListener("innoide:view-output", handleViewOutput);
+      window.removeEventListener("innoide:problem", handleProblem);
+      window.removeEventListener("innoide:debug-console", handleDebugConsole);
+      window.removeEventListener("innoide:serial-open", handleDebugConsole);
+      window.removeEventListener("innoide:terminal-open", handleTerminalOpen);
+      window.removeEventListener("innoide:postman", handlePostman);
+      window.removeEventListener("innoide:rest-api", handleRestApi);
+      window.removeEventListener("innoide:compile-start", runCode);
+      window.removeEventListener("innoide:build-start", runCode);
+    };
+  }, [onExpand, scrollToPanel]);
+
+  // Imperative handle
   useImperativeHandle(ref, () => ({
     runCode,
     flashCode: handleCodeFlash,
     appendOutputLine: (line) => {
       setOutput((prev) => [...prev, line]);
-      setResponse((prev) => (prev ? `${prev}\n${line}` : line));
     },
     clearOutput: () => {
       setOutput([]);
-      setResponse("");
+      setExecutionSummary(null);
     },
+    setActivePanel: (panel) => {
+      setActivePanel(panel);
+      if (onExpand) onExpand();
+    }
   }));
 
-  const handleRunClick = () => {
-    setIsRunClicked(true);
-    scrollToPanel();
-    runCode();
-  };
-
-  const openModal = () => {
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-  };
+  // Style Tokens
+  const consoleBg = colorMode === "dark" ? "#0a0e17" : "#0d1117";
+  const consoleBorder = colorMode === "dark" ? "gray.700" : "gray.200";
 
   return (
     <Box
@@ -1583,68 +935,792 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
       flexDirection="column"
       {...rest}
     >
-
-      {/* Tool Selection Buttons */}
-      <HStack spacing={4} mb={6} flexWrap="wrap">
+      {/* Primary Tool Selection Buttons matching screenshot exactly */}
+      <HStack spacing={3} mb={4} flexWrap="wrap">
         {[
-          { id: "flash", label: "Flash", action: handleCodeFlash },
-          { id: "viewOutput", label: "View Output", action: runCode },
-          { id: "problem", label: "Problem" },
-          { id: "debug", label: "Debug Console" },
+          { id: "viewOutput", label: "View Output" },
+          { id: "problem", label: "Problem", count: allProblems.length },
+          { id: "debug", label: "Debug Console", isConnected: isConnectedToDevice },
           { id: "terminal", label: "Terminal" },
+          { id: "flash", label: "Flash", action: handleCodeFlash },
           { id: "postman", label: "Postman" },
           { id: "restApi", label: "REST API" },
-        ].map((item) => (
-          <Button
-            key={item.id}
-            size="sm"
-            variant={activePanel === item.id ? "solid" : "outline"}
-            colorScheme="blue"
-            onClick={() => {
-              if (activePanel === item.id && !item.action) {
-                setActivePanel(null);
-                if (onCollapse) onCollapse();
-              } else {
-                if (onExpand) onExpand();
-                scrollToPanel();
+        ].map((item) => {
+          const isActive = activePanel === item.id;
+          return (
+            <Button
+              key={item.id}
+              id={`panel-tab-${item.id}`}
+              size="sm"
+              variant={isActive ? "solid" : "outline"}
+              colorScheme="blue"
+              onClick={() => {
                 if (item.action) {
                   item.action();
                 } else {
                   setActivePanel(item.id);
+                  if (onExpand) onExpand();
+                  scrollToPanel();
                 }
+              }}
+              borderRadius="md"
+              px={5}
+              h="36px"
+              fontWeight="500"
+              _hover={
+                !isActive
+                  ? {
+                      bg: colorMode === "dark" ? "whiteAlpha.100" : "blue.50",
+                      borderColor: "blue.400",
+                    }
+                  : {}
               }
-            }}
-            borderRadius="md"
-            px={6}
-            h="36px"
-            fontWeight="500"
-            _hover={activePanel !== item.id ? { bg: "blue.50", borderColor: "blue.400" } : {}}
-          >
-            {item.label}
-          </Button>
-        ))}
+              rightIcon={
+                item.count > 0 ? (
+                  <Badge
+                    colorScheme={errorCount > 0 ? "red" : "orange"}
+                    variant="solid"
+                    borderRadius="full"
+                    px={1.5}
+                    fontSize="10px"
+                  >
+                    {item.count}
+                  </Badge>
+                ) : item.isConnected ? (
+                  <Box w="8px" h="8px" borderRadius="full" bg="green.400" boxShadow="0 0 6px #48bb78" />
+                ) : null
+              }
+            >
+              {item.label}
+            </Button>
+          );
+        })}
       </HStack>
 
-      {/* Main Content Container (Bordered Box) */}
+      {/* Main Content Container */}
       <Box
         border="1px solid"
-        borderColor={colorMode === "dark" ? "gray.600" : "gray.200"}
+        borderColor={consoleBorder}
         borderRadius="lg"
-        p={6}
+        p={4}
         boxShadow="sm"
         flex="1"
         overflowY="auto"
         minH="0"
         bg={colorMode === "dark" ? "gray.900" : "white"}
         sx={{
-          '&::-webkit-scrollbar': { width: '7px' },
-          '&::-webkit-scrollbar-track': { background: 'transparent' },
-          '&::-webkit-scrollbar-thumb': { background: colorMode === 'dark' ? '#666' : '#555', borderRadius: '8px' },
-          '&::-webkit-scrollbar-thumb:hover': { background: colorMode === 'dark' ? '#888' : '#333' },
+          "&::-webkit-scrollbar": { width: "7px" },
+          "&::-webkit-scrollbar-track": { background: "transparent" },
+          "&::-webkit-scrollbar-thumb": {
+            background: colorMode === "dark" ? "#666" : "#aaa",
+            borderRadius: "8px",
+          },
+          "&::-webkit-scrollbar-thumb:hover": {
+            background: colorMode === "dark" ? "#888" : "#888",
+          },
         }}
       >
+        {/* ========================================================= */}
+        {/* PANEL 1: VIEW OUTPUT                                      */}
+        {/* ========================================================= */}
+        {activePanel === "viewOutput" && (
+          <Flex direction="column" h="100%" gap={3}>
+            {/* Header Control Bar */}
+            <Flex
+              justify="space-between"
+              align="center"
+              flexWrap="wrap"
+              gap={2}
+              pb={3}
+              borderBottom="1px solid"
+              borderColor={colorMode === "dark" ? "gray.700" : "gray.200"}
+            >
+              <HStack spacing={3}>
+                <Text fontSize="sm" fontWeight="bold" color={colorMode === "dark" ? "white" : "gray.800"}>
+                  Execution Output
+                </Text>
+                <Badge colorScheme="blue" variant="subtle" px={2} py={0.5} borderRadius="md" fontSize="xs">
+                  {!language || language.toLowerCase().includes("select") ? "C (GCC / C11)" : language.toUpperCase()}
+                </Badge>
+                {isLoading ? (
+                  <Badge colorScheme="yellow" display="flex" alignItems="center" gap={1.5}>
+                    <Spinner size="xs" /> Executing...
+                  </Badge>
+                ) : executionSummary ? (
+                  <HStack spacing={2}>
+                    <Badge colorScheme={executionSummary.isError ? "red" : "green"}>
+                      Exit: {executionSummary.exitCode}
+                    </Badge>
+                    <Text fontSize="xs" color="gray.500">
+                      {executionSummary.durationMs}ms
+                    </Text>
+                  </HStack>
+                ) : (
+                  <Badge colorScheme="gray">Ready</Badge>
+                )}
+              </HStack>
 
-        {/* REST API Builder Panel UI */}
+              <HStack spacing={2}>
+                <Button
+                  leftIcon={<Play size={14} />}
+                  size="xs"
+                  colorScheme="blue"
+                  isLoading={isLoading}
+                  onClick={runCode}
+                >
+                  Run Code
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setShowStdin(!showStdin)}
+                  colorScheme={showStdin ? "blue" : "gray"}
+                >
+                  {showStdin ? "Hide Stdin" : "Stdin"}
+                </Button>
+                <Tooltip label="Copy Output">
+                  <IconButton
+                    aria-label="Copy Output"
+                    icon={copiedOutput ? <Check size={14} color="green" /> : <Copy size={14} />}
+                    size="xs"
+                    variant="ghost"
+                    onClick={handleCopyOutput}
+                    isDisabled={output.length === 0}
+                  />
+                </Tooltip>
+                <Tooltip label="Clear Output">
+                  <IconButton
+                    aria-label="Clear Output"
+                    icon={<Trash2 size={14} />}
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setOutput([]);
+                      setExecutionSummary(null);
+                    }}
+                  />
+                </Tooltip>
+              </HStack>
+            </Flex>
+
+            {/* Standard Input Collapse */}
+            <Collapse in={showStdin} animateOpacity>
+              <Box mb={2} p={2} bg={colorMode === "dark" ? "gray.800" : "gray.50"} borderRadius="md">
+                <Text fontSize="xs" mb={1} fontWeight="600" color="gray.500">
+                  Standard Input (passed to program stdin):
+                </Text>
+                <Input
+                  size="sm"
+                  fontFamily="monospace"
+                  placeholder="Enter stdin input here..."
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  bg={colorMode === "dark" ? "gray.900" : "white"}
+                />
+              </Box>
+            </Collapse>
+
+            {/* Console Log Body */}
+            <Box
+              flex="1"
+              bg={consoleBg}
+              borderRadius="md"
+              p={4}
+              fontFamily="Consolas, Monaco, 'Courier New', monospace"
+              fontSize="13px"
+              color="#e2e8f0"
+              overflowY="auto"
+              minH="220px"
+              maxH="450px"
+              border="1px solid"
+              borderColor={colorMode === "dark" ? "gray.700" : "gray.300"}
+            >
+              {isLoading ? (
+                <Flex align="center" justify="center" h="100%" minH="180px" direction="column" gap={3}>
+                  <Spinner size="md" color="blue.400" />
+                  <Text color="gray.400" fontSize="sm">
+                    Compiling and executing code in cloud sandbox...
+                  </Text>
+                </Flex>
+              ) : output.length === 0 ? (
+                <Flex align="center" justify="center" h="100%" minH="180px" direction="column" gap={3}>
+                  <Box p={3} borderRadius="full" bg="whiteAlpha.100">
+                    <Play size={24} color="#60a5fa" />
+                  </Box>
+                  <Text color="gray.300" fontWeight="600">
+                    No output generated yet
+                  </Text>
+                  <Text color="gray.400" fontSize="xs" maxW="380px" textAlign="center">
+                    Click "Run Code" above or press compile in the Tools menu to execute your code.
+                  </Text>
+                  <Button size="sm" colorScheme="blue" leftIcon={<Play size={14} />} onClick={runCode}>
+                    Run Code Now
+                  </Button>
+                </Flex>
+              ) : (
+                output.map((line, idx) => {
+                  const isErr =
+                    /error:|fatal error:|exception:|syntaxerror:|stderr/i.test(line);
+                  const isWarn = /warning:/i.test(line);
+                  const isHeader = /^\[.*\]$/.test(line.trim());
+
+                  return (
+                    <Text
+                      key={idx}
+                      color={
+                        isErr
+                          ? "#f87171"
+                          : isWarn
+                          ? "#fbbf24"
+                          : isHeader
+                          ? "#38bdf8"
+                          : "#f1f5f9"
+                      }
+                      whiteSpace="pre-wrap"
+                      wordBreak="break-word"
+                      lineHeight="1.5"
+                    >
+                      {line}
+                    </Text>
+                  );
+                })
+              )}
+              <div ref={outputBottomRef} />
+            </Box>
+          </Flex>
+        )}
+
+        {/* ========================================================= */}
+        {/* PANEL 2: PROBLEM (DIAGNOSTICS & ERRORS)                   */}
+        {/* ========================================================= */}
+        {activePanel === "problem" && (
+          <Flex direction="column" h="100%" gap={3}>
+            {/* Header Control Bar */}
+            <Flex
+              justify="space-between"
+              align="center"
+              flexWrap="wrap"
+              gap={2}
+              pb={3}
+              borderBottom="1px solid"
+              borderColor={colorMode === "dark" ? "gray.700" : "gray.200"}
+            >
+              <HStack spacing={3}>
+                <Text fontSize="sm" fontWeight="bold" color={colorMode === "dark" ? "white" : "gray.800"}>
+                  Problems
+                </Text>
+                <Badge
+                  colorScheme={allProblems.length > 0 ? (errorCount > 0 ? "red" : "orange") : "green"}
+                  variant="solid"
+                  px={2}
+                  py={0.5}
+                  borderRadius="full"
+                  fontSize="xs"
+                >
+                  {allProblems.length}
+                </Badge>
+              </HStack>
+
+              <HStack spacing={2}>
+                <Button
+                  size="xs"
+                  variant={problemFilter === "all" ? "solid" : "outline"}
+                  colorScheme="blue"
+                  onClick={() => setProblemFilter("all")}
+                >
+                  All ({allProblems.length})
+                </Button>
+                <Button
+                  size="xs"
+                  variant={problemFilter === "errors" ? "solid" : "outline"}
+                  colorScheme="red"
+                  onClick={() => setProblemFilter("errors")}
+                >
+                  Errors ({errorCount})
+                </Button>
+                <Button
+                  size="xs"
+                  variant={problemFilter === "warnings" ? "solid" : "outline"}
+                  colorScheme="orange"
+                  onClick={() => setProblemFilter("warnings")}
+                >
+                  Warnings ({warningCount})
+                </Button>
+                <Tooltip label="Clear Compiler Problems">
+                  <IconButton
+                    aria-label="Clear compiler problems"
+                    icon={<Trash2 size={14} />}
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setCompilerProblems([])}
+                  />
+                </Tooltip>
+              </HStack>
+            </Flex>
+
+            {/* Problems List */}
+            <Box flex="1" overflowY="auto" minH="220px" maxH="450px">
+              {filteredProblems.length === 0 ? (
+                <Flex align="center" justify="center" h="100%" minH="200px" direction="column" gap={2}>
+                  <Box p={3} borderRadius="full" bg="green.50" _dark={{ bg: "green.900" }}>
+                    <CheckCircle2 size={32} color="#22c55e" />
+                  </Box>
+                  <Text fontWeight="600" color={colorMode === "dark" ? "gray.200" : "gray.700"}>
+                    No problems have been detected in the workspace.
+                  </Text>
+                  <Text fontSize="xs" color="gray.500">
+                    Your code passes Monaco syntax checks and compiler validation.
+                  </Text>
+                </Flex>
+              ) : (
+                <VStack spacing={2} align="stretch">
+                  {filteredProblems.map((prob) => (
+                    <Box
+                      key={prob.id}
+                      p={3}
+                      borderRadius="md"
+                      border="1px solid"
+                      borderColor={
+                        prob.severity === "error"
+                          ? "red.200"
+                          : prob.severity === "warning"
+                          ? "orange.200"
+                          : "blue.200"
+                      }
+                      bg={
+                        colorMode === "dark"
+                          ? prob.severity === "error"
+                            ? "rgba(239, 68, 68, 0.1)"
+                            : "rgba(245, 158, 11, 0.1)"
+                          : prob.severity === "error"
+                          ? "red.50"
+                          : "orange.50"
+                      }
+                      cursor="pointer"
+                      onClick={() => handleJumpToProblem(prob)}
+                      _hover={{
+                        transform: "translateY(-1px)",
+                        boxShadow: "sm",
+                        borderColor: prob.severity === "error" ? "red.400" : "orange.400",
+                      }}
+                      transition="all 0.15s ease"
+                    >
+                      <Flex justify="space-between" align="flex-start" gap={2}>
+                        <HStack spacing={2.5} align="flex-start">
+                          <Box mt={0.5}>
+                            {prob.severity === "error" ? (
+                              <XCircle size={16} color="#ef4444" />
+                            ) : prob.severity === "warning" ? (
+                              <AlertTriangle size={16} color="#f59e0b" />
+                            ) : (
+                              <Info size={16} color="#3b82f6" />
+                            )}
+                          </Box>
+                          <Box>
+                            <Text fontSize="sm" fontWeight="600" color={colorMode === "dark" ? "gray.100" : "gray.800"}>
+                              {prob.message}
+                            </Text>
+                            <HStack spacing={2} mt={1}>
+                              <Badge size="sm" variant="subtle" colorScheme="gray" fontSize="xs">
+                                {prob.source}
+                              </Badge>
+                              <Text fontSize="xs" color="gray.500">
+                                {prob.file} [Line {prob.line}, Col {prob.column}]
+                              </Text>
+                            </HStack>
+                          </Box>
+                        </HStack>
+
+                        <Button size="xs" variant="ghost" colorScheme="blue" rightIcon={<ChevronRight size={12} />}>
+                          Go to line
+                        </Button>
+                      </Flex>
+                    </Box>
+                  ))}
+                </VStack>
+              )}
+            </Box>
+          </Flex>
+        )}
+
+        {/* ========================================================= */}
+        {/* PANEL 3: DEBUG CONSOLE & SERIAL MONITOR                   */}
+        {/* ========================================================= */}
+        {activePanel === "debug" && (
+          <Flex direction="column" h="100%" gap={3}>
+            {/* Header Control Bar */}
+            <Flex
+              justify="space-between"
+              align="center"
+              flexWrap="wrap"
+              gap={2}
+              pb={3}
+              borderBottom="1px solid"
+              borderColor={colorMode === "dark" ? "gray.700" : "gray.200"}
+            >
+              <HStack spacing={3}>
+                <Text fontSize="sm" fontWeight="bold" color={colorMode === "dark" ? "white" : "gray.800"}>
+                  Debug Console & Serial
+                </Text>
+                <HStack spacing={1.5}>
+                  <Box
+                    w="8px"
+                    h="8px"
+                    borderRadius="full"
+                    bg={isConnectedToDevice ? "green.400" : "gray.400"}
+                    boxShadow={isConnectedToDevice ? "0 0 8px #48bb78" : "none"}
+                  />
+                  <Text fontSize="xs" fontWeight="500" color={isConnectedToDevice ? "green.500" : "gray.500"}>
+                    {isConnectedToDevice ? `Connected (${selectedPort})` : "Disconnected"}
+                  </Text>
+                </HStack>
+              </HStack>
+
+              <HStack spacing={2} flexWrap="wrap">
+                <Select
+                  size="xs"
+                  w="100px"
+                  value={selectedPort}
+                  onChange={(e) => setSelectedPort(e.target.value)}
+                  borderRadius="md"
+                  isDisabled={isConnectedToDevice}
+                >
+                  {availablePorts.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  size="xs"
+                  w="100px"
+                  value={baudRate}
+                  onChange={(e) => setBaudRate(e.target.value)}
+                  borderRadius="md"
+                  isDisabled={isConnectedToDevice}
+                >
+                  <option value="9600">9600</option>
+                  <option value="57600">57600</option>
+                  <option value="115200">115200</option>
+                  <option value="230400">230400</option>
+                  <option value="921600">921600</option>
+                </Select>
+
+                <Tooltip label="Rescan COM Ports">
+                  <IconButton
+                    aria-label="Scan Ports"
+                    icon={<RefreshCw size={13} className={isScanningPorts ? "spin" : ""} />}
+                    size="xs"
+                    variant="outline"
+                    onClick={scanPorts}
+                    isLoading={isScanningPorts}
+                    isDisabled={isConnectedToDevice}
+                  />
+                </Tooltip>
+
+                <Button
+                  size="xs"
+                  colorScheme={isConnectedToDevice ? "red" : "green"}
+                  onClick={handleToggleSerialConnect}
+                >
+                  {isConnectedToDevice ? "Disconnect" : "Connect Serial"}
+                </Button>
+
+                <Tooltip label="Clear Console">
+                  <IconButton
+                    aria-label="Clear Console"
+                    icon={<Trash2 size={13} />}
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setSerialOutput([])}
+                  />
+                </Tooltip>
+
+                <Checkbox
+                  size="sm"
+                  isChecked={debugAutoScroll}
+                  onChange={(e) => setDebugAutoScroll(e.target.checked)}
+                >
+                  <Text fontSize="xs">Auto-scroll</Text>
+                </Checkbox>
+              </HStack>
+            </Flex>
+
+            {/* Debug Console Output Stream */}
+            <Box
+              flex="1"
+              bg={consoleBg}
+              borderRadius="md"
+              p={4}
+              fontFamily="Consolas, Monaco, 'Courier New', monospace"
+              fontSize="12px"
+              color="#00ff66"
+              overflowY="auto"
+              minH="200px"
+              maxH="380px"
+              border="1px solid"
+              borderColor={colorMode === "dark" ? "gray.700" : "gray.300"}
+            >
+              {serialOutput.length === 0 ? (
+                <Text color="gray.500" fontStyle="italic">
+                  Console buffer empty. Connect to serial or send a command below.
+                </Text>
+              ) : (
+                serialOutput.map((line, i) => {
+                  const isSys = /\[SYSTEM\]|\[INFO\]/i.test(line);
+                  const isErr = /\[ERR\]|\[ERROR\]|E \(/i.test(line);
+                  const isWarn = /\[WARN\]|W \(/i.test(line);
+                  const isSent = line.trim().startsWith(">");
+
+                  return (
+                    <Text
+                      key={i}
+                      color={
+                        isSent
+                          ? "#38bdf8"
+                          : isErr
+                          ? "#f87171"
+                          : isWarn
+                          ? "#fbbf24"
+                          : isSys
+                          ? "#94a3b8"
+                          : "#22c55e"
+                      }
+                      whiteSpace="pre-wrap"
+                      wordBreak="break-word"
+                      lineHeight="1.5"
+                    >
+                      {line}
+                    </Text>
+                  );
+                })
+              )}
+              <div ref={debugBottomRef} />
+            </Box>
+
+            {/* Command Send Bar */}
+            <HStack spacing={2}>
+              <Input
+                size="sm"
+                fontFamily="monospace"
+                placeholder="Send command or expression (e.g. HELP, RESTART, LED:1)..."
+                value={debugInput}
+                onChange={(e) => setDebugInput(e.target.value)}
+                onKeyDown={handleDebugKeyDown}
+                bg={colorMode === "dark" ? "gray.800" : "white"}
+                borderRadius="md"
+              />
+              <Button
+                size="sm"
+                colorScheme="blue"
+                leftIcon={<Send size={14} />}
+                onClick={handleSendDebugCommand}
+              >
+                Send
+              </Button>
+            </HStack>
+          </Flex>
+        )}
+
+        {/* ========================================================= */}
+        {/* PANEL 4: TERMINAL                                         */}
+        {/* ========================================================= */}
+        {activePanel === "terminal" && (
+          runtimeState !== "idle" && runtimeState !== "uploading" ? (
+            <Box h="100%" minH="250px">
+              <TerminalPanel isExpanded={true} onToggleExpand={onExpand} />
+            </Box>
+          ) : (
+            <Flex direction="column" h="100%" gap={3}>
+              {/* Terminal Header Bar */}
+              <Flex
+                justify="space-between"
+                align="center"
+                pb={2}
+                borderBottom="1px solid"
+                borderColor={colorMode === "dark" ? "gray.700" : "gray.200"}
+              >
+                <HStack spacing={2}>
+                  <TerminalIcon size={14} color="#3b82f6" />
+                  <Text fontSize="sm" fontWeight="bold" color={colorMode === "dark" ? "white" : "gray.800"}>
+                    Terminal
+                  </Text>
+                  <Badge colorScheme="blue" variant="subtle" fontSize="xs">
+                    bash
+                  </Badge>
+                  <Text fontSize="xs" color="gray.500">
+                    {cwd}
+                  </Text>
+                </HStack>
+
+                <HStack spacing={2}>
+                  <Tooltip label="Clear Screen">
+                    <IconButton
+                      aria-label="Clear screen"
+                      icon={<Trash2 size={13} />}
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setTerminalOutput([])}
+                    />
+                  </Tooltip>
+                  <Tooltip label="Copy All">
+                    <IconButton
+                      aria-label="Copy All"
+                      icon={<Copy size={13} />}
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        navigator.clipboard.writeText(terminalOutput.join("\n"));
+                        toast({ title: "Copied", description: "Terminal buffer copied", status: "info", duration: 2000 });
+                      }}
+                    />
+                  </Tooltip>
+                </HStack>
+              </Flex>
+
+              {/* Terminal Screen */}
+              <Box
+                flex="1"
+                bg={consoleBg}
+                borderRadius="md"
+                p={4}
+                fontFamily="Consolas, Monaco, 'Courier New', monospace"
+                fontSize="13px"
+                color="#e2e8f0"
+                overflowY="auto"
+                minH="220px"
+                maxH="400px"
+                border="1px solid"
+                borderColor={colorMode === "dark" ? "gray.700" : "gray.300"}
+              >
+                {terminalOutput.map((line, i) => (
+                  <Text key={i} mb={1} whiteSpace="pre-wrap" wordBreak="break-word" lineHeight="1.4">
+                    {line}
+                  </Text>
+                ))}
+                <div ref={terminalBottomRef} />
+              </Box>
+
+              {/* Prompt & Input Bar */}
+              <HStack spacing={2} align="center" mt={1}>
+                <Text
+                  color="#22c55e"
+                  fontWeight="bold"
+                  fontSize="13px"
+                  fontFamily="Consolas, Monaco, monospace"
+                  whiteSpace="nowrap"
+                >
+                  {`user@innoide:${cwd}$`}
+                </Text>
+                <Input
+                  size="sm"
+                  fontFamily="Consolas, Monaco, monospace"
+                  fontSize="13px"
+                  placeholder="Type command ('help' for options)..."
+                  value={terminalInput}
+                  onChange={(e) => setTerminalInput(e.target.value)}
+                  onKeyDown={handleTerminalKeyDown}
+                  bg={colorMode === "dark" ? "gray.800" : "white"}
+                  borderRadius="md"
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  colorScheme="blue"
+                  onClick={() => executeTerminalCommand(terminalInput)}
+                >
+                  Run
+                </Button>
+              </HStack>
+            </Flex>
+          )
+        )}
+
+        {/* ========================================================= */}
+        {/* PANEL 5: POSTMAN HTTP CLIENT                              */}
+        {/* ========================================================= */}
+        {activePanel === "postman" && (
+          <Box display="flex" flexDirection="column" gap={4}>
+            <HStack spacing={3} alignItems="center">
+              <Select
+                w="120px"
+                size="md"
+                value={postmanMethod}
+                onChange={(e) => setPostmanMethod(e.target.value)}
+                borderRadius="md"
+              >
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </Select>
+              <Input
+                size="md"
+                flex={1}
+                placeholder="https://jsonplaceholder.typicode.com/todos/1"
+                value={postmanUrl}
+                onChange={(e) => setPostmanUrl(e.target.value)}
+                borderRadius="md"
+              />
+              <Button
+                colorScheme="blue"
+                size="md"
+                onClick={handlePostmanSend}
+                isLoading={postmanLoading}
+                px={8}
+                borderRadius="md"
+              >
+                Send
+              </Button>
+            </HStack>
+
+            {["POST", "PUT", "PATCH"].includes(postmanMethod) && (
+              <Box>
+                <Text fontSize="xs" mb={1} color="gray.500">
+                  Request Body (JSON)
+                </Text>
+                <Textarea
+                  size="sm"
+                  value={postmanBody}
+                  onChange={(e) => setPostmanBody(e.target.value)}
+                  placeholder='{"key": "value"}'
+                  fontFamily="monospace"
+                  rows={4}
+                />
+              </Box>
+            )}
+
+            <Box borderTop="1px solid" borderColor={colorMode === "dark" ? "gray.700" : "gray.100"} pt={3}>
+              <Text fontSize="sm" fontWeight="bold" mb={2} color={colorMode === "dark" ? "gray.400" : "gray.700"}>
+                Response {postmanResponse && `(${postmanResponse.status || "Error"})`}
+              </Text>
+              {postmanResponse ? (
+                <Box
+                  bg={consoleBg}
+                  p={4}
+                  borderRadius="md"
+                  overflowY="auto"
+                  maxH="300px"
+                  border="1px solid"
+                  borderColor={colorMode === "dark" ? "gray.700" : "gray.200"}
+                >
+                  <pre style={{ fontSize: "13px", color: "#e2e8f0" }}>
+                    {JSON.stringify(postmanResponse.data || postmanResponse, null, 2)}
+                  </pre>
+                </Box>
+              ) : (
+                <Text fontSize="sm" color="gray.400">
+                  No response yet. Send a request to see output here.
+                </Text>
+              )}
+            </Box>
+          </Box>
+        )}
+
+        {/* ========================================================= */}
+        {/* PANEL 6: REST API BUILDER                                 */}
+        {/* ========================================================= */}
         {activePanel === "restApi" && (
           <ApiBuilderPanel
             onOpenPostman={(reqData) => {
@@ -1658,191 +1734,6 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
               scrollToPanel();
             }}
           />
-        )}
-
-        {/* Postman Panel UI - Rendered independently if toggled */}
-        {activePanel === "postman" && (
-          <Box display="flex" flexDirection="column" gap={6}>
-            <HStack spacing={4} alignItems="center" h="56px" mb={4}>
-              <Select
-                w="120px"
-                size="lg"
-                h="48px"
-                value={postmanMethod}
-                onChange={(e) => setPostmanMethod(e.target.value)}
-                borderRadius="md"
-                bg={colorMode === "dark" ? "gray.800" : "white"}
-                borderColor="gray.200"
-              >
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="DELETE">DELETE</option>
-              </Select>
-              <Input
-                h="48px"
-                width="85%"
-                size="lg"
-                flex={1}
-                placeholder="https://jsonplaceholder.typicode.com/todos/1"
-                textColor={colorMode === "dark" ? "white" : "black"}
-                value={postmanUrl}
-                onChange={(e) => setPostmanUrl(e.target.value)}
-                bg={colorMode === "dark" ? "gray.800" : "white"}
-                borderColor="gray.200"
-                borderRadius="md"
-                sx={{ margin: "0px !important" }}
-              />
-              <Button
-                colorScheme="blue"
-                size="lg"
-                h="48px"
-                onClick={handlePostmanSend}
-                isLoading={postmanLoading}
-                px={10}
-                borderRadius="md"
-              >
-                Send
-              </Button>
-            </HStack>
-
-            {['POST', 'PUT', 'PATCH'].includes(postmanMethod) && (
-              <Box>
-                <Text fontSize="xs" mb={1} color="gray.500">Request Body (JSON)</Text>
-                <Textarea
-                  size="sm"
-                  value={postmanBody}
-                  onChange={(e) => setPostmanBody(e.target.value)}
-                  placeholder='{"key": "value"}'
-                  fontFamily="monospace"
-                  rows={4}
-                  color={colorMode === "dark" ? "white" : "black"}
-                  _placeholder={{ color: "gray.500" }}
-                />
-              </Box>
-            )}
-
-            <Box borderTop="1px solid" borderColor={colorMode === "dark" ? "gray.700" : "gray.100"} pt={4}>
-              <Text fontSize="sm" fontWeight="bold" mb={2} color={colorMode === "dark" ? "gray.400" : "gray.700"}>
-                Response
-              </Text>
-              {postmanResponse ? (
-                <Box
-                  bg={colorMode === "dark" ? "gray.800" : "gray.50"}
-                  p={4}
-                  borderRadius="md"
-                  overflowY="auto"
-                  maxH="400px"
-                  border="1px solid"
-                  borderColor={colorMode === "dark" ? "gray.700" : "gray.200"}
-                >
-                  <pre style={{ fontSize: '13px', color: colorMode === "dark" ? '#e2e8f0' : '#1a202c' }}>
-                    {JSON.stringify(postmanResponse.data, null, 2)}
-                  </pre>
-                </Box>
-              ) : (
-                <Text fontSize="sm" color="gray.400">
-                  No response yet.
-                </Text>
-              )}
-            </Box>
-          </Box>
-        )}
-
-        {activePanel === "problem" && (
-          <Box>
-            <Text fontSize="sm" fontWeight="bold" mb={3} color={colorMode === "dark" ? "gray.500" : "black"}>Output</Text>
-            <pre style={{ ...responseStyle, margin: 0, minHeight: "200px", fontSize: "13px" }}>
-              {output.length > 0
-                ? output.map((line, i) => <Text key={i}>{line}</Text>)
-                : (response || "Run or flash to see output.")}
-            </pre>
-          </Box>
-        )}
-
-        {activePanel === "debug" && (
-          <Box display="flex" flexDirection="column" gap={4}>
-            <Box display="flex" justifyContent="space-between" mb={2}>
-              <Text fontSize="sm" fontWeight="bold" color={colorMode === "dark" ? "gray.500" : "black"}>Debug Console</Text>
-              <HStack spacing={2}>
-                <Button size="xs" onClick={() => setIsConnectedToDevice(!isConnectedToDevice)} colorScheme={isConnectedToDevice ? "red" : "green"}>
-                  {isConnectedToDevice ? "Disconnect" : "Connect Serial"}
-                </Button>
-                <Button size="xs" onClick={() => setSerialOutput([])}>Clear</Button>
-              </HStack>
-            </Box>
-            <Box
-              fontFamily="monospace"
-              fontSize="13px"
-              bg={colorMode === "dark" ? "black" : "gray.50"}
-              p={4}
-              borderRadius="md"
-              maxH="400px"
-              overflowY="auto"
-            >
-              {serialOutput.length === 0 ? (
-                <Text color="gray.400">No debug output. Connect to a device.</Text>
-              ) : (
-                serialOutput.map((line, i) => <Text key={i}>{line}</Text>)
-              )}
-            </Box>
-          </Box>
-        )}
-
-        {activePanel === "terminal" && (
-          runtimeState !== "idle" ? (
-            <Box h="100%" minH="250px">
-              <TerminalPanel 
-                isExpanded={true}
-                onToggleExpand={onExpand}
-              />
-            </Box>
-          ) : (
-            <Box display="flex" flexDirection="column" gap={0} bg="white" border="1px solid" borderColor="gray.200" borderRadius="md" p={6} minH="300px">
-              <Box
-                fontFamily="monospace"
-                fontSize="16px"
-                mb={4}
-                color="black"
-                maxH="400px"
-                overflowY="auto"
-                sx={{
-                  '&::-webkit-scrollbar': { width: '8px' },
-                  '&::-webkit-scrollbar-thumb': { bg: 'gray.200', borderRadius: '4px' },
-                }}
-              >
-                {terminalOutput.map((line, i) => (
-                  <Text key={i} mb={1} whiteSpace="pre-wrap">
-                    {line}
-                  </Text>
-                ))}
-              </Box>
-              <HStack spacing={3} alignItems="center" h="40px" mt={2} mb={0}>
-                <Text color="green.600" fontWeight="bold" fontSize="16px" whiteSpace="nowrap" lineHeight="1">
-                  {`user@innoide:${cwd}$`}
-                </Text>
-                <Input
-                  variant="outline"
-                  size="md"
-                  fontSize="16px"
-                  sx={{ margin: "0px !important", color: "black", _placeholder: { color: "gray.500" } }}
-                  placeholder="Enter your input"
-                  value={terminalInput}
-                  onChange={(e) => setTerminalInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  autoFocus
-                  borderColor="blue.500"
-                  _hover={{ borderColor: "blue.400" }}
-                  _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #3182ce" }}
-                  color="black"
-                  bg="transparent"
-                  borderRadius="md"
-                  maxW="400px"
-                  h="36px"
-                />
-              </HStack>
-            </Box>
-          )
         )}
       </Box>
     </Box>

@@ -29,7 +29,7 @@ import { ensureProjectFolder } from '../utils/workspaceStorage';
 import { useToast } from '@chakra-ui/react';
 import './DiagramTabs.css';
 
-const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
+const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON, onSaveTab }) => {
   const dispatch = useDispatch();
   const toast = useToast();
   const projectContext = useProject() || {}; // Use project context safely
@@ -252,12 +252,18 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
           onClick={async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            try {
-              if (typeof onSaveJSON === 'function') {
-                onSaveJSON();
+            if (typeof onSaveTab === 'function') {
+              try {
+                await onSaveTab(activeTabId);
+              } catch (err) {
+                console.error('[DiagramTabs] onSaveTab error:', err);
               }
-            } catch (err) {
-              console.error('[DiagramTabs] onSaveJSON error:', err);
+            } else if (typeof onSaveJSON === 'function') {
+              try {
+                await onSaveJSON(activeTabId);
+              } catch (err) {
+                console.error('[DiagramTabs] onSaveJSON error:', err);
+              }
             }
             try {
               if (typeof saveActiveTabNow === 'function') {
@@ -267,7 +273,7 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON }) => {
               console.warn('[DiagramTabs] saveActiveTabNow error:', err);
             }
           }}
-          title="Save Diagram"
+          title="Save Tab"
         >
           <Save size={16} />
         </button>

@@ -430,44 +430,41 @@ export class FlashService {
       }
     }
 
-    // Write source code if provided directly.
-    // IMPORTANT: Only overwrite main.c if the code actually contains the reactive
-    // USB-Serial/JTAG command handler.  If the editor still has the old blink sketch
-    // (no usb_serial_jtag) we keep the reactive firmware that is already on disk.
+    // Write source code from the code editor canvas directly to main.c
     if (code && typeof code === 'string' && code.trim()) {
-      const isReactiveFirmware = code.includes('usb_serial_jtag') || code.includes('LED:1') || code.includes('LED:0');
-      if (!isReactiveFirmware) {
-        logger.warn('Editor code does not contain a reactive USB-serial handler. Keeping reactive firmware on disk instead of overwriting with blink sketch.');
-      } else {
-        try {
-          const mainDir = path.join(this.projectDir, 'main');
-          if (!fs.existsSync(mainDir)) fs.mkdirSync(mainDir, { recursive: true });
+      try {
+        const mainDir = path.join(this.projectDir, 'main');
+        if (!fs.existsSync(mainDir)) fs.mkdirSync(mainDir, { recursive: true });
 
-          const mainCPath = path.join(mainDir, 'main.c');
-          const mainCmakePath = path.join(mainDir, 'CMakeLists.txt');
-          const rootCmakePath = path.join(this.projectDir, 'CMakeLists.txt');
+        const mainCPath = path.join(mainDir, 'main.c');
+        const mainCmakePath = path.join(mainDir, 'CMakeLists.txt');
+        const rootCmakePath = path.join(this.projectDir, 'CMakeLists.txt');
 
-          fs.writeFileSync(mainCPath, code.replace(/\r\n/g, '\n'), 'utf-8');
-          logger.info(`Wrote active source code to ${mainCPath}`);
+        fs.writeFileSync(mainCPath, code.replace(/\r\n/g, '\n'), 'utf-8');
+        logger.info(`Wrote active code-editor canvas source code to ${mainCPath}`);
 
-          const isLedStripUsed = code.includes('led_strip.h') || code.includes('led_strip');
-          const idfComponentYml = path.join(mainDir, 'idf_component.yml');
-          if (isLedStripUsed && !fs.existsSync(idfComponentYml)) {
-            fs.writeFileSync(idfComponentYml, 'dependencies:\n  espressif/led_strip: "^3.0.0"\n', 'utf-8');
-          }
-
-          const requiresStr = isLedStripUsed
-            ? 'REQUIRES led_strip esp_driver_rmt esp_driver_gpio driver esp_driver_usb_serial_jtag esp_driver_uart vfs'
-            : 'REQUIRES esp_driver_rmt esp_driver_gpio driver esp_driver_usb_serial_jtag esp_driver_uart vfs';
-
-          fs.writeFileSync(mainCmakePath, `idf_component_register(SRCS "main.c"\n                    INCLUDE_DIRS "."\n                    ${requiresStr})\n`, 'utf-8');
-
-          if (!fs.existsSync(rootCmakePath)) {
-            fs.writeFileSync(rootCmakePath, 'cmake_minimum_required(VERSION 3.16)\ninclude($ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(ESP32_Firmware_Project)\n', 'utf-8');
-          }
-        } catch (err) {
-          logger.error('Error writing main.c before pipeline launch:', err.message);
+        const isLedStripUsed = code.includes('led_strip.h') || code.includes('led_strip');
+        const isWifiUsed = code.includes('esp_wifi.h') || code.includes('esp_wifi');
+        const idfComponentYml = path.join(mainDir, 'idf_component.yml');
+        if (isLedStripUsed && !fs.existsSync(idfComponentYml)) {
+          fs.writeFileSync(idfComponentYml, 'dependencies:\n  espressif/led_strip: "^3.0.0"\n', 'utf-8');
         }
+
+        const reqList = ['esp_driver_rmt', 'esp_driver_gpio', 'driver', 'esp_driver_usb_serial_jtag', 'esp_driver_uart', 'vfs'];
+        if (isLedStripUsed) {
+          reqList.unshift('led_strip');
+        }
+        if (isWifiUsed) {
+          reqList.push('esp_wifi', 'esp_netif', 'esp_event', 'nvs_flash', 'lwip', 'esp_http_server');
+        }
+
+        fs.writeFileSync(mainCmakePath, `idf_component_register(SRCS "main.c"\n                    INCLUDE_DIRS "."\n                    REQUIRES ${reqList.join(' ')})\n`, 'utf-8');
+
+        if (!fs.existsSync(rootCmakePath)) {
+          fs.writeFileSync(rootCmakePath, 'cmake_minimum_required(VERSION 3.16)\ninclude($ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(ESP32_Firmware_Project)\n', 'utf-8');
+        }
+      } catch (err) {
+        logger.error('Error writing main.c before pipeline launch:', err.message);
       }
     }
 

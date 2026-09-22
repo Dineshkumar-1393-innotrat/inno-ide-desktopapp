@@ -2907,6 +2907,102 @@ function DiagramEditor() {
   const toast = useToast();
   const [isSaving, setIsSaving] = useState(false);
 
+  const saveTab = useCallback(async () => {
+    setIsSaving(true);
+    const effectiveTabId = activeTabId || tabs[0]?.id || 'default_tab';
+    const effectiveTab = activeTab || tabs.find(t => t?.id === effectiveTabId) || {
+      id: effectiveTabId,
+      name: activeProjectName || 'Untitled Project'
+    };
+
+    let viewport = { x: 0, y: 0, zoom: 1 };
+    try {
+      if (typeof rf?.getViewport === 'function') {
+        viewport = rf.getViewport();
+      }
+    } catch (e) {}
+
+    const payload = buildDiagramExportPayload({
+      nodes: nodes || [],
+      edges: edges || [],
+      viewport,
+      projectId: activeProjectId,
+      projectName: activeProjectName || effectiveTab?.name || 'Untitled Project',
+      productId: activeProductId,
+      productName: activeProductName || activeProjectName || 'Product'
+    });
+
+    const tabName = effectiveTab?.name || activeProjectName || "Tab";
+    const sanitizedName = sanitizeSegment ? sanitizeSegment(tabName) : tabName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const fileName = `${sanitizedName}.json`;
+
+    try {
+      // 1. Mark active tab clean in Redux (clears dirty dot)
+      if (effectiveTabId) {
+        dispatch(markTabClean(effectiveTabId));
+      }
+
+      // 2. Persist to project canvas storage
+      if (activeProjectId) {
+        canvasIntegration.saveCanvasToFile(
+          payload,
+          `BlockDiagram/${fileName}`,
+          activeProjectId
+        ).catch(err => console.warn("[BlockDiagram] Background file save warning:", err));
+      }
+
+      // 3. Update tabs state
+      const latestTabs = tabs.map(t =>
+        t.id === effectiveTabId
+          ? { ...t, state: payload, dirty: false }
+          : t
+      );
+
+      // 4. Save to localStorage
+      const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+      if (effectiveProjectId) {
+        const storagePayload = {
+          tabs: latestTabs,
+          activeTabId: effectiveTabId,
+          projectId: effectiveProjectId,
+          projectName: activeProjectName,
+          savedAt: new Date().toISOString()
+        };
+        localStorage.setItem(`innoide:block_diagram_tabs:${userId || 'default'}:${effectiveProjectId}`, JSON.stringify(storagePayload));
+        localStorage.setItem(`innoide:block_diagram_tabs:${effectiveProjectId}`, JSON.stringify(storagePayload));
+        if (activeProjectName) {
+          localStorage.setItem(`innoide:block_diagram_tabs:${activeProjectName}`, JSON.stringify(storagePayload));
+        }
+      }
+
+      // 5. Backend diagramData save
+      if (typeof saveDiagramData === 'function') {
+        saveDiagramData(latestTabs, 'blockDiagram').catch(err => console.warn("[BlockDiagram] Background diagramData save warning:", err));
+      }
+
+      toast({
+        title: "Tab Saved",
+        description: `"${tabName}" has been saved successfully.`,
+        status: "success",
+        duration: 2500,
+        isClosable: true,
+        position: "top-right",
+      });
+    } catch (err) {
+      console.error("[BlockDiagram] Save tab error:", err);
+      toast({
+        title: "Failed to Save Tab",
+        description: err.message || "An error occurred while saving the tab.",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+        position: "top-right",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [activeTabId, tabs, activeTab, activeProjectName, rf, activeProjectId, activeProductId, activeProductName, dispatch, userId, saveDiagramData, toast]);
+
   const saveDiagram = async () => {
     setIsSaving(true);
 
@@ -3422,7 +3518,7 @@ function DiagramEditor() {
             justifyContent: 'space-between',
             alignItems: 'center'
           }}>
-            <DiagramTabs title="Block Diagram Workspace" kind="blockDiagram" onSaveJSON={saveDiagram} />
+            <DiagramTabs title="Block Diagram Workspace" kind="blockDiagram" onSaveTab={saveTab} onSaveJSON={saveDiagram} />
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <CreateProductButton />
             </div>

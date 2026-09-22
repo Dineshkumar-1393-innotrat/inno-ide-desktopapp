@@ -3433,6 +3433,28 @@ function BlockProgrammingCanvas() {
     [navigate],
   );
 
+  const saveTab = useCallback(async () => {
+    const snapshot = await buildDiagramExportPayload({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      viewport: rf.getViewport(),
+      projectId: activeProjectId,
+      projectName: activeProjectName,
+      productId: activeProductId,
+      productName: activeProductName
+    });
+    if (activeTabIdRef.current) {
+      dispatch(markTabClean(activeTabIdRef.current));
+    }
+    if (activeProjectId) {
+      canvasIntegration.saveCanvasToFile(
+        snapshot,
+        `BlockProgramming/${activeProjectName || 'tab'}.json`,
+        activeProjectId
+      ).catch(err => console.warn("[BlockProgramming] Background file save warning:", err));
+    }
+  }, [rf, dispatch, activeProjectId, activeProjectName, activeProductId, activeProductName]);
+
   const saveDiagram = useCallback(async () => {
     const snapshot = await buildDiagramExportPayload({
       nodes: nodesRef.current,
@@ -3873,7 +3895,7 @@ return (
               verticalAlign="middle"
             />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-              <DiagramTabs title="Block Programming Workspace" kind="blockProgramming" onSaveJSON={saveDiagram} />
+              <DiagramTabs title="Block Programming Workspace" kind="blockProgramming" onSaveTab={saveTab} onSaveJSON={saveDiagram} />
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <CreateProductButton />
               </div>

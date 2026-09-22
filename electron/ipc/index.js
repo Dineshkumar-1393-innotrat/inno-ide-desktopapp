@@ -102,6 +102,26 @@ async function startRemoteTunnel(port = currentCompanionPort, forceRestart = fal
     return { success: true, url: currentRemoteUrl, provider: remoteTunnelProvider };
   }
 
+  // Check if Cloud Tunnel Daemon already created an active, fresh tunnel in scratch/active_tunnel.json
+  if (!forceRestart) {
+    try {
+      const statusFile = path.join(__dirname, '../../scratch/active_tunnel.json');
+      if (fs.existsSync(statusFile)) {
+        const raw = fs.readFileSync(statusFile, 'utf8');
+        const data = JSON.parse(raw);
+        const isFresh = data?.timestamp && (Date.now() - data.timestamp < 1000 * 60 * 15);
+        if (data && data.active && data.url && isFresh) {
+          currentRemoteUrl = data.url;
+          remoteTunnelProvider = data.provider || 'localhost.run';
+          console.log(`[RemoteTunnel] Reusing active Cloud Tunnel Daemon URL: ${data.url}`);
+          saveTunnelStatus(true, data.url, remoteTunnelProvider);
+          notifyTunnelStatus(true, data.url, remoteTunnelProvider, 'active');
+          return { success: true, url: data.url, provider: remoteTunnelProvider };
+        }
+      }
+    } catch { }
+  }
+
   if (tunnelStartingPromise) return await tunnelStartingPromise;
 
   tunnelStartingPromise = (async () => {
@@ -321,7 +341,9 @@ let currentCompanionHtml = `<!DOCTYPE html>
   </div>
   <script>
     function addLog(msg) {
+      console.log(msg);
       const el = document.getElementById('logConsole');
+      if (!el) return;
       const time = new Date().toLocaleTimeString();
       el.innerHTML += '<div>[' + time + '] ' + msg + '</div>';
       el.scrollTop = el.scrollHeight;

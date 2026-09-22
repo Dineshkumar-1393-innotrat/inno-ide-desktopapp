@@ -41,17 +41,27 @@ process.on('exit', () => {
   cleanupStatus();
 });
 
+let stabilityTimer = null;
+
 function startTunnel() {
-  const useServeo = consecutiveFailures >= 2;
+  // Rotate providers if repeated drops occur: 0-1: localhost.run, 2-3: serveo.net, 4+: alternate
+  const useServeo = (consecutiveFailures >= 2 && consecutiveFailures % 4 < 2);
   const targetHost = useServeo ? 'serveo.net' : 'nokey@localhost.run';
   const providerName = useServeo ? 'serveo' : 'localhost.run';
 
-  console.log(`[TunnelDaemon] Starting SSH tunnel via ${providerName} (${targetHost}) for port 5055...`);
+  console.log(`[TunnelDaemon] Starting SSH tunnel via ${providerName} (${targetHost}) for port 5055 (attempt ${consecutiveFailures + 1})...`);
+
+  if (currentProc) {
+    try { currentProc.kill(); } catch {}
+    currentProc = null;
+  }
 
   const proc = spawn('ssh', [
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'ServerAliveInterval=15',
-    '-o', 'ServerAliveCountMax=4',
+    '-o', 'ServerAliveCountMax=3',
+    '-o', 'TCPKeepAlive=yes',
+    '-o', 'ExitOnForwardFailure=yes',
     '-R', '80:127.0.0.1:5055',
     targetHost
   ]);
@@ -64,7 +74,6 @@ function startTunnel() {
     const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.(?:lhr\.life|serveousercontent\.com|serveo\.net)/i);
     if (match && (!activeUrl || activeUrl !== match[0])) {
       activeUrl = match[0];
-      consecutiveFailures = 0;
       console.log('>>> [LIVE CLOUD TUNNEL URL]: ' + activeUrl + ' <<<');
       fs.writeFileSync(STATUS_FILE, JSON.stringify({
         url: activeUrl,
@@ -72,6 +81,15 @@ function startTunnel() {
         active: true,
         provider: providerName
       }, null, 2));
+
+      // Only mark tunnel as fully stable after remaining connected for 1 minute (60s)
+      if (stabilityTimer) clearTimeout(stabilityTimer);
+      stabilityTimer = setTimeout(() => {
+        if (currentProc === proc) {
+          console.log(`[TunnelDaemon] Tunnel via ${providerName} is stable (uptime > 60s).`);
+          consecutiveFailures = 0;
+        }
+      }, 60000);
     }
   };
 
@@ -79,15 +97,21 @@ function startTunnel() {
   proc.stderr.on('data', handleOutput);
 
   proc.on('close', (code) => {
-    currentProc = null;
-    console.warn(`[TunnelDaemon] SSH tunnel exited with code ${code}. Auto-restarting in 2s...`);
+    if (currentProc === proc) {
+      currentProc = null;
+    }
+    if (stabilityTimer) clearTimeout(stabilityTimer);
     consecutiveFailures++;
     cleanupStatus();
-    setTimeout(startTunnel, 2000);
+
+    const delay = Math.min(2000 + (consecutiveFailures * 1500), 12000);
+    console.warn(`[TunnelDaemon] SSH tunnel exited with code ${code}. Reconnecting via ${useServeo ? 'serveo' : 'localhost.run'} in ${delay / 1000}s...`);
+    setTimeout(startTunnel, delay);
   });
 
   proc.on('error', (err) => {
     console.error('[TunnelDaemon] SSH error:', err.message);
+    if (stabilityTimer) clearTimeout(stabilityTimer);
     consecutiveFailures++;
   });
 }

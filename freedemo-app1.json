@@ -1,0 +1,52 @@
+{
+  "projectDetails": {
+    "projectId": "6ab21e7081a88a0820edc3c0",
+    "projectName": "freedemo-app1",
+    "description": "",
+    "projectCategory": "Logistics",
+    "projectType": "bare metal",
+    "board": "STM32 U5",
+    "boardType": "STM32 U5",
+    "features": "writeCode",
+    "createdAt": "2026-09-22T06:21:36.575Z"
+  },
+  "productDetails": {
+    "productId": "6ab21e7081a88a0820edc3c3",
+    "productName": "freedemo-app1",
+    "basicInformation": {
+      "noOfDevices": 1,
+      "noOfComponents": 1
+    },
+    "noOfDevices": 1,
+    "noOfComponents": 1,
+    "components": [
+      {
+        "componentID": "",
+        "componentType": "Sensors",
+        "componentName": "LIDAR",
+        "note": "",
+        "urls": []
+      }
+    ],
+    "devices": [],
+    "note": "",
+    "urls": [],
+    "createdAt": "2026-09-21T04:28:48.697Z"
+  },
+  "canvas": {
+    "nodes": [],
+    "edges": [],
+    "viewport": {
+      "x": 246.40989248084918,
+      "y": -98.08347647442673,
+      "zoom": 1.1432050483364895
+    }
+  },
+  "nodes": [],
+  "edges": [],
+  "viewport": {
+    "x": 246.40989248084918,
+    "y": -98.08347647442673,
+    "zoom": 1.1432050483364895
+  }
+}
