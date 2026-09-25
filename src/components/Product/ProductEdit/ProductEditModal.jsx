@@ -151,6 +151,8 @@ function ProductEditModal({
                 <Tabs
                   variant="unstyled"
                   defaultIndex={0}
+                  isLazy
+                  lazyBehavior="keepMounted"
                   onChange={(index) => {
                     // Re-fetch components list every time Remove Component tab is activated
                     if (index === 2) {

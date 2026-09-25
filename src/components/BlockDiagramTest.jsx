@@ -1456,21 +1456,21 @@ function EditableEdge(edgeProps) {
 }
 
 const nodeTypes = {
-  process: ProcessNode,
-  decision: DecisionNode,
-  terminator: TerminatorNode,
-  text: TextNode,
-  ellipse: EllipseNode,
-  database: DatabaseNode,
-  data: DataNode,
-  delay: DelayNode,
-  connector: ConnectorNode,
-  summing: SummingNode,
-  mic: MicNode,
-  bluetooth: BluetoothNode,
-  antenna: AntennaNode,
-  actor: ActorNode,
-  junction: JunctionNode,
+  process: React.memo(ProcessNode),
+  decision: React.memo(DecisionNode),
+  terminator: React.memo(TerminatorNode),
+  text: React.memo(TextNode),
+  ellipse: React.memo(EllipseNode),
+  database: React.memo(DatabaseNode),
+  data: React.memo(DataNode),
+  delay: React.memo(DelayNode),
+  connector: React.memo(ConnectorNode),
+  summing: React.memo(SummingNode),
+  mic: React.memo(MicNode),
+  bluetooth: React.memo(BluetoothNode),
+  antenna: React.memo(AntennaNode),
+  actor: React.memo(ActorNode),
+  junction: React.memo(JunctionNode),
 };
 
 const edgeTypes = {
@@ -1818,37 +1818,105 @@ function DiagramEditor() {
   const [isExplorerVisible, setIsExplorerVisible] = useState('explorer');
   const reactFlowWrapper = useRef(null);
 
-  // Derive nodes and edges from active tab
-  const nodes = activeTab?.state?.nodes || [];
-  const rawEdges = activeTab?.state?.edges || [];
-  const edges = useMemo(() => {
-    return rawEdges.map((e) => (e.animated ? { ...e, animated: false } : e));
-  }, [rawEdges]);
+  // Local high-performance canvas state decoupled from 60fps Redux dispatches
+  const [nodes, setNodesState] = useState(() => activeTab?.state?.nodes || []);
+  const [edges, setEdgesState] = useState(() => {
+    const raw = activeTab?.state?.edges || [];
+    return raw.map((e) => (e.animated ? { ...e, animated: false } : e));
+  });
+
+  const lastSyncedTabId = useRef(activeTabId);
+
+  // Sync from Redux on tab switch
+  useEffect(() => {
+    if (!activeTab) return;
+    if (activeTab.id !== lastSyncedTabId.current) {
+      lastSyncedTabId.current = activeTab.id;
+      const newNodes = activeTab.state?.nodes || [];
+      const newEdges = (activeTab.state?.edges || []).map((e) => (e.animated ? { ...e, animated: false } : e));
+      setNodesState(newNodes);
+      setEdgesState(newEdges);
+      nodesRef.current = newNodes;
+      edgesRef.current = newEdges;
+    }
+  }, [activeTab, activeTabId]);
+
+  const syncTimerRef = useRef(null);
+  const commitToRedux = useCallback(
+    (currentNodes, currentEdges) => {
+      if (!activeTabId) return;
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      dispatch(updateTabState({
+        tabId: activeTabId,
+        nodes: currentNodes,
+        edges: currentEdges,
+      }));
+    },
+    [dispatch, activeTabId],
+  );
+
+  const debounceSyncToRedux = useCallback(
+    (currentNodes, currentEdges) => {
+      if (!activeTabId) return;
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = setTimeout(() => {
+        commitToRedux(currentNodes, currentEdges);
+      }, 300);
+    },
+    [commitToRedux, activeTabId],
+  );
 
   const setNodes = useCallback(
     (nds) => {
-      const nextNodes = typeof nds === "function" ? nds(nodes) : nds;
-      dispatch(updateTabState({ tabId: activeTabId, nodes: nextNodes }));
+      setNodesState((prev) => {
+        const next = typeof nds === "function" ? nds(prev) : nds;
+        nodesRef.current = next;
+        debounceSyncToRedux(next, edgesRef.current);
+        return next;
+      });
     },
-    [dispatch, activeTabId, nodes],
+    [debounceSyncToRedux],
   );
 
   const setEdges = useCallback(
     (eds) => {
-      const nextEdges = typeof eds === "function" ? eds(edges) : eds;
-      dispatch(updateTabState({ tabId: activeTabId, edges: nextEdges }));
+      setEdgesState((prev) => {
+        const next = typeof eds === "function" ? eds(prev) : eds;
+        edgesRef.current = next;
+        debounceSyncToRedux(nodesRef.current, next);
+        return next;
+      });
     },
-    [dispatch, activeTabId, edges],
+    [debounceSyncToRedux],
   );
 
   const onNodesChange = useCallback(
-    (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
-    [setNodes],
+    (changes) => {
+      setNodesState((nds) => {
+        const next = applyNodeChanges(changes, nds);
+        nodesRef.current = next;
+        debounceSyncToRedux(next, edgesRef.current);
+        return next;
+      });
+    },
+    [debounceSyncToRedux],
   );
+
   const onEdgesChange = useCallback(
-    (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-    [setEdges],
+    (changes) => {
+      setEdgesState((eds) => {
+        const next = applyEdgeChanges(changes, eds);
+        edgesRef.current = next;
+        debounceSyncToRedux(nodesRef.current, next);
+        return next;
+      });
+    },
+    [debounceSyncToRedux],
   );
+
+  const handleNodeDragStop = useCallback(() => {
+    commitToRedux(nodesRef.current, edgesRef.current);
+  }, [commitToRedux]);
 
   const [selected, setSelected] = useState(null);
   const [hasProjects, setHasProjects] = useState(false);
@@ -2151,16 +2219,14 @@ function DiagramEditor() {
         } catch (e) {}
       }
 
-      // Source D: Check Electron filesystem or static fetch for saved JSON file
-      if (!loadedTabs) {
+      // Source D: Check Electron filesystem for saved JSON file
+      if (!loadedTabs && activeProjectName) {
         try {
           let rawContent = null;
           if (window.electronAPI?.filesystem?.readFile) {
             const possibleFiles = [
               `${activeProjectName}.json`,
-              `d:/ide-desktop-app/${activeProjectName}.json`,
-              `BlockDiagram/${activeProjectName}.json`,
-              `d:/ide-desktop-app/BlockDiagram/${activeProjectName}.json`
+              `BlockDiagram/${activeProjectName}.json`
             ];
             for (const f of possibleFiles) {
               try {
@@ -2168,12 +2234,6 @@ function DiagramEditor() {
                 if (res) { rawContent = res; break; }
               } catch (err) {}
             }
-          }
-          if (!rawContent && typeof fetch === 'function') {
-            try {
-              const res = await fetch(`/${activeProjectName}.json`);
-              if (res.ok) rawContent = await res.text();
-            } catch (err) {}
           }
           if (rawContent) {
             const parsed = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
@@ -3546,6 +3606,8 @@ function DiagramEditor() {
                 edges={edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
+                onNodeDragStop={handleNodeDragStop}
+                onSelectionDragStop={handleNodeDragStop}
                 onConnect={onConnect}
                 onConnectStart={onConnectStart}
                 onConnectEnd={onConnectEnd}

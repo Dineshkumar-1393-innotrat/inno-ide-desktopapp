@@ -71,6 +71,9 @@ const CreateProductDefintionModal = ({
           <ModalBody p={0}>
             <ProductDefinition
               initialStep={2}
+              projectId={currentProjectId}
+              productId={currentProductId !== currentProjectId ? currentProductId : undefined}
+              productName={currentProductName}
               onClose={handleClose}
               onSuccess={() => {
                 if (typeof setIsProductDefined === "function") {

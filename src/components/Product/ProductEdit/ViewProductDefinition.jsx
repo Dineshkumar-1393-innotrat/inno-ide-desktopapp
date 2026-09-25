@@ -78,29 +78,164 @@ const ViewProductDefinition = ({ productID, productName }) => {
 
   //   fetches and updates the form
 
+  const extractNoteAndUrls = (component, apiData, apiDataRaw, componentName, targetProductId, targetProductName) => {
+    // 1. Try to read from component directly
+    let note = component.note || component.Note || component.notes || component.Notes || component.description || component.desc || "";
+
+    let urls = [];
+    if (Array.isArray(component.urls) && component.urls.length > 0) {
+      urls = component.urls;
+    } else if (Array.isArray(component.Urls) && component.Urls.length > 0) {
+      urls = component.Urls;
+    } else if (component.urls && typeof component.urls === "string") {
+      urls = [component.urls];
+    } else if (component.url && typeof component.url === "string") {
+      urls = [component.url];
+    } else if (component.urlLink && typeof component.urlLink === "string") {
+      urls = [component.urlLink];
+    } else if (component.link && typeof component.link === "string") {
+      urls = [component.link];
+    }
+
+    // 2. Try to read from top-level apiData / apiDataRaw if component didn't have it
+    if (!note) {
+      note = apiData.note || apiData.Note || apiData.notes || apiData.Notes || apiData.productDesc || apiData.description ||
+             apiDataRaw?.note || apiDataRaw?.notes || apiDataRaw?.productDesc || apiDataRaw?.description ||
+             apiDataRaw?.data?.note || apiDataRaw?.data?.notes ||
+             apiDataRaw?.definition?.note || apiDataRaw?.data?.definition?.note || "";
+    }
+
+    if (urls.length === 0) {
+      if (Array.isArray(apiData.urls) && apiData.urls.length > 0) {
+        urls = apiData.urls;
+      } else if (Array.isArray(apiData.Urls) && apiData.Urls.length > 0) {
+        urls = apiData.Urls;
+      } else if (apiData.urls && typeof apiData.urls === "string") {
+        urls = [apiData.urls];
+      } else if (apiData.url && typeof apiData.url === "string") {
+        urls = [apiData.url];
+      } else if (apiData.urlLink && typeof apiData.urlLink === "string") {
+        urls = [apiData.urlLink];
+      } else if (Array.isArray(apiDataRaw?.urls) && apiDataRaw.urls.length > 0) {
+        urls = apiDataRaw.urls;
+      } else if (apiDataRaw?.url && typeof apiDataRaw.url === "string") {
+        urls = [apiDataRaw.url];
+      } else if (apiDataRaw?.urlLink && typeof apiDataRaw.urlLink === "string") {
+        urls = [apiDataRaw.urlLink];
+      } else if (Array.isArray(apiDataRaw?.data?.urls) && apiDataRaw.data.urls.length > 0) {
+        urls = apiDataRaw.data.urls;
+      } else if (apiDataRaw?.data?.url) {
+        urls = [apiDataRaw.data.url];
+      } else if (apiDataRaw?.data?.urlLink) {
+        urls = [apiDataRaw.data.urlLink];
+      }
+    }
+
+    // 3. Fallback to localStorage cached product details if still empty
+    if (!note || urls.length === 0) {
+      try {
+        const resolvedProdId = targetProductId || productID || localStorage.getItem("activeProductId") || localStorage.getItem("activeProjectId");
+        const resolvedProjId = localStorage.getItem("activeProjectId");
+        const resolvedProdName = targetProductName || productName || localStorage.getItem("activeProductName") || localStorage.getItem("activeProjectName");
+
+        let cachedDetails = null;
+        if (resolvedProdId) {
+          const stored = localStorage.getItem(`innoide:product_details_${resolvedProdId}`);
+          if (stored) cachedDetails = JSON.parse(stored);
+        }
+        if (!cachedDetails && resolvedProjId) {
+          const stored = localStorage.getItem(`innoide:product_details_${resolvedProjId}`);
+          if (stored) cachedDetails = JSON.parse(stored);
+        }
+        if (!cachedDetails && resolvedProdName) {
+          const stored = localStorage.getItem(`innoide:product_details_${resolvedProdName}`);
+          if (stored) cachedDetails = JSON.parse(stored);
+        }
+        if (!cachedDetails) {
+          const stored = localStorage.getItem("innoide:last_product_details");
+          if (stored) cachedDetails = JSON.parse(stored);
+        }
+
+        if (cachedDetails) {
+          if (!note) {
+            if (cachedDetails.componentsPayload?.[componentName]?.note) {
+              note = cachedDetails.componentsPayload[componentName].note;
+            } else if (Array.isArray(cachedDetails.components)) {
+              const matchComp = cachedDetails.components.find(
+                (c) => c.name === componentName || c.componentName === componentName
+              );
+              if (matchComp?.note) note = matchComp.note;
+            }
+            if (!note) {
+              note = cachedDetails.note || cachedDetails.notes || cachedDetails.productDesc || cachedDetails.description || "";
+            }
+          }
+
+          if (urls.length === 0) {
+            if (cachedDetails.componentsPayload?.[componentName]?.urls) {
+              const u = cachedDetails.componentsPayload[componentName].urls;
+              urls = Array.isArray(u) ? u : (u ? [u] : []);
+            } else if (Array.isArray(cachedDetails.components)) {
+              const matchComp = cachedDetails.components.find(
+                (c) => c.name === componentName || c.componentName === componentName
+              );
+              if (matchComp?.urls) urls = Array.isArray(matchComp.urls) ? matchComp.urls : [matchComp.urls];
+              else if (matchComp?.url) urls = [matchComp.url];
+              else if (matchComp?.urlLink) urls = [matchComp.urlLink];
+            }
+            if (urls.length === 0) {
+              if (Array.isArray(cachedDetails.urls) && cachedDetails.urls.length > 0) urls = cachedDetails.urls;
+              else if (cachedDetails.urlLink) urls = [cachedDetails.urlLink];
+              else if (cachedDetails.url) urls = [cachedDetails.url];
+            }
+          }
+        }
+      } catch (cacheErr) {
+        console.warn("[ViewProductDefinition] Error reading cached note/urls:", cacheErr);
+      }
+    }
+
+    const cleanUrls = urls.filter((u) => u !== undefined && u !== null);
+    const finalUrls = cleanUrls.length > 0 ? cleanUrls : [""];
+
+    return { note: note || "", urls: finalUrls };
+  };
+
   const fetchProductDefinition = async (productID) => {
     console.log("[ViewProductDefinition] Fetching definition for ID:", productID);
 
     try {
-      let response;
-      const localUrl = `${productAPIBase}/product/${productID}/definitionNew`;
-      
-      try {
-        console.log(`[ViewProductDefinition] Attempting local fetch: ${localUrl}`);
-        response = await axios.get(localUrl, { timeout: 4000 });
-      } catch (localError) {
-        console.warn("[ViewProductDefinition] Local fetch failed/timed out, trying Eureka fallback...");
-        // Use definitionNew for fallback as requested
-        const fallbackUrl = `${baseURL}/product/${productID}/definitionNew`;
-        console.log(`[ViewProductDefinition] Attempting fallback fetch: ${fallbackUrl}`);
-        response = await axios.get(fallbackUrl);
-      }
+      const url = `${productAPIBase || baseURL || 'http://localhost:5004'}/product/${productID}/definitionNew`;
+      const response = await axios.get(url, { timeout: 3000 });
 
       console.log("[ViewProductDefinition] Received Data:", response.data);
       const convertedComponents = convertDataFromApi(response.data);
 
       const rawProd = response.data?.data || response.data;
       try {
+        let existingCached = null;
+        try {
+          existingCached = JSON.parse(
+            localStorage.getItem(`innoide:product_details_${productID}`) ||
+            localStorage.getItem(`innoide:product_details_${productName}`) ||
+            localStorage.getItem('innoide:last_product_details') || "null"
+          );
+        } catch (e) {}
+
+        const effectiveNote = 
+          rawProd.note || 
+          rawProd.notes || 
+          rawProd.productDesc || 
+          convertedComponents[0]?.note || 
+          existingCached?.note || 
+          '';
+
+        const effectiveUrls = 
+          (Array.isArray(rawProd.urls) && rawProd.urls.length > 0) ? rawProd.urls :
+          (rawProd.url ? [rawProd.url] :
+          (convertedComponents[0]?.urls?.filter(Boolean)?.length > 0 ? convertedComponents[0].urls.filter(Boolean) :
+          (existingCached?.urls || (existingCached?.urlLink ? [existingCached.urlLink] : []))));
+
         const prodDetails = {
           productId: productID,
           productName: rawProd.productName || productName || '',
@@ -111,8 +246,8 @@ const ViewProductDefinition = ({ productID, productName }) => {
           noOfDevices: 1,
           noOfComponents: convertedComponents.length,
           components: convertedComponents,
-          note: rawProd.note || '',
-          urls: rawProd.urls || [],
+          note: effectiveNote,
+          urls: effectiveUrls,
           createdAt: new Date().toISOString()
         };
         localStorage.setItem(`innoide:product_details_${productID}`, JSON.stringify(prodDetails));
@@ -126,12 +261,27 @@ const ViewProductDefinition = ({ productID, productName }) => {
       }));
     } catch (error) {
       console.error("[ViewProductDefinition] Error fetching product definition (All servers failed):", error);
+      // Attempt recovery from localStorage cache if network fails
+      try {
+        const cached = 
+          JSON.parse(localStorage.getItem(`innoide:product_details_${productID}`) || "null") ||
+          JSON.parse(localStorage.getItem(`innoide:product_details_${productName}`) || "null") ||
+          JSON.parse(localStorage.getItem('innoide:last_product_details') || "null");
+        if (cached && (cached.componentsPayload || cached.components)) {
+          console.log("[ViewProductDefinition] Recovering from localStorage cache:", cached);
+          const convertedComponents = convertDataFromApi({ components: cached.componentsPayload || {} });
+          setInitialValues((prevValues) => ({
+            ...prevValues,
+            components: convertedComponents,
+          }));
+        }
+      } catch (cacheErr) {}
     }
   };
 
   const convertDataFromApi = (apiDataRaw) => {
-    // Support both { ... } and { data: { ... } } structures
-    const apiData = apiDataRaw?.data || apiDataRaw;
+    // Support { ... }, { data: { ... } }, and { data: { definition: { ... } } } structures
+    const apiData = apiDataRaw?.data?.definition || apiDataRaw?.definition || apiDataRaw?.data || apiDataRaw;
     if (!apiData || !apiData.components) return [];
 
     return Object.keys(apiData.components).map((componentName) => {
@@ -148,25 +298,15 @@ const ViewProductDefinition = ({ productID, productName }) => {
         componentType = componentType.charAt(0).toUpperCase() + componentType.slice(1);
       }
 
-      // 2. Initialize formatted component
-      // Note/URLs may live inside the component OR at the top-level product (fallback)
-      // Check both lowercase and capitalized variants, and common alternatives
-      let componentNote = component.note || component.Note || component.notes || component.Notes || apiData.note || apiData.Note || "";
-      
-      let componentUrls = [];
-      if (Array.isArray(component.urls) && component.urls.length > 0) {
-        componentUrls = component.urls;
-      } else if (Array.isArray(component.Urls) && component.Urls.length > 0) {
-        componentUrls = component.Urls;
-      } else if (component.urls && typeof component.urls === "string") {
-        componentUrls = [component.urls];
-      } else if (component.url && typeof component.url === "string") {
-        componentUrls = [component.url];
-      } else if (Array.isArray(apiData.urls) && apiData.urls.length > 0) {
-        componentUrls = apiData.urls;
-      } else if (Array.isArray(apiData.Urls) && apiData.Urls.length > 0) {
-        componentUrls = apiData.Urls;
-      }
+      // 2. Initialize formatted component with robust note and url extraction
+      const { note: componentNote, urls: componentUrls } = extractNoteAndUrls(
+        component,
+        apiData,
+        apiDataRaw,
+        componentName,
+        productID,
+        productName
+      );
 
       let formattedComponent = {
         componentID: component.componentID || component.id || "",
@@ -177,14 +317,11 @@ const ViewProductDefinition = ({ productID, productName }) => {
       };
 
       // 3. Extract parameters (min, max, unit)
-      // They might be at the root, or inside 'parameters', or inside a named object (like 'distance')
       let params = component.parameters || {};
       
-      // If no 'parameters' key, check other keys that are objects (like the 'distance' object in user's example)
       if (Object.keys(params).length === 0) {
         Object.keys(component).forEach(key => {
           if (typeof component[key] === 'object' && component[key] !== null && !Array.isArray(component[key])) {
-            // Found an object key (e.g., 'distance'), merge its contents if it has min/max/unit
             if (component[key].min !== undefined || component[key].max !== undefined || component[key].unit !== undefined) {
               params = { ...params, ...component[key] };
             }
@@ -192,7 +329,6 @@ const ViewProductDefinition = ({ productID, productName }) => {
         });
       }
 
-      // Fallback: Check component root for min/max/unit (standard structure)
       const unitValue = params.unit || component.unit;
       if (unitValue) {
         formattedComponent.unit = Array.isArray(unitValue) ? unitValue : [unitValue];

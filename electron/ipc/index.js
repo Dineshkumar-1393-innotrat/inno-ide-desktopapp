@@ -601,8 +601,16 @@ export function registerAllIPCHandlers(getMainWindow) {
 
             if (!payload.endsWith('\n')) payload += '\r\n';
 
-            console.log(`[CompanionServer] Dispatching to ${targetPort}:`, payload.trim());
-            const writeResult = await serialService.writePort(targetPort, payload);
+            // When syncOnly is set, skip the serial write — only update state store + broadcast SSE.
+            // This is used by the desktop toggle to avoid duplicate serial writes when the primary
+            // Electron IPC serial.write already sent the command to the hardware.
+            let writeResult = { success: true, syncOnly: true };
+            if (!data.syncOnly) {
+              console.log(`[CompanionServer] Dispatching to ${targetPort}:`, payload.trim());
+              writeResult = await serialService.writePort(targetPort, payload);
+            } else {
+              console.log(`[CompanionServer] syncOnly — state broadcast only (serial write skipped for ${targetPort})`);
+            }
 
             // Multi-device synchronization: update state store in memory
             const widgetId = data.widgetId || 'w-led';

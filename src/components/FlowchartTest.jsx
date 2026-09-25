@@ -4492,40 +4492,100 @@ function DiagramEditor() {
   const reactFlowWrapper = useRef(null);
   const { sidebarWidth, startResizing } = useResizableSidebar(240, 160, 480);
 
-  // Derive nodes and edges from active tab
-  const nodes = activeTab?.state?.nodes || [];
-  const edges = activeTab?.state?.edges || [];
+  const nodesRef = useRef(activeTab?.state?.nodes || []);
+  const edgesRef = useRef(activeTab?.state?.edges || []);
+
+  // Local high-performance canvas state decoupled from 60fps Redux dispatches
+  const [nodes, setNodesState] = useState(() => activeTab?.state?.nodes || []);
+  const [edges, setEdgesState] = useState(() => activeTab?.state?.edges || []);
+
+  const lastSyncedTabId = useRef(activeTabId);
+
+  // Sync from Redux on tab switch or external state update
+  useEffect(() => {
+    if (!activeTab) return;
+    if (activeTab.id !== lastSyncedTabId.current) {
+      lastSyncedTabId.current = activeTab.id;
+      const newNodes = activeTab.state?.nodes || [];
+      const newEdges = activeTab.state?.edges || [];
+      setNodesState(newNodes);
+      setEdgesState(newEdges);
+      nodesRef.current = newNodes;
+      edgesRef.current = newEdges;
+    }
+  }, [activeTab, activeTabId]);
+
+  const syncTimerRef = useRef(null);
+  const commitToRedux = useCallback(
+    (currentNodes, currentEdges) => {
+      if (!activeTabId) return;
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      dispatch(updateTabState({
+        tabId: activeTabId,
+        nodes: currentNodes,
+        edges: currentEdges,
+      }));
+    },
+    [dispatch, activeTabId],
+  );
+
+  const debounceSyncToRedux = useCallback(
+    (currentNodes, currentEdges) => {
+      if (!activeTabId) return;
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = setTimeout(() => {
+        commitToRedux(currentNodes, currentEdges);
+      }, 300);
+    },
+    [commitToRedux, activeTabId],
+  );
 
   const setNodes = useCallback(
     (nds) => {
-      const nextNodes = typeof nds === "function" ? nds(nodes) : nds;
-      dispatch(updateTabState({ tabId: activeTabId, nodes: nextNodes }));
+      setNodesState((prev) => {
+        const next = typeof nds === "function" ? nds(prev) : nds;
+        nodesRef.current = next;
+        debounceSyncToRedux(next, edgesRef.current);
+        return next;
+      });
     },
-    [dispatch, activeTabId, nodes],
+    [debounceSyncToRedux],
   );
 
   const setEdges = useCallback(
     (eds) => {
-      const nextEdges = typeof eds === "function" ? eds(edges) : eds;
-      dispatch(updateTabState({ tabId: activeTabId, edges: nextEdges }));
+      setEdgesState((prev) => {
+        const next = typeof eds === "function" ? eds(prev) : eds;
+        edgesRef.current = next;
+        debounceSyncToRedux(nodesRef.current, next);
+        return next;
+      });
     },
-    [dispatch, activeTabId, edges],
+    [debounceSyncToRedux],
   );
 
   const onNodesChange = useCallback(
     (changes) => {
-      const nextNodes = applyNodeChanges(changes, nodes);
-      dispatch(updateTabState({ tabId: activeTabId, nodes: nextNodes }));
+      setNodesState((nds) => {
+        const next = applyNodeChanges(changes, nds);
+        nodesRef.current = next;
+        debounceSyncToRedux(next, edgesRef.current);
+        return next;
+      });
     },
-    [dispatch, activeTabId, nodes],
+    [debounceSyncToRedux],
   );
 
   const onEdgesChange = useCallback(
     (changes) => {
-      const nextEdges = applyEdgeChanges(changes, edges);
-      dispatch(updateTabState({ tabId: activeTabId, edges: nextEdges }));
+      setEdgesState((eds) => {
+        const next = applyEdgeChanges(changes, eds);
+        edgesRef.current = next;
+        debounceSyncToRedux(nodesRef.current, next);
+        return next;
+      });
     },
-    [dispatch, activeTabId, edges],
+    [debounceSyncToRedux],
   );
 
   const [selected, setSelected] = useState(null);
@@ -4855,12 +4915,9 @@ function DiagramEditor() {
     }
   }, [tabs.length, activeProjectName, dispatch]);
 
-  // History & snapshots
   const HISTORY_LIMIT = 100;
   const historyRef = useRef({ entries: [], index: -1 });
   const debounceRef = useRef(null);
-  const nodesRef = useRef(nodes);
-  const edgesRef = useRef(edges);
   const isUndoRedoRef = useRef(false);
   const lastSnapshotRef = useRef("");
   const lastActiveTabIdRef = useRef(null);
@@ -5454,8 +5511,9 @@ function DiagramEditor() {
   }, [activeTab?.id, rf]);
 
   const onNodeDragStop = useCallback(() => {
+    commitToRedux(nodesRef.current, edgesRef.current);
     scheduleSnapshot();
-  }, [scheduleSnapshot]);
+  }, [commitToRedux, scheduleSnapshot]);
 
   const handlePaletteDragStart = useCallback((event, item) => {
     let payload;
@@ -6735,6 +6793,7 @@ function DiagramEditor() {
                 onConnectEnd={onConnectEnd}
                 onInit={setReactFlowInstance}
                 onNodeDragStop={onNodeDragStop}
+                onSelectionDragStop={onNodeDragStop}
                 onSelectionChange={onSelectionChange}
                 onPaneClick={(e) => { exitEditing(e); setShowProperties(false); }}
                 nodeTypes={nodeTypes}

@@ -31,6 +31,7 @@ import CreateProductButton from "../shared/CreateProductButton";
 import CreateNewProjectModal from "./CreateNewProjectModal";
 import { useDisclosure } from "@chakra-ui/react";
 import { FaChevronRight, FaChevronDown } from "react-icons/fa";
+import { fetchFileSystem, checkProductDefinition, buildTree } from "../EmbeddedFileManagement/EmbeddedFileManagement";
 
 const initialFileSystem = {
   name: "root",
@@ -78,17 +79,22 @@ const MenuSidebar = () => {
   const [isProductDefined, setIsProductDefined] = useState(null);
   const { isOpen, onOpen, onClose } = useDisclosure();
 
+  const loadFileSystem = useCallback((uid) => {
+    if (!uid) return;
+    return fetchFileSystem(uid, setFileSystem, buildTree);
+  }, []);
+
   // fetch user information local storage
   useEffect(() => {
     const userInfo = getUserInfo();
     if (userInfo) {
       setUser(userInfo);
-      fetchFileSystem(userInfo?.userId);
+      loadFileSystem(userInfo?.userId);
     }
     const handleRefresh = () => {
       if (user?.userId) {
         console.log("[MenuSidebar] Refreshing file system via global event...");
-        fetchFileSystem(user.userId);
+        loadFileSystem(user.userId);
       }
     };
     window.addEventListener("innoide:refresh-filesystem", handleRefresh);
@@ -96,114 +102,15 @@ const MenuSidebar = () => {
     return () => {
       window.removeEventListener("innoide:refresh-filesystem", handleRefresh);
     };
-  }, [user]);
+  }, [user, loadFileSystem]);
 
   useEffect(() => {
-    const checkProductDefinition = async () => {
-      if (!activeProductId) {
-        setIsProductDefined(null); // Reset if no active project
-        return;
-      }
-
-      try {
-        const response = await axios.get(
-          `${productAPIBase}/product/${activeProductId}/definitionNew`
-        );
-
-        // Check if components exist in the response
-        const hasComponents =
-          Object.keys(response.data.components || {}).length > 0;
-        setIsProductDefined(hasComponents);
-      } catch (error) {
-        console.error("Error fetching product definition:", error);
-        setIsProductDefined(false); // Assume false if error occurs
-      }
-    };
-
-    checkProductDefinition();
-  }, [activeProductId]);
-
-  const buildTree = (flatArray) => {
-    const idMap = {};
-    let root = null;
-    const orphans = [];
-
-    // First pass: create a map of all nodes
-    flatArray.forEach((item) => {
-      idMap[item._id] = {
-        _id: item._id,
-        name: item.name,
-        type: item.type,
-        content: item.content || null,
-        productId: item.productId || null,
-        children: [],
-      };
-    });
-
-    // Second pass: Assign children to their parents
-    flatArray.forEach((item) => {
-      if (item.parentId && idMap[item.parentId]) {
-        idMap[item.parentId].children.push(idMap[item._id]);
-      } else {
-        if (item.name === "root") {
-          root = idMap[item._id]; // The explicit root node
-        } else {
-          orphans.push(idMap[item._id]); // Items without parentId that are not "root"
-        }
-      }
-    });
-
-    // Attach orphaned items to root if possible
-    if (root) {
-      orphans.forEach((orphan) => {
-        root.children.push(orphan);
-      });
-    } else if (orphans.length > 0) {
-      // Fallback: create a virtual root if "root" wasn't found
-      root = {
-        _id: "virtual_root",
-        name: "root",
-        type: "folder",
-        children: orphans,
-      };
+    if (!activeProductId) {
+      setIsProductDefined(null); // Reset if no active project
+      return;
     }
-
-    return root || { _id: "empty", name: "root", type: "folder", children: [] };
-  };
-
-  // Fetch file system and ensure root folder exists
-  const fetchFileSystem = async (userId) => {
-    if (!userId) return;
-
-    try {
-      const { data } = await axios.get(
-        `${API.MAIN}/api/v1/rootStatus/${userId}`
-      );
-
-      if (!data.isRootCreated) {
-        await axios.post(
-          `${API.MAIN}/api/v1/filesystem/createRoot`,
-          {
-            userId,
-            name: "root",
-            type: "folder",
-          }
-        );
-      }
-
-      // Fetch the full file system after ensuring root exists
-      const fileResponse = await axios.get(
-        `${API.MAIN}/api/v1/files/${userId}`
-      );
-
-      if (fileResponse.data.success) {
-        const structuredData = buildTree(fileResponse.data.files);
-        setFileSystem(structuredData);
-      }
-    } catch (error) {
-      console.error("Error fetching file system:", error);
-    }
-  };
+    checkProductDefinition(activeProductId, setIsProductDefined, activeProjectId);
+  }, [activeProductId, activeProjectId]);
 
   // Add new folder or file
   const addItem = async (parentFolder, type, userId) => {
@@ -224,7 +131,15 @@ const MenuSidebar = () => {
       );
 
       if (data.success) {
-        fetchFileSystem(user.userId); // Refresh the file system
+        if (data.file?._id && (parentFolder.name === "root" || !parentFolder.parentId) && type === "folder") {
+          switchProject({
+            projectId: data.file._id,
+            projectName: newItemName,
+            productId: null,
+            productName: newItemName,
+          });
+        }
+        loadFileSystem(user.userId); // Refresh the file system
       }
     } catch (error) {
       console.error(`Error creating ${type}:`, error);
@@ -286,7 +201,15 @@ const MenuSidebar = () => {
 
       // Refresh the file system if creation was successful
       if (data.success) {
-        fetchFileSystem(userId);
+        if (data.file?._id) {
+          switchProject({
+            projectId: data.file._id,
+            projectName: projectName,
+            productId: productId,
+            productName: projectName
+          });
+        }
+        loadFileSystem(userId);
       } else {
         throw new Error("File/Folder creation failed.");
       }
@@ -315,7 +238,7 @@ const MenuSidebar = () => {
 
       window.dispatchEvent(new CustomEvent("project-deleted", { detail: { projectId: id } }));
 
-      await fetchFileSystem(user.userId);
+      await loadFileSystem(user.userId);
       // You can add state update logic here if needed
     } catch (error) {
       console.error("Error deleting folder:", error);

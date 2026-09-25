@@ -81,22 +81,23 @@ const CreateProductButton = () => {
         fetchStatus();
     }, [fetchStatus]);
 
-    // Listen to refresh events across the application
+    // Listen to targeted refresh events across the application
     useEffect(() => {
+        let timer = null;
         const handleRefresh = () => {
-            fetchStatus();
-            syncStatusFromStorage();
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+                fetchStatus();
+                syncStatusFromStorage();
+            }, 300);
         };
 
-        window.addEventListener("storage", handleRefresh);
         window.addEventListener("product-definition-changed", handleRefresh);
-        window.addEventListener("innoide:refresh-filesystem", handleRefresh);
         window.addEventListener("project:created", handleRefresh);
 
         return () => {
-            window.removeEventListener("storage", handleRefresh);
+            if (timer) clearTimeout(timer);
             window.removeEventListener("product-definition-changed", handleRefresh);
-            window.removeEventListener("innoide:refresh-filesystem", handleRefresh);
             window.removeEventListener("project:created", handleRefresh);
         };
     }, [fetchStatus, syncStatusFromStorage]);
@@ -213,6 +214,9 @@ const CreateProductButton = () => {
                         <ModalBody p={0}>
                             <ProductDefinition
                                 initialStep={2}
+                                projectId={currentProjectId}
+                                productId={currentProductId !== currentProjectId ? currentProductId : undefined}
+                                productName={currentProductName}
                                 onClose={handleModalClose}
                                 onSuccess={handleSuccess}
                             />

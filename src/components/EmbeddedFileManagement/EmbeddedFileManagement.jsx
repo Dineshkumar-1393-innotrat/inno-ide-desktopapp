@@ -35,6 +35,14 @@ import { useProject } from "../../ProjectContext.jsx";
 import { useDispatch } from "react-redux";
 import { setProjectFiles } from "../../features/workspace/store/workspaceSlice";
 
+// In-memory cache for product definition status to prevent repetitive network checks
+const productDefinitionCache = new Map();
+if (typeof window !== "undefined") {
+  window.addEventListener("product-definition-changed", () => {
+    productDefinitionCache.clear();
+  });
+}
+
 export const checkProductDefinition = async (
   activeProductId,
   setIsProductDefined,
@@ -47,30 +55,25 @@ export const checkProductDefinition = async (
     return;
   }
 
-  // Construct URL with optional projectId as query param
-  const url = `${productAPIBase}/product/${activeProductId}/definitionNew${activeProjectId ? `?projectId=${activeProjectId}` : ''}`;
-  
-  console.log(`[checkProductDefinition] Checking: ${url}`);
+  // Fast path: return cached result immediately
+  const cacheKey = `${activeProductId}:${activeProjectId || ''}`;
+  if (productDefinitionCache.has(cacheKey)) {
+    const cached = productDefinitionCache.get(cacheKey);
+    if (typeof setIsProductDefined === 'function') {
+      setIsProductDefined(cached);
+    }
+    return;
+  }
+
+  const base = productAPIBase || baseURL || 'http://localhost:5004';
+  const url = `${base}/product/${activeProductId}/definitionNew${activeProjectId ? `?projectId=${activeProjectId}` : ''}`;
 
   try {
-    let response;
-    try {
-      console.log(`[checkProductDefinition] Attempting local check: ${url}`);
-      response = await axios.get(url, { timeout: 3000 }); // Short timeout for local check
-    } catch (localError) {
-      console.warn("[checkProductDefinition] Local check failed/timed out, falling back to Eureka...");
-      // Use definitionNew for fallback as requested
-      const fallbackUrl = `${baseURL}/product/${activeProductId}/definitionNew${activeProjectId ? `?projectId=${activeProjectId}` : ''}`;
-      response = await axios.get(fallbackUrl);
-    }
-
-    console.log("[checkProductDefinition] RAW Response:", response.data);
-
-    // Check if components exist in the response (supports { components }, { data: { components } }, or array response)
+    const response = await axios.get(url, { timeout: 2500 });
     const rawData = response.data?.data || response.data;
     const item = Array.isArray(rawData) ? rawData[0] : rawData;
     const components = item?.components || response.data?.components || response.data?.data?.components;
-    
+
     let hasComponents = false;
     if (components) {
       if (Array.isArray(components)) {
@@ -81,16 +84,16 @@ export const checkProductDefinition = async (
         hasComponents = Boolean(components);
       }
     }
-    
-    console.log(`[checkProductDefinition] Result: hasComponents=${hasComponents}`);
-    
+
+    productDefinitionCache.set(cacheKey, hasComponents);
+
     if (typeof setIsProductDefined === 'function') {
       setIsProductDefined(Boolean(hasComponents));
     }
   } catch (error) {
-    console.error("Error fetching product definition (All servers failed):", error);
+    productDefinitionCache.set(cacheKey, false);
     if (typeof setIsProductDefined === 'function') {
-      setIsProductDefined(false); // Assume false if error occurs
+      setIsProductDefined(false);
     }
   }
 };
@@ -161,48 +164,76 @@ export const buildTree = (flatArray) => {
   return root || { _id: "empty", name: "root", type: "folder", path: "root", children: [] };
 };
 
+// Cache verified roots and deduplicate concurrent in-flight requests
+const verifiedRoots = new Set();
+let inFlightFileFetch = null;
+
 // Fetch file system and ensure root folder exists
 export const fetchFileSystem = async (userId, setFileSystem, buildTree) => {
   if (!userId) return { success: false, error: "No User ID provided" };
 
-  try {
-    const { data } = await axios.get(
-      `${API.MAIN}/api/v1/rootStatus/${userId}`
-    );
-
-    if (!data.isRootCreated) {
-      await axios.post(
-        `${API.MAIN}/api/v1/filesystem/createRoot`,
-        {
-          userId,
-          name: "root",
-          type: "folder",
-        }
-      );
+  // If a fetch is already in flight, wait for its completion to avoid duplicate network calls
+  if (inFlightFileFetch) {
+    const res = await inFlightFileFetch;
+    if (res.success && typeof setFileSystem === 'function' && typeof buildTree === 'function') {
+      setFileSystem(buildTree(res.files));
     }
+    return res;
+  }
 
-    // Fetch the full file system after ensuring root exists
-    const fileResponse = await axios.get(
-      `${API.MAIN}/api/v1/files/${userId}`
-    );
+  const executeFetch = async () => {
+    try {
+      // Step 1: Ensure root exists (only check once per user session)
+      if (!verifiedRoots.has(userId)) {
+        try {
+          const { data } = await axios.get(
+            `${API.MAIN}/api/v1/rootStatus/${userId}`,
+            { timeout: 2500 }
+          );
 
-    if (fileResponse.data.success) {
-      console.log("[EmbeddedFileManagement] Raw Files Received:", fileResponse.data.files?.length);
-      const anyFolders = fileResponse.data.files?.filter(f => f.type === 'folder');
-      if (anyFolders && anyFolders.length > 0) {
-        console.log("[EmbeddedFileManagement] Folder Metadata Sample:", anyFolders.slice(0, 5));
+          if (!data.isRootCreated) {
+            await axios.post(
+              `${API.MAIN}/api/v1/filesystem/createRoot`,
+              {
+                userId,
+                name: "root",
+                type: "folder",
+              },
+              { timeout: 2500 }
+            );
+          }
+          verifiedRoots.add(userId);
+        } catch (rootErr) {
+          console.warn("[fetchFileSystem] rootStatus check failed, continuing to file fetch:", rootErr.message);
+        }
       }
 
-      const structuredData = buildTree(fileResponse.data.files);
-      setFileSystem(structuredData);
-      return { success: true };
-    } else {
-      return { success: false, error: "Failed to fetch files" };
+      // Step 2: Fetch the full file system after ensuring root exists
+      const fileResponse = await axios.get(
+        `${API.MAIN}/api/v1/files/${userId}`,
+        { timeout: 5000 }
+      );
+
+      if (fileResponse.data?.success) {
+        const files = fileResponse.data.files || [];
+        if (typeof setFileSystem === 'function' && typeof buildTree === 'function') {
+          const structuredData = buildTree(files);
+          setFileSystem(structuredData);
+        }
+        return { success: true, files };
+      } else {
+        return { success: false, error: "Failed to fetch files" };
+      }
+    } catch (error) {
+      console.error("Error fetching file system:", error);
+      return { success: false, error: error.message || "Unknown error" };
+    } finally {
+      inFlightFileFetch = null;
     }
-  } catch (error) {
-    console.error("Error fetching file system:", error);
-    return { success: false, error: error.message || "Unknown error" };
-  }
+  };
+
+  inFlightFileFetch = executeFetch();
+  return inFlightFileFetch;
 };
 
 const EmbeddedFileManagement = () => {

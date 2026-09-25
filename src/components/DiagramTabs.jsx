@@ -35,26 +35,19 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON, onSaveTab }) => {
   const projectContext = useProject() || {}; // Use project context safely
   const { activeProjectId } = projectContext;
 
-  // Try to get state from Redux based on 'kind'
-  const flowchartState = useSelector(state => state.flowchart);
-  const blockDiagramState = useSelector(state => state.blockDiagram);
-  const blockProgrammingState = useSelector(state => state.blockProgramming);
+  // Only subscribe to the specific slice for this tab kind to prevent cross-diagram re-renders
+  const reduxSlice = useSelector((state) => {
+    if (kind === 'flowchart') return state.flowchart;
+    if (kind === 'blockDiagram') return state.blockDiagram;
+    if (kind === 'blockProgramming') return state.blockProgramming;
+    return null;
+  });
 
   const [editingTabId, setEditingTabId] = useState(null);
   const [tempName, setTempName] = useState('');
 
-  let reduxTabs, reduxActiveTabId;
-
-  if (kind === 'flowchart') {
-    reduxTabs = flowchartState.tabs;
-    reduxActiveTabId = flowchartState.activeTabId;
-  } else if (kind === 'blockDiagram') {
-    reduxTabs = blockDiagramState.tabs;
-    reduxActiveTabId = blockDiagramState.activeTabId;
-  } else if (kind === 'blockProgramming') {
-    reduxTabs = blockProgrammingState.tabs;
-    reduxActiveTabId = blockProgrammingState.activeTabId;
-  }
+  const reduxTabs = reduxSlice?.tabs;
+  const reduxActiveTabId = reduxSlice?.activeTabId;
 
   // Use context safely if available
   const context = useContext(WorkspaceTabsContext) || {};

@@ -11,12 +11,18 @@ export class DeviceService {
 
       return ports.map((p, idx) => ({
         id: `device-${p.path || idx}`,
-        name: p.friendlyName || `Hardware Device (${p.path})`,
+        name: p.friendlyName || `${p.chipName || 'Hardware Device'} (${p.path})`,
+        chipName: p.chipName,
+        chip: p.chip || 'esp32',
         type: 'microcontroller',
         status: 'available',
         port: p.path,
         manufacturer: p.manufacturer,
-        isUsb: p.isUsb
+        vendorId: p.vendorId,
+        productId: p.productId,
+        isUsb: p.isUsb,
+        isBluetooth: p.isBluetooth,
+        recognized: p.recognized
       }));
     } catch (error) {
       logger.error('Error listing devices:', error.message);

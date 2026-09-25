@@ -331,7 +331,7 @@ export default function ESP32Flasher({
         id: "device",
         label: "Hardware device detected",
         status: hasDevice ? "pass" : "fail",
-        value: hasDevice ? `${selectedDevice.name} (${selectedDevice.port})` : "No device connected"
+        value: hasDevice ? `${selectedDevice.chipName || selectedDevice.name} on ${selectedDevice.port}` : "No device connected"
       },
       {
         id: "board",
@@ -817,9 +817,11 @@ export default function ESP32Flasher({
         }
       }
 
-      // MULTI-DEVICE SYNC: Always notify Companion HTTP server (port 5055) so all connected phones on Wi-Fi & Cloud receive SSE update
+      // MULTI-DEVICE SYNC: Notify Companion HTTP server (port 5055) so all connected phones on Wi-Fi & Cloud receive SSE update.
+      // syncOnly=true ensures this only broadcasts state — the serial write was already done via Electron IPC above.
       try {
-        fetch("http://localhost:5055/api/action", { method: "POST", headers, body }).catch(() => { });
+        const syncBody = JSON.stringify({ payload: cmd, port: targetPort, value: nextVal, SwitchStatus: nextVal ? 1 : 0, syncOnly: true });
+        fetch("http://localhost:5055/api/action", { method: "POST", headers, body: syncBody }).catch(() => { });
       } catch (e) { }
 
       // TERTIARY: InnoIDE Backend (port 5004) — updates SwitchStatus record
@@ -1116,6 +1118,8 @@ export default function ESP32Flasher({
             allDevices.push({
               id: `esp32-wifi-${p.path || idx}`,
               name: p.friendlyName || `ESP32-S3 Wireless Node`,
+              chipName: p.chipName || p.friendlyName || `ESP32-S3 Wireless Node`,
+              friendlyName: p.friendlyName || `ESP32-S3 Wireless Node`,
               ip: p.ip || (p.path ? p.path.replace(/^TCP:/i, '') : '192.168.1.105'),
               firmware: "Firmware v1.2.1 (Wi-Fi)",
               port: p.path,
@@ -1124,22 +1128,31 @@ export default function ESP32Flasher({
               signal: 5,
               battery: 95,
               isUsb: false,
+              isBluetooth: false,
               isNetwork: true,
+              recognized: true,
               selected: false
             });
           } else {
+            // Physical USB devices, standard COM ports, and Bluetooth serial ports
             allDevices.push({
               id: `esp32-detected-${p.path || idx}`,
-              name: p.friendlyName || (p.isUsb ? `ESP32-S3 Board (${p.path})` : `Serial Port (${p.path})`),
+              name: p.friendlyName || `${p.chipName || 'Serial Device'} (${p.path})`,
+              chipName: p.chipName || p.friendlyName || `Device (${p.path})`,
+              friendlyName: p.friendlyName || `${p.chipName || 'Device'} (${p.path})`,
               ip: `COM Port (${p.path})`,
-              firmware: "Firmware v1.2.1",
+              firmware: p.recognized ? `${(p.chip || 'ESP32').toUpperCase()} Firmware` : "Serial Device",
               port: p.path,
               chip: p.chip || "esp32s3",
               manufacturer: p.manufacturer || (p.isUsb ? 'USB Serial Device' : 'Serial Port'),
-              signal: 4,
+              vendorId: p.vendorId,
+              productId: p.productId,
+              signal: p.isUsb ? 5 : 2,
               battery: 85 + (idx * 5) % 15,
               isUsb: p.isUsb !== false,
+              isBluetooth: Boolean(p.isBluetooth),
               isNetwork: false,
+              recognized: Boolean(p.recognized),
               selected: idx === 0
             });
           }
@@ -1153,6 +1166,8 @@ export default function ESP32Flasher({
             allDevices.unshift({
               id: `esp32-wifi-${wn.ip}`,
               name: wn.name || `ESP32-S3 Wireless Node (${wn.ip})`,
+              chipName: wn.name || `ESP32-S3 Wireless Node`,
+              friendlyName: wn.name || `ESP32-S3 Wireless Node (${wn.ip})`,
               ip: wn.ip,
               firmware: "Firmware v1.2.1 (Wi-Fi)",
               port: wn.port || `TCP:${wn.ip}:${wn.tcpPort || 8888}`,
@@ -1161,7 +1176,9 @@ export default function ESP32Flasher({
               signal: 5,
               battery: 100,
               isUsb: false,
+              isBluetooth: false,
               isNetwork: true,
+              recognized: true,
               selected: false
             });
           }
@@ -1182,7 +1199,12 @@ export default function ESP32Flasher({
         setDevices(filtered);
         setSelectedDeviceId((prevId) => {
           const exists = filtered.some((d) => d.id === prevId);
-          return exists ? prevId : filtered[0]?.id;
+          if (exists) return prevId;
+          const preferred = filtered.find(d => d.isUsb && d.recognized && d.chip?.includes('esp32'))
+            || filtered.find(d => d.isUsb && d.recognized)
+            || filtered.find(d => d.isUsb)
+            || filtered[0];
+          return preferred?.id || filtered[0]?.id;
         });
       } else {
         setDevices([]);
@@ -8358,15 +8380,25 @@ Generated automatically by **InnoIDE App Companion Studio**.
                                 border="2px solid white"
                               />
                             </Box>
-                            <VStack align="start" spacing={0}>
-                              <Text fontWeight="extrabold" fontSize="sm">
-                                {device.name}
-                              </Text>
+                            <VStack align="start" spacing={0.5}>
+                              <HStack spacing={2} align="center" flexWrap="wrap">
+                                <Text fontWeight="extrabold" fontSize="sm">
+                                  {device.chipName || device.name}
+                                </Text>
+                                <Badge colorScheme={device.isUsb ? "green" : (device.isNetwork ? "blue" : "gray")} fontSize="10px" borderRadius="md" px={1.5}>
+                                  {device.port}
+                                </Badge>
+                                {device.chip && (
+                                  <Badge colorScheme="purple" fontSize="9px" borderRadius="md" px={1.5}>
+                                    {device.chip.toUpperCase()}
+                                  </Badge>
+                                )}
+                              </HStack>
                               <Text fontSize="11px" color="gray.500">
-                                {device.ip}
+                                {device.manufacturer || device.ip} {device.vendorId ? `(VID: ${device.vendorId}, PID: ${device.productId})` : ''}
                               </Text>
                               <Text fontSize="10px" color="gray.400">
-                                {device.firmware} • Port: {device.port}
+                                Port: {device.port} • {device.isUsb ? 'USB Serial Interface' : (device.isBluetooth ? 'Bluetooth Serial' : (device.isNetwork ? 'Wi-Fi Network' : 'Standard Serial'))}
                               </Text>
                             </VStack>
                           </HStack>
@@ -8482,7 +8514,7 @@ Generated automatically by **InnoIDE App Companion Studio**.
                     <FaCheckCircle size={18} />
                   </Box>
                   <Text fontSize="xs" fontWeight="bold" color="green.800">
-                    Hardware check passed: {selectedDevice.name} ({selectedDevice.port}) is ready for flash.
+                    Hardware check passed: {selectedDevice.chipName || selectedDevice.name} on {selectedDevice.port} is ready for flash.
                   </Text>
                 </HStack>
               ) : (

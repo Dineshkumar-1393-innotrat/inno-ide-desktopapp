@@ -407,10 +407,16 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
       }
 
       if (ports.length > 0) {
-        const formatted = ports.map((p) => (typeof p === "string" ? p : p.path || p.port || "COM3"));
+        const formatted = ports.map((p) => {
+          if (typeof p === "string") return { path: p, label: p };
+          const path = p.path || p.port || "COM3";
+          const label = p.friendlyName || (p.chipName ? `${p.chipName} (${path})` : path);
+          return { path, label };
+        });
         setAvailablePorts(formatted);
-        if (!formatted.includes(selectedPort)) {
-          setSelectedPort(formatted[0]);
+        const paths = formatted.map(f => f.path);
+        if (!paths.includes(selectedPort)) {
+          setSelectedPort(paths[0]);
         }
       }
     } catch (err) {
@@ -641,7 +647,12 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
           portList = Array.isArray(res) ? res : res?.ports || [];
         }
         if (portList.length > 0) {
-          const formatted = portList.map((p) => `  • ${p.path || p.port || p} ${p.manufacturer ? "(" + p.manufacturer + ")" : ""}`);
+          const formatted = portList.map((p) => {
+            const path = p.path || p.port || p;
+            const name = p.chipName || p.friendlyName || p.manufacturer || 'Serial Port';
+            const vidPid = p.vendorId ? ` [VID:${p.vendorId} PID:${p.productId}]` : '';
+            return `  • ${path}: ${name}${vidPid}`;
+          });
           setTerminalOutput((prev) => [...prev, `Detected ${portList.length} serial port(s):`, ...formatted]);
         } else {
           setTerminalOutput((prev) => [
@@ -1379,17 +1390,24 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
               <HStack spacing={2} flexWrap="wrap">
                 <Select
                   size="xs"
-                  w="100px"
+                  w="auto"
+                  minW="120px"
+                  maxW="260px"
                   value={selectedPort}
                   onChange={(e) => setSelectedPort(e.target.value)}
                   borderRadius="md"
                   isDisabled={isConnectedToDevice}
+                  title={selectedPort}
                 >
-                  {availablePorts.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
+                  {availablePorts.map((p) => {
+                    const val = typeof p === "string" ? p : p.path;
+                    const text = typeof p === "string" ? p : (p.label || p.friendlyName || p.path);
+                    return (
+                      <option key={val} value={val}>
+                        {text}
+                      </option>
+                    );
+                  })}
                 </Select>
 
                 <Select

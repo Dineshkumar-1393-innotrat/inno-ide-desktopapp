@@ -39,7 +39,14 @@ import { productAPIBase, baseURL } from "../utilities";
 
 import { COMPONENT_DATA, COMPONENT_TYPES } from "./componentData.js";
 
-export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 }) {
+export default function ProductDefinition({
+  onSuccess,
+  onClose,
+  initialStep = 2,
+  projectId: propProjectId,
+  productId: propProductId,
+  productName: propProductName,
+}) {
   const toast = useToast();
 
   // Get project data from ProjectContext to ensure accurate association
@@ -50,7 +57,8 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
     activeProductId,
     setActiveProductId,
     setActiveProductName,
-    setActiveDeviceId
+    setActiveDeviceId,
+    user,
   } = useProject();
 
   // const SI_UNITS = [
@@ -354,7 +362,7 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
 
   // Basic Info (Step 1 + reused in Step 2)
   const [productName, setProductName] = useState(() => {
-    return activeProjectName || localStorage.getItem("activeProjectName") || "";
+    return propProductName || activeProductName || activeProjectName || localStorage.getItem("activeProjectName") || "";
   });
   const [description, setDescription] = useState("");
 
@@ -881,8 +889,8 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
   };
   const [isLoading, setIsLoading] = useState(false);
 
-  const submitProductDefinition = async () => {
-    const productId = localStorage.getItem("activeProductId");
+  const submitProductDefinition = async (overrideProductId) => {
+    const productId = overrideProductId || propProductId || activeProductId || localStorage.getItem("activeProductId");
     if (!productId) {
       console.error("Product ID missing for definition");
       return;
@@ -1010,7 +1018,10 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
         type: type,
         parameters: paramsObj,
         note: note || "",
-        urls: urlLink ? [urlLink] : []
+        notes: note || "",
+        urls: urlLink ? [urlLink] : [],
+        url: urlLink || "",
+        urlLink: urlLink || ""
       };
     });
 
@@ -1018,7 +1029,10 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
       productID: productId,
       productName: productName,
       note: note || "",
+      notes: note || "",
       urls: urlLink ? [urlLink] : [],
+      url: urlLink || "",
+      urlLink: urlLink || "",
       components: componentsPayload
     };
 
@@ -1068,7 +1082,10 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
         componentsPayload: componentsPayload,
         devices: deviceInfos,
         note: note || "",
+        notes: note || "",
         urls: urlLink ? [urlLink] : [],
+        urlLink: urlLink || "",
+        url: urlLink || "",
         createdAt: new Date().toISOString()
       };
       try {
@@ -1097,12 +1114,99 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
 
   const handleSubmitDevices = async () => {
     setLoading(true);
-    const productId = activeProductId || localStorage.getItem("activeProductId");
+
+    // Resolve IDs from props, context, and storage
+    let projectId = propProjectId || activeProjectId || localStorage.getItem("activeProjectId") || "";
+    let productId = propProductId || activeProductId || localStorage.getItem("activeProductId") || "";
+    let effectiveProductName = propProductName || productName || activeProductName || activeProjectName || localStorage.getItem("activeProjectName") || "Product";
+
+    // 1. If projectId is missing, try reading from cached project metadata
+    if (!projectId) {
+      try {
+        const lastProj = JSON.parse(localStorage.getItem('innoide:last_project_details') || "{}");
+        if (lastProj?.projectId) projectId = lastProj.projectId;
+        if (!effectiveProductName || effectiveProductName === "Product") {
+          if (lastProj?.projectName) effectiveProductName = lastProj.projectName;
+        }
+      } catch (e) {}
+    }
+
+    // 2. If productId is missing but projectId is known, try reading from mappings
+    if (!productId && projectId) {
+      try {
+        const userData = JSON.parse(localStorage.getItem("userData") || "{}");
+        const userId = user?.userId || user?._id || user?.id || userData.userId;
+        const map = JSON.parse(localStorage.getItem("projectProductMap") || "{}");
+        const mappedId = (userId && map[userId]?.[projectId]) || map[projectId];
+        if (mappedId) productId = mappedId;
+
+        if (!productId) {
+          const prodDetails = JSON.parse(localStorage.getItem(`innoide:product_details_${projectId}`) || "{}");
+          if (prodDetails?.productId || prodDetails?.productID || prodDetails?._id) {
+            productId = prodDetails.productId || prodDetails.productID || prodDetails._id;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. If productId is STILL missing, auto-create product on backend now!
+    if (!productId) {
+      try {
+        const userData = JSON.parse(localStorage.getItem("userData") || "{}");
+        const userId = user?.userId || user?._id || user?.id || userData.userId;
+
+        if (!userId) {
+          throw new Error("User identity missing. Please log in again.");
+        }
+
+        const createPayload = {
+          name: effectiveProductName,
+          userId: userId,
+          projectId: projectId || undefined,
+          productDesc: note || description || "Auto-created product definition",
+        };
+
+        console.log("[CreateProduct] Creating product record first on /productNew:", createPayload);
+        const createResp = await axios.post(`${API.MAIN}/productNew`, createPayload);
+        productId = createResp.data?.productID || createResp.data?.productId;
+
+        if (productId) {
+          localStorage.setItem("activeProductId", productId);
+          localStorage.setItem("activeProductName", effectiveProductName);
+          setActiveProductId(productId);
+          setActiveProductName(effectiveProductName);
+
+          if (projectId) {
+            localStorage.setItem("activeProjectId", projectId);
+            setActiveProjectId(projectId);
+            // Link to folder if exists
+            try {
+              await axios.put(`${API.MAIN}/api/v1/updateFileAndFolder`, {
+                fileId: projectId,
+                productId: productId
+              });
+            } catch (err) {
+              console.warn("Could not link productId to project folder:", err.message);
+            }
+          }
+        }
+      } catch (createErr) {
+        console.error("[CreateProduct] Failed to auto-create product record:", createErr);
+        toast({
+          title: "Product Creation Failed",
+          description: createErr?.response?.data?.message || createErr.message || "Failed to initialize product for this project.",
+          status: "error",
+          duration: 4000,
+        });
+        setLoading(false);
+        return;
+      }
+    }
 
     if (!productId) {
       toast({
         title: "Product ID Missing",
-        description: "activeProjectId not found in localStorage.",
+        description: "Could not associate a product with the current project. Please ensure a project is open.",
         status: "error",
         duration: 3000,
       });
@@ -1182,7 +1286,7 @@ export default function ProductDefinition({ onSuccess, onClose, initialStep = 2 
       }
 
       // 2. Submit Definition (Chained)
-      await submitProductDefinition();
+      await submitProductDefinition(productId);
 
       // onSuccess is handled inside submitProductDefinition
       // if (onSuccess) onSuccess(); 

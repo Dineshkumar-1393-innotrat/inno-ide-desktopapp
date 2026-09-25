@@ -53,9 +53,11 @@ const Embedded = () => {
                     setIsFlashing(false);
                     return;
                 }
-                const selectedPort = ports[0].path;
+                const targetDev = ports.find(p => p.isUsb) || ports[0];
+                const selectedPort = targetDev.path;
+                const devName = targetDev.chipName || targetDev.friendlyName || selectedPort;
 
-                setResponse((prev) => `${prev}\nDetected Port: ${selectedPort}. Flashing ESP32 device...`);
+                setResponse((prev) => `${prev}\nDetected Device: ${devName} on ${selectedPort}. Flashing ESP32 device...`);
 
                 let unsubscribe = null;
                 if (window.electronAPI?.flash?.onEvent) {

@@ -152,7 +152,7 @@ export function ProjectProvider({ children }) {
       const results = await Promise.all(
         endpoints.map(async (ep) => {
           try {
-            const res = await axios.get(ep.url, { signal: controller.signal });
+            const res = await axios.get(ep.url, { signal: controller.signal, timeout: 4000 });
             if (res.data?.success && res.data?.data?.[0]) {
               const doc = res.data.data[0];
               // Normalize data field names (some use blockDiagram, some flowDiagram, some use root nodes/edges)
@@ -258,22 +258,41 @@ export function ProjectProvider({ children }) {
         localStorage.setItem("activeProjectName", projectName);
       }
 
-      // Only set if explicitly provided (e.g. from sidebar folder metadata)
-      if (productId) {
-        setActiveProductId(productId);
-        localStorage.setItem("activeProductId", productId);
+      // Resolve productId from mapping or cache if not explicitly provided
+      let effectiveProductId = productId;
+      let effectiveProductName = productName;
+      if (!effectiveProductId && projectId && userId) {
+        const storedMap = projectProductMap[userId] || {};
+        if (storedMap[projectId]) {
+          effectiveProductId = storedMap[projectId];
+        } else {
+          try {
+            const cached = localStorage.getItem(`innoide:product_details_${projectId}`);
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              effectiveProductId = parsed.productId || parsed.productID || parsed._id;
+              if (parsed.productName && !effectiveProductName) effectiveProductName = parsed.productName;
+            }
+          } catch (e) {}
+        }
+      }
+
+      // Only set if explicitly provided or resolved from cache/mapping
+      if (effectiveProductId) {
+        setActiveProductId(effectiveProductId);
+        localStorage.setItem("activeProductId", effectiveProductId);
 
         // Update mapping (keyed by userId)
         if (userId) {
           setProjectProductMap(prev => ({
             ...prev,
-            [userId]: { ...(prev[userId] || {}), [projectId]: productId }
+            [userId]: { ...(prev[userId] || {}), [projectId]: effectiveProductId }
           }));
         }
       }
-      if (productName) {
-        setActiveProductName(productName);
-        localStorage.setItem("activeProductName", productName);
+      if (effectiveProductName) {
+        setActiveProductName(effectiveProductName);
+        localStorage.setItem("activeProductName", effectiveProductName);
       }
 
       // 8. Fetch backend diagram data for the new project.
@@ -497,6 +516,18 @@ export function ProjectProvider({ children }) {
         const userId = user?.userId || user?._id || user?.id;
         
         if (!userId || !activeProjectId) {
+          return;
+        }
+
+        // Fast-path: If activeProductId is already set, ensure mapping is saved and return early
+        if (activeProductId) {
+          const userMap = projectProductMap[userId] || {};
+          if (!userMap[activeProjectId]) {
+            setProjectProductMap(prev => ({
+              ...prev,
+              [userId]: { ...(prev[userId] || {}), [activeProjectId]: activeProductId }
+            }));
+          }
           return;
         }
 
