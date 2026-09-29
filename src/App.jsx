@@ -12,6 +12,7 @@ import { autoSaveManager } from "./utils/autoSaveManager";
 import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { useRouteRestoration } from "./hooks/useRouteRestoration";
+import { ValidationProvider } from "./validation";
 
 // Eagerly loaded core / lightweight components
 import Home from "./components/Home";
@@ -94,66 +95,68 @@ const App = () => {
         <WorkspaceStateProvider>
           <AuthProvider>
             <MeetingProvider>
-              <DndProvider backend={HTML5Backend}>
-                <Box minH="100vh" display="flex" flexDirection="column" overflowX="hidden">
-                  <Suspense fallback={<PageLoader />}>
-                    <Routes>
-                      <Route path="/" element={<Home />} />
-                      <Route path="/template" element={<Template />} />
+              <ValidationProvider>
+                <DndProvider backend={HTML5Backend}>
+                  <Box minH="100vh" display="flex" flexDirection="column" overflowX="hidden">
+                    <Suspense fallback={<PageLoader />}>
+                      <Routes>
+                        <Route path="/" element={<Home />} />
+                        <Route path="/template" element={<Template />} />
 
-                      <Route
-                        path="/editor"
-                        element={
-                          <CodeEditor
-                            currentPanel={currentPanel}
-                            onDebugClick={handleToggleDebug}
-                            onFlashClick={handleToggleFlash}
-                          />
-                        }
-                      />
-                      <Route path="/FlowchartTest" element={<FlowchartTest />} />
-                      <Route path="/feedback" element={<Feedback />} />
-                      <Route path="/defineproduct" element={<DefineProduct />} />
-                      <Route path="/textbox" element={<TextBox />} />
-                      <Route path="/fileupload" element={<FileUpload />} />
-                      <Route path="/simulation" element={<Simulation />} />
-                      <Route path="/createaccount" element={<CreateAccount />} />
-                      <Route path="/forgotpassword" element={<ForgotPassword />} />
-                      <Route path="/simulationpopup" element={<SimulationPopup />} />
-                      <Route path="/defineproductone" element={<DefineProductOne />} />
-                      <Route path="/defineproducttwo" element={<DefineProductTwo />} />
-                      <Route path="/BlockDiagram" element={<BlockDiagramTest />} />
-                      <Route path="/blockprogramming" element={<BlockProgramming />} />
-                      <Route path="/fileexplorerone" element={<FileExplorerOne />} />
-                      <Route
-                        path="/createproductdefination"
-                        element={<CreateProductDefination />}
-                      />
-                      <Route path="/view-data" element={<VisualizeData />} />
-                      <Route path="/logout" element={<Logout />} />
-                      <Route path="/userbutton" element={<UserButton />} />
-                      <Route path="/embedded" element={<EmbeddedFileManagement />} />
-                      <Route
-                        path="/embedded/manage"
-                        element={<EmbeddedFileManagement />}
-                      />
-                      <Route path="/toggle" element={<Toggle />} />
-                      <Route path="/mathcodeeditor" element={<MathCodeEditor />} />
-                      <Route path="/meet" element={<MeetingPage />} />
-                      <Route path="/meet/:meetingId" element={<MeetingPage />} />
-                      <Route path="/rule-engine" element={<RuleEnginePage />} />
-                      <Route path="/flasher" element={<ESP32Flasher />} />
+                        <Route
+                          path="/editor"
+                          element={
+                            <CodeEditor
+                              currentPanel={currentPanel}
+                              onDebugClick={handleToggleDebug}
+                              onFlashClick={handleToggleFlash}
+                            />
+                          }
+                        />
+                        <Route path="/FlowchartTest" element={<FlowchartTest />} />
+                        <Route path="/feedback" element={<Feedback />} />
+                        <Route path="/defineproduct" element={<DefineProduct />} />
+                        <Route path="/textbox" element={<TextBox />} />
+                        <Route path="/fileupload" element={<FileUpload />} />
+                        <Route path="/simulation" element={<Simulation />} />
+                        <Route path="/createaccount" element={<CreateAccount />} />
+                        <Route path="/forgotpassword" element={<ForgotPassword />} />
+                        <Route path="/simulationpopup" element={<SimulationPopup />} />
+                        <Route path="/defineproductone" element={<DefineProductOne />} />
+                        <Route path="/defineproducttwo" element={<DefineProductTwo />} />
+                        <Route path="/BlockDiagram" element={<BlockDiagramTest />} />
+                        <Route path="/blockprogramming" element={<BlockProgramming />} />
+                        <Route path="/fileexplorerone" element={<FileExplorerOne />} />
+                        <Route
+                          path="/createproductdefination"
+                          element={<CreateProductDefination />}
+                        />
+                        <Route path="/view-data" element={<VisualizeData />} />
+                        <Route path="/logout" element={<Logout />} />
+                        <Route path="/userbutton" element={<UserButton />} />
+                        <Route path="/embedded" element={<EmbeddedFileManagement />} />
+                        <Route
+                          path="/embedded/manage"
+                          element={<EmbeddedFileManagement />}
+                        />
+                        <Route path="/toggle" element={<Toggle />} />
+                        <Route path="/mathcodeeditor" element={<MathCodeEditor />} />
+                        <Route path="/meet" element={<MeetingPage />} />
+                        <Route path="/meet/:meetingId" element={<MeetingPage />} />
+                        <Route path="/rule-engine" element={<RuleEnginePage />} />
+                        <Route path="/flasher" element={<ESP32Flasher />} />
 
-                      <Route path="/autosave-demo" element={<AutoSaveDemo />} />
-                    </Routes>
-                  </Suspense>
-                </Box>
+                        <Route path="/autosave-demo" element={<AutoSaveDemo />} />
+                      </Routes>
+                    </Suspense>
+                  </Box>
 
-                {/* AutoSaveStatus hidden on /simulation route per user request */}
-                {location.pathname !== "/simulation" && (
-                  <AutoSaveStatus position="corner" />
-                )}
-              </DndProvider>
+                  {/* AutoSaveStatus hidden on /simulation route per user request */}
+                  {location.pathname !== "/simulation" && (
+                    <AutoSaveStatus position="corner" />
+                  )}
+                </DndProvider>
+              </ValidationProvider>
             </MeetingProvider>
           </AuthProvider>
         </WorkspaceStateProvider>

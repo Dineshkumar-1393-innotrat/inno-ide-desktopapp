@@ -26,20 +26,99 @@ let companionState = {
     'w-led': false
   },
   lastPayload: 'LED:0',
-  activePort: 'COM9'
+  activePort: 'COM9',
+  lastLocation: null,
+  switchLocations: [],
+  hostLocation: {
+    lat: 13.0147,
+    lng: 80.2242,
+    city: 'Little Mount',
+    address: 'Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India',
+    country: 'India',
+    source: 'Calibrated Location (Little Mount)',
+    timestamp: new Date().toLocaleTimeString()
+  },
+  formQuestions: [],
+  formResponses: []
 };
 
 const sseClients = new Set();
 
+function isStaleGeolog(l) {
+  if (!l) return true;
+  const t = String(l.time || l.timestamp || "");
+  const city = String(l.city || "");
+  const id = String(l.id || "");
+  if (id === "loc-init-1") return true;
+  if (
+    t === "12:53:01" ||
+    t === "12:34:55" ||
+    t === "12:34:49" ||
+    t === "12:19:06 pm" ||
+    t === "11:36:18" ||
+    t === "11:36:10" ||
+    t === "11:35:58" ||
+    t === "11:01:35" ||
+    t === "11:01:33"
+  ) {
+    return true;
+  }
+  if (city === "Ambattur" || city === "Chennai") return true;
+  return false;
+}
+
+function sanitizeServerResponses(respList) {
+  if (!Array.isArray(respList)) return [];
+  return respList.filter((r) => {
+    if (!r) return false;
+    const ans = String(r.answer || "").trim().toLowerCase();
+    const qText = String(r.questionText || r.question || "").trim().toLowerCase();
+    if (
+      r.id === "resp-1" ||
+      r.id === "resp-2" ||
+      r.questionId === "q-1" ||
+      r.questionId === "q-2" ||
+      qText.includes("technician") ||
+      qText.includes("operational status") ||
+      qText.includes("hi satya") ||
+      qText.includes("what is your name") ||
+      ans === "iam good" ||
+      ans === "i am good" ||
+      ans === "dinesh" ||
+      ans === "dk" ||
+      ans === "alex" ||
+      ans === "alex engineer" ||
+      ans.includes("alex engineer") ||
+      ans === "running normally at 24.5°c" ||
+      ans.includes("running normally")
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 function broadcastStateUpdate(extraData = {}) {
   companionState.version += 1;
   companionState.lastUpdate = Date.now();
+  companionState.formResponses = sanitizeServerResponses(companionState.formResponses);
+  if (Array.isArray(companionState.switchLocations)) {
+    companionState.switchLocations = companionState.switchLocations.filter(l => !isStaleGeolog(l));
+  }
+  if (companionState.lastLocation && isStaleGeolog(companionState.lastLocation)) {
+    companionState.lastLocation = null;
+  }
   const eventPayload = JSON.stringify({
     version: companionState.version,
     lastUpdate: companionState.lastUpdate,
     states: companionState.states,
     lastPayload: companionState.lastPayload,
     activePort: companionState.activePort,
+    lastLocation: companionState.lastLocation,
+    switchLocations: companionState.switchLocations,
+    hostLocation: companionState.hostLocation,
+    formQuestions: companionState.formQuestions,
+    formResponses: companionState.formResponses,
     ...extraData
   });
 
@@ -626,13 +705,100 @@ export function registerAllIPCHandlers(getMainWindow) {
             companionState.lastPayload = payload.trim();
             companionState.activePort = targetPort;
 
+            // Location tracking for switch toggles & device
+            if (data.hostLocation) {
+              companionState.hostLocation = data.hostLocation;
+            }
+
+            // Clear geologs / locations if requested
+            if (data.clearGeologs) {
+              companionState.switchLocations = [];
+              companionState.lastLocation = null;
+            }
+
+            // Purge any stale hardcoded items from past sessions
+            if (Array.isArray(companionState.switchLocations)) {
+              companionState.switchLocations = companionState.switchLocations.filter(l => !isStaleGeolog(l));
+            }
+
+            if (data.location) {
+              // Ensure coordinates are not stale hardcoded
+              const isStale = isStaleGeolog(data.location);
+              if (!isStale) {
+                companionState.lastLocation = data.location;
+                if (!Array.isArray(companionState.switchLocations)) {
+                  companionState.switchLocations = [];
+                }
+                const exists = companionState.switchLocations.some(l => l.id === data.location.id || (l.timestamp === data.location.timestamp && l.event === data.location.event));
+                if (!exists) {
+                  companionState.switchLocations.unshift(data.location);
+                  if (companionState.switchLocations.length > 50) companionState.switchLocations.pop();
+                }
+              }
+            } else if ((isExplicitOn || isExplicitOff) && companionState.hostLocation && companionState.hostLocation.lat) {
+              // Auto-log geolog using host device location if GPS is unavailable
+              const eventLabel = isExplicitOn ? 'ON' : 'OFF';
+              const autoLoc = {
+                id: 'loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+                event: eventLabel,
+                switchTitle: data.switchTitle || ('Switch ' + eventLabel),
+                lat: companionState.hostLocation.lat,
+                lng: companionState.hostLocation.lng,
+                city: companionState.hostLocation.city || 'Host Location',
+                address: companionState.hostLocation.address || '',
+                source: companionState.hostLocation.source || 'Host Device',
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now()
+              };
+              companionState.lastLocation = autoLoc;
+              if (!Array.isArray(companionState.switchLocations)) {
+                companionState.switchLocations = [];
+              }
+              companionState.switchLocations.unshift(autoLoc);
+              if (companionState.switchLocations.length > 50) companionState.switchLocations.pop();
+              data.location = autoLoc;
+            }
+
+            // Clear Google Form responses if requested
+            if (data.clearFormResponses) {
+              companionState.formResponses = [];
+            }
+
+            // Google Form responses from mobile companion
+            if (data.formResponse) {
+              if (!Array.isArray(companionState.formResponses)) {
+                companionState.formResponses = [];
+              }
+              const ans = String(data.formResponse.answer || "").trim();
+              const isDummy =
+                data.formResponse.id === "resp-1" ||
+                data.formResponse.id === "resp-2" ||
+                ans === "Alex Engineer" ||
+                ans === "Running normally at 24.5°C" ||
+                ans.toLowerCase().includes("alex engineer") ||
+                ans.toLowerCase().includes("running normally");
+              if (!isDummy) {
+                companionState.formResponses.unshift(data.formResponse);
+                if (companionState.formResponses.length > 100) companionState.formResponses.pop();
+              }
+            }
+
+            // Form questions sync
+            if (data.questions && Array.isArray(data.questions)) {
+              companionState.formQuestions = data.questions;
+            }
+
             // Broadcast to all connected phones (SSE stream)
             broadcastStateUpdate({
               port: targetPort,
               isOn: isExplicitOn,
               isOff: isExplicitOff,
               widgetId: widgetId,
-              value: data.value
+              value: data.value,
+              location: data.location || companionState.lastLocation,
+              hostLocation: data.hostLocation || companionState.hostLocation,
+              formResponse: data.formResponse,
+              questions: data.questions || companionState.formQuestions
             });
 
             const mainWindow = getMainWindow();
@@ -641,7 +807,12 @@ export function registerAllIPCHandlers(getMainWindow) {
                 port: targetPort,
                 isOn: isExplicitOn,
                 isOff: isExplicitOff,
-                payload: payload.trim()
+                payload: payload.trim(),
+                location: data.location || companionState.lastLocation,
+                switchLocations: companionState.switchLocations,
+                hostLocation: data.hostLocation || companionState.hostLocation,
+                formResponse: data.formResponse,
+                questions: data.questions || companionState.formQuestions
               });
             }
 
@@ -709,7 +880,12 @@ export function registerAllIPCHandlers(getMainWindow) {
           lastUpdate: companionState.lastUpdate,
           states: companionState.states,
           lastPayload: companionState.lastPayload,
-          activePort: companionState.activePort
+          activePort: companionState.activePort,
+          lastLocation: companionState.lastLocation,
+          switchLocations: companionState.switchLocations,
+          hostLocation: companionState.hostLocation,
+          formQuestions: companionState.formQuestions,
+          formResponses: sanitizeServerResponses(companionState.formResponses)
         })}\n\n`);
 
         sseClients.add(res);
@@ -721,6 +897,13 @@ export function registerAllIPCHandlers(getMainWindow) {
 
       // Multi-Device Current State Endpoint (Polling Fallback)
       if (pathname === '/api/state') {
+        companionState.formResponses = sanitizeServerResponses(companionState.formResponses);
+        if (Array.isArray(companionState.switchLocations)) {
+          companionState.switchLocations = companionState.switchLocations.filter(l => !isStaleGeolog(l));
+        }
+        if (companionState.lastLocation && isStaleGeolog(companionState.lastLocation)) {
+          companionState.lastLocation = companionState.switchLocations[0] || null;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({
           success: true,
@@ -729,8 +912,21 @@ export function registerAllIPCHandlers(getMainWindow) {
           states: companionState.states,
           lastPayload: companionState.lastPayload,
           activePort: companionState.activePort,
+          lastLocation: companionState.lastLocation,
+          switchLocations: companionState.switchLocations,
+          hostLocation: companionState.hostLocation,
+          formQuestions: companionState.formQuestions,
+          formResponses: companionState.formResponses,
           connectedClients: sseClients.size
         }));
+      }
+
+      if (pathname === '/api/clear-stale-locations') {
+        companionState.switchLocations = [];
+        companionState.lastLocation = companionState.hostLocation || null;
+        broadcastStateUpdate();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, message: 'Cleared stale switch locations' }));
       }
 
       // HTML update endpoint — allows React renderer to push a fresh companion app page
@@ -773,6 +969,34 @@ export function registerAllIPCHandlers(getMainWindow) {
       });
     } catch (listenErr) {
       console.warn(`[CompanionServer] Port ${currentCompanionPort} in use, skipping creation:`, listenErr.message);
+    }
+
+    // Auto-detect host machine location dynamically
+    if (!companionState.hostLocation) {
+      try {
+        fetch('https://ipwho.is/')
+          .then((r) => r.json())
+          .then((d) => {
+            if (d && d.success !== false && d.latitude && d.longitude) {
+              const detectedHost = {
+                lat: parseFloat(Number(d.latitude).toFixed(4)),
+                lng: parseFloat(Number(d.longitude).toFixed(4)),
+                city: d.city || d.region || 'Local Device',
+                country: d.country || 'India',
+                address: [d.city, d.region, d.country].filter(Boolean).join(', '),
+                event: 'ACTIVE',
+                source: 'ipwho.is',
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now()
+              };
+              companionState.hostLocation = detectedHost;
+              if (!companionState.lastLocation) {
+                companionState.lastLocation = detectedHost;
+              }
+            }
+          })
+          .catch(() => { });
+      } catch { }
     }
 
     const ip = getLocalIPv4();

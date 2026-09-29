@@ -980,6 +980,7 @@ import {
 import { FaPlay, FaStop } from 'react-icons/fa';
 import { useProject } from "../ProjectContext";
 import { baseURL, productAPIBase } from "../utilities";
+import { validationManager, ValidationAction, ValidationSeverity } from "../validation";
 
 const DeviceControlButtons = () => {
   const [isRunning, setIsRunning] = useState(false);
@@ -1032,6 +1033,26 @@ const DeviceControlButtons = () => {
   };
 
   const handleStartClick = async () => {
+    // 1. Centralized InnoIDE Workflow Validation for Simulation
+    try {
+      const validationResult = await validationManager.validateAction(ValidationAction.SIMULATION_START, {
+        productId: activeProductId,
+        activeProductId,
+        currentScreen: 'Simulation',
+        action: 'simulation.start',
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR);
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          return;
+        }
+      }
+    } catch (valErr) {
+      console.warn("[SimulationOne] Simulation validation check warning:", valErr);
+    }
+
     if (!activeProductId) {
       toast({
         title: 'Error',

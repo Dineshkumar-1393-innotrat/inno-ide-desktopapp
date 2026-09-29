@@ -12,6 +12,7 @@ import ProductDefinition from "../CreateProduct";
 import ProductEditModal from "../Product/ProductEdit/ProductEditModal";
 import { useProject } from "../../ProjectContext";
 import { checkProductDefinition } from "../EmbeddedFileManagement/EmbeddedFileManagement";
+import { workflowValidator, validationManager, WorkflowStage } from "../../validation";
 
 /**
  * CreateProductButton - Reusable button that dynamically toggles between:
@@ -102,11 +103,23 @@ const CreateProductButton = () => {
         };
     }, [fetchStatus, syncStatusFromStorage]);
 
-    // Open modal
+    // Open modal with workflow order validation guard
     const handleOpenModal = useCallback(() => {
+        const result = workflowValidator.canEnterStage(WorkflowStage.DEFINE_PRODUCT, {
+            projectId: currentProjectId,
+            activeProjectId,
+            currentScreen: 'Editor',
+            action: 'product.create',
+        });
+
+        if (!result.allowed && result.violation) {
+            validationManager.setActiveViolation(result.violation);
+            return;
+        }
+
         isSubmittedRef.current = false;
         setModalOpen(true);
-    }, []);
+    }, [currentProjectId, activeProjectId]);
 
     // Handle user closing/skipping create product without submitting
     const handleModalClose = useCallback(() => {

@@ -134,9 +134,16 @@ const FileExplorer = ({ variant }) => {
         if (userInfo) loadFileSystem(userInfo.userId);
       }
     };
+    const handleCreateProjectEvent = () => {
+      onOpen();
+    };
     window.addEventListener('file-system-refresh', handleRefreshEvent);
-    return () => window.removeEventListener('file-system-refresh', handleRefreshEvent);
-  }, [user]);
+    window.addEventListener('innoide:create-new-project', handleCreateProjectEvent);
+    return () => {
+      window.removeEventListener('file-system-refresh', handleRefreshEvent);
+      window.removeEventListener('innoide:create-new-project', handleCreateProjectEvent);
+    };
+  }, [user, onOpen]);
 
   const loadFileSystem = async (userId) => {
     setIsLoading(true);

@@ -18,11 +18,10 @@
 #define LED_COUNT 1
 #define COMMAND_BUFFER_SIZE 64
 
-// Blue Color definition as in user's specification:
-// RGB = (0, 0, 255)
 #define LED_COLOR_R 0
 #define LED_COLOR_G 0
 #define LED_COLOR_B 255
+#define BLINK_DELAY_MS 1000
 
 static led_strip_handle_t s_strip = NULL;
 static volatile bool s_blink_enabled = true;
@@ -38,7 +37,6 @@ static void apply_command(const char *cmd)
 {
     if (!cmd || strlen(cmd) == 0) return;
 
-    // Check Automation & Hardware Rules: OFF / STOP / LOW commands
     if (strstr(cmd, "LED:0") != NULL ||
         strstr(cmd, "led:0") != NULL ||
         strstr(cmd, "LED:OFF") != NULL ||
@@ -63,7 +61,6 @@ static void apply_command(const char *cmd)
         gpio_set_level(LED_GPIO_STANDARD, 0);
         send_serial_ack("ACK:LED:0\r\n");
     }
-    // Check Automation & Hardware Rules: ON / START / HIGH commands
     else if (strstr(cmd, "LED:1") != NULL ||
              strstr(cmd, "led:1") != NULL ||
              strstr(cmd, "LED:ON") != NULL ||
@@ -114,7 +111,6 @@ static void poll_serial(char *buf, size_t *idx, size_t max_len)
         } else if (*idx < max_len - 1) {
             buf[(*idx)++] = c;
             buf[*idx] = '\0';
-            // Immediate check for standard short commands without requiring newline
             if (strcmp(buf, "LED:0") == 0 || strcmp(buf, "LED:1") == 0 ||
                 strcasecmp(buf, "LED:OFF") == 0 || strcasecmp(buf, "LED:ON") == 0) {
                 apply_command(buf);
@@ -128,12 +124,10 @@ static void poll_serial(char *buf, size_t *idx, size_t max_len)
 
 void app_main(void)
 {
-    // 1. Standard GPIO initialization (GPIO 2)
     gpio_reset_pin(LED_GPIO_STANDARD);
     gpio_set_direction(LED_GPIO_STANDARD, GPIO_MODE_OUTPUT);
     gpio_set_level(LED_GPIO_STANDARD, 0);
 
-    // 2. WS2812 RGB LED configuration (GPIO 48)
     led_strip_config_t strip_config = {
         .strip_gpio_num = LED_GPIO,
         .max_leds = LED_COUNT,
@@ -148,14 +142,12 @@ void app_main(void)
     ESP_ERROR_CHECK(led_strip_clear(s_strip));
     ESP_ERROR_CHECK(led_strip_refresh(s_strip));
 
-    // 3. USB-Serial/JTAG Driver (Native USB COM Port on ESP32-S3)
     usb_serial_jtag_driver_config_t usb_config = {
         .tx_buffer_size = 1024,
         .rx_buffer_size = 1024,
     };
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
 
-    // 4. UART0 Driver (Hardware UART fallback)
     uart_config_t uart_config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -170,41 +162,35 @@ void app_main(void)
     char cmd_buf[COMMAND_BUFFER_SIZE] = {0};
     size_t cmd_idx = 0;
 
-    // Send boot notification
     send_serial_ack("BOOT:INNO_IDE_READY\r\n");
 
     while (1)
     {
-        // Check for incoming serial commands before cycle
         poll_serial(cmd_buf, &cmd_idx, sizeof(cmd_buf));
 
-        // If blinking is disabled by Automation Rules / UI toggle, stay OFF
         if (!s_blink_enabled) {
             vTaskDelay(pdMS_TO_TICKS(25));
             continue;
         }
 
-        // --- BLUE ON (RGB = 0, 0, 255) for 1 second ---
         led_strip_set_pixel(s_strip, 0, LED_COLOR_R, LED_COLOR_G, LED_COLOR_B);
         led_strip_refresh(s_strip);
         gpio_set_level(LED_GPIO_STANDARD, 1);
 
-        for (int elapsed = 0; elapsed < 1000 && s_blink_enabled; elapsed += 25) {
+        for (int elapsed = 0; elapsed < BLINK_DELAY_MS && s_blink_enabled; elapsed += 25) {
             vTaskDelay(pdMS_TO_TICKS(25));
             poll_serial(cmd_buf, &cmd_idx, sizeof(cmd_buf));
         }
 
-        // If stopped during the ON phase, continue to stay OFF immediately
         if (!s_blink_enabled) {
             continue;
         }
 
-        // --- OFF for 1 second ---
         led_strip_clear(s_strip);
         led_strip_refresh(s_strip);
         gpio_set_level(LED_GPIO_STANDARD, 0);
 
-        for (int elapsed = 0; elapsed < 1000 && s_blink_enabled; elapsed += 25) {
+        for (int elapsed = 0; elapsed < BLINK_DELAY_MS && s_blink_enabled; elapsed += 25) {
             vTaskDelay(pdMS_TO_TICKS(25));
             poll_serial(cmd_buf, &cmd_idx, sizeof(cmd_buf));
         }

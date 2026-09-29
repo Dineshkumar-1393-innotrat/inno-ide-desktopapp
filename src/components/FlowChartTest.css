@@ -376,6 +376,12 @@
   color: #1e293b;
 }
 
+.fc-sidebar-scope .shape-card * {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
 .fc-sidebar-scope .shape-card:hover {
   background: #f1f5f9;
   border-color: #cbd5e1;

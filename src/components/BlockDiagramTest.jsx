@@ -58,9 +58,10 @@ import { projectManager } from '../utils/projectManager';
 import projectFileManager from '../utils/projectFileManager';
 import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
 import CreateProductButton from './shared/CreateProductButton';
-import { buildDiagramExportPayload } from '../utils/projectProductExportHelper';
+import { buildDiagramExportPayload, getProductCreationDetails } from '../utils/projectProductExportHelper';
+import { validationManager, ValidationAction, ValidationSeverity } from '../validation';
 
-import { useToast } from '@chakra-ui/react';
+import { useToast, Button } from '@chakra-ui/react';
 import { Loader2, Monitor, CheckCircle } from 'lucide-react';
 
 // --- Gold Standard Transition Components ---
@@ -2127,7 +2128,21 @@ function DiagramEditor() {
   useEffect(() => {
     let isCancelled = false;
     const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
-    if (!effectiveProjectId) return;
+    if (!effectiveProjectId) {
+      isSwitchingProjectRef.current = false;
+      if (!tabsRef.current || tabsRef.current.length === 0) {
+        const projName = activeProjectName || localStorage.getItem("activeProjectName") || "Tab 1";
+        const freshTab = {
+          id: `tab_${Date.now()}`,
+          name: projName,
+          state: createBlockDiagramState(),
+          dirty: false,
+        };
+        dispatch(setTabs([freshTab]));
+        dispatch(setActiveTab(freshTab.id));
+      }
+      return;
+    }
 
     const prevProjectId = currentProjectIdRef.current;
     
@@ -2168,36 +2183,76 @@ function DiagramEditor() {
       let loadedTabs = null;
       let loadedActiveId = null;
 
-      // Source A: localStorage project tabs cache (must have valid nodes)
       try {
-        const stored = localStorage.getItem(`innoide:block_diagram_tabs:${userId || 'default'}:${effectiveProjectId}`)
-          || localStorage.getItem(`innoide:block_diagram_tabs:${effectiveProjectId}`)
-          || (activeProjectName ? localStorage.getItem(`innoide:block_diagram_tabs:${activeProjectName}`) : null);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed?.tabs && Array.isArray(parsed.tabs) && hasValidDiagramNodes(parsed.tabs)) {
-            loadedTabs = parsed.tabs;
-            loadedActiveId = parsed.activeTabId || parsed.tabs[0]?.id;
-          }
-        }
-      } catch (e) {
-        console.warn("[BlockDiagram] Error reading project tabs from storage:", e);
-      }
-
-      // Source B: Central diagramData (from backend) if populated with nodes
-      if (!loadedTabs && diagramData?.blockDiagram?.data && Array.isArray(diagramData.blockDiagram.data) && hasValidDiagramNodes(diagramData.blockDiagram.data)) {
-        loadedTabs = diagramData.blockDiagram.data;
-        loadedActiveId = loadedTabs[0]?.id;
-      }
-
-      // Source C: Check projectFileManager for any diagram files for this project
-      if (!loadedTabs) {
+        // Source A: localStorage project tabs cache (must have valid nodes)
         try {
-          const allFiles = projectFileManager.getProjectFiles();
-          const pFiles = allFiles[effectiveProjectId] || (activeProjectName ? allFiles[activeProjectName] : null) || {};
-          for (const [path, fileObj] of Object.entries(pFiles)) {
-            if (path.toLowerCase().includes('blockdiagram') || path.endsWith('.json')) {
-              const parsed = typeof fileObj?.content === 'string' ? JSON.parse(fileObj.content) : fileObj?.content;
+          const stored = localStorage.getItem(`innoide:block_diagram_tabs:${userId || 'default'}:${effectiveProjectId}`)
+            || localStorage.getItem(`innoide:block_diagram_tabs:${effectiveProjectId}`)
+            || (activeProjectName ? localStorage.getItem(`innoide:block_diagram_tabs:${activeProjectName}`) : null);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.tabs && Array.isArray(parsed.tabs) && hasValidDiagramNodes(parsed.tabs)) {
+              loadedTabs = parsed.tabs;
+              loadedActiveId = parsed.activeTabId || parsed.tabs[0]?.id;
+            }
+          }
+        } catch (e) {
+          console.warn("[BlockDiagram] Error reading project tabs from storage:", e);
+        }
+
+        // Source B: Central diagramData (from backend) if populated with nodes
+        if (!loadedTabs && diagramData?.blockDiagram?.data && Array.isArray(diagramData.blockDiagram.data) && hasValidDiagramNodes(diagramData.blockDiagram.data)) {
+          loadedTabs = diagramData.blockDiagram.data;
+          loadedActiveId = loadedTabs[0]?.id;
+        }
+
+        // Source C: Check projectFileManager for any diagram files for this project
+        if (!loadedTabs) {
+          try {
+            const allFiles = projectFileManager.getProjectFiles();
+            const pFiles = allFiles[effectiveProjectId] || (activeProjectName ? allFiles[activeProjectName] : null) || {};
+            for (const [path, fileObj] of Object.entries(pFiles)) {
+              if (path.toLowerCase().includes('blockdiagram') || path.endsWith('.json')) {
+                const parsed = typeof fileObj?.content === 'string' ? JSON.parse(fileObj.content) : fileObj?.content;
+                const targetNodes = parsed?.nodes || parsed?.canvas?.nodes || [];
+                if (targetNodes.length > 0) {
+                  const newTabId = `tab_${Date.now()}`;
+                  loadedTabs = [{
+                    id: newTabId,
+                    name: activeProjectName || "System Diagram",
+                    state: {
+                      nodes: targetNodes,
+                      edges: parsed?.edges || parsed?.canvas?.edges || [],
+                      viewport: parsed?.viewport || parsed?.canvas?.viewport || null,
+                    },
+                    dirty: false,
+                  }];
+                  loadedActiveId = newTabId;
+                  break;
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        // Source D: Check Electron filesystem for saved JSON file
+        if (!loadedTabs && activeProjectName) {
+          try {
+            let rawContent = null;
+            if (window.electronAPI?.filesystem?.readFile) {
+              const possibleFiles = [
+                `${activeProjectName}.json`,
+                `BlockDiagram/${activeProjectName}.json`
+              ];
+              for (const f of possibleFiles) {
+                try {
+                  const res = await window.electronAPI.filesystem.readFile(f, "utf8");
+                  if (res) { rawContent = res; break; }
+                } catch (err) {}
+              }
+            }
+            if (rawContent) {
+              const parsed = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
               const targetNodes = parsed?.nodes || parsed?.canvas?.nodes || [];
               if (targetNodes.length > 0) {
                 const newTabId = `tab_${Date.now()}`;
@@ -2212,120 +2267,83 @@ function DiagramEditor() {
                   dirty: false,
                 }];
                 loadedActiveId = newTabId;
-                break;
               }
             }
-          }
-        } catch (e) {}
-      }
+          } catch (e) {}
+        }
 
-      // Source D: Check Electron filesystem for saved JSON file
-      if (!loadedTabs && activeProjectName) {
-        try {
-          let rawContent = null;
-          if (window.electronAPI?.filesystem?.readFile) {
-            const possibleFiles = [
-              `${activeProjectName}.json`,
-              `BlockDiagram/${activeProjectName}.json`
-            ];
-            for (const f of possibleFiles) {
-              try {
-                const res = await window.electronAPI.filesystem.readFile(f, "utf8");
-                if (res) { rawContent = res; break; }
-              } catch (err) {}
+        // Source E: Guaranteed fallback for Demo-08 if its diagram was saved
+        if (!loadedTabs && (activeProjectName === 'Demo-08' || activeProjectName?.toLowerCase() === 'demo-08')) {
+          const newTabId = `tab_${Date.now()}`;
+          loadedTabs = [{
+            id: newTabId,
+            name: "Demo-08",
+            state: {
+              nodes: DEMO_08_BACKUP_DIAGRAM.nodes,
+              edges: DEMO_08_BACKUP_DIAGRAM.edges,
+              viewport: DEMO_08_BACKUP_DIAGRAM.viewport
+            },
+            dirty: false
+          }];
+          loadedActiveId = newTabId;
+        }
+
+        if (isCancelled) return;
+
+        // 3. Commit tabs or initialize fresh tab for the new project
+        if (loadedTabs && loadedTabs.length > 0) {
+          console.log(`[BlockDiagram] Loading ${loadedTabs.length} tabs for ${activeProjectName || effectiveProjectId}`);
+          dispatch(setTabs(loadedTabs));
+          dispatch(setActiveTab(loadedActiveId || loadedTabs[0].id));
+
+          // Immediately cache loaded tabs in localStorage
+          try {
+            const payload = {
+              tabs: loadedTabs,
+              activeTabId: loadedActiveId || loadedTabs[0].id,
+              projectId: effectiveProjectId,
+              projectName: activeProjectName,
+              savedAt: new Date().toISOString()
+            };
+            localStorage.setItem(`innoide:block_diagram_tabs:${userId || 'default'}:${effectiveProjectId}`, JSON.stringify(payload));
+            localStorage.setItem(`innoide:block_diagram_tabs:${effectiveProjectId}`, JSON.stringify(payload));
+            if (activeProjectName) {
+              localStorage.setItem(`innoide:block_diagram_tabs:${activeProjectName}`, JSON.stringify(payload));
             }
-          }
-          if (rawContent) {
-            const parsed = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
-            const targetNodes = parsed?.nodes || parsed?.canvas?.nodes || [];
-            if (targetNodes.length > 0) {
-              const newTabId = `tab_${Date.now()}`;
-              loadedTabs = [{
-                id: newTabId,
-                name: activeProjectName || "System Diagram",
-                state: {
-                  nodes: targetNodes,
-                  edges: parsed?.edges || parsed?.canvas?.edges || [],
-                  viewport: parsed?.viewport || parsed?.canvas?.viewport || null,
-                },
-                dirty: false,
-              }];
-              loadedActiveId = newTabId;
+          } catch (e) {}
+
+          const targetViewport = loadedTabs[0]?.state?.viewport;
+          setTimeout(() => {
+            if (targetViewport && rf?.setViewport) {
+              rf.setViewport(targetViewport);
+            } else if (rf && rf.fitView) {
+              rf.fitView({ padding: 0.2, duration: 300, maxZoom: 1 });
             }
-          }
-        } catch (e) {}
-      }
-
-      // Source E: Guaranteed fallback for Demo-08 if its diagram was saved
-      if (!loadedTabs && (activeProjectName === 'Demo-08' || activeProjectName?.toLowerCase() === 'demo-08')) {
-        const newTabId = `tab_${Date.now()}`;
-        loadedTabs = [{
-          id: newTabId,
-          name: "Demo-08",
-          state: {
-            nodes: DEMO_08_BACKUP_DIAGRAM.nodes,
-            edges: DEMO_08_BACKUP_DIAGRAM.edges,
-            viewport: DEMO_08_BACKUP_DIAGRAM.viewport
-          },
-          dirty: false
-        }];
-        loadedActiveId = newTabId;
-      }
-
-      if (isCancelled) return;
-
-      // 3. Commit tabs or initialize fresh tab for the new project
-      if (loadedTabs && loadedTabs.length > 0) {
-        console.log(`[BlockDiagram] Loading ${loadedTabs.length} tabs for ${activeProjectName || effectiveProjectId}`);
-        dispatch(setTabs(loadedTabs));
-        dispatch(setActiveTab(loadedActiveId || loadedTabs[0].id));
-
-        // Immediately cache loaded tabs in localStorage
-        try {
-          const payload = {
-            tabs: loadedTabs,
-            activeTabId: loadedActiveId || loadedTabs[0].id,
-            projectId: effectiveProjectId,
-            projectName: activeProjectName,
-            savedAt: new Date().toISOString()
+          }, 50);
+        } else {
+          const projName = activeProjectName || localStorage.getItem("activeProjectName") || "Tab 1";
+          console.log(`[BlockDiagram] Initializing clean tab for ${projName}`);
+          const freshTab = {
+            id: `tab_${Date.now()}`,
+            name: projName,
+            state: createBlockDiagramState(),
+            dirty: false,
           };
-          localStorage.setItem(`innoide:block_diagram_tabs:${userId || 'default'}:${effectiveProjectId}`, JSON.stringify(payload));
-          localStorage.setItem(`innoide:block_diagram_tabs:${effectiveProjectId}`, JSON.stringify(payload));
-          if (activeProjectName) {
-            localStorage.setItem(`innoide:block_diagram_tabs:${activeProjectName}`, JSON.stringify(payload));
-          }
-        } catch (e) {}
-
-        const targetViewport = loadedTabs[0]?.state?.viewport;
-        setTimeout(() => {
-          if (targetViewport && rf?.setViewport) {
-            rf.setViewport(targetViewport);
-          } else if (rf && rf.fitView) {
-            rf.fitView({ padding: 0.2, duration: 300, maxZoom: 1 });
-          }
-        }, 50);
-      } else {
-        const projName = activeProjectName || localStorage.getItem("activeProjectName") || "Tab 1";
-        console.log(`[BlockDiagram] Initializing clean tab for ${projName}`);
-        const freshTab = {
-          id: `tab_${Date.now()}`,
-          name: projName,
-          state: createBlockDiagramState(),
-          dirty: false,
-        };
-        dispatch(setTabs([freshTab]));
-        dispatch(setActiveTab(freshTab.id));
-      }
-
-      setTimeout(() => {
+          dispatch(setTabs([freshTab]));
+          dispatch(setActiveTab(freshTab.id));
+        }
+      } catch (err) {
+        console.error("[BlockDiagram] Error in loadTabs:", err);
+      } finally {
         isSwitchingProjectRef.current = false;
-      }, 100);
+      }
     };
 
     loadTabs();
 
     return () => {
       isCancelled = true;
+      isSwitchingProjectRef.current = false;
     };
   }, [activeProjectId, activeProjectName, dispatch, userId, diagramData?.blockDiagram?.data, rf]);
 
@@ -2364,7 +2382,7 @@ function DiagramEditor() {
 
   // Fallback: If tabs are closed to 0, recreate a fresh tab for the current project
   useEffect(() => {
-    if (tabs.length === 0 && !isSwitchingProjectRef.current) {
+    if (!tabs || tabs.length === 0) {
       const projName = activeProjectName || localStorage.getItem("activeProjectName") || "Tab 1";
       const freshTab = {
         id: `tab_${Date.now()}`,
@@ -2375,7 +2393,7 @@ function DiagramEditor() {
       dispatch(setTabs([freshTab]));
       dispatch(setActiveTab(freshTab.id));
     }
-  }, [tabs.length, activeProjectName, dispatch]);
+  }, [tabs?.length, activeProjectName, dispatch]);
 
   // Sync canvas state with workspace tabs on tab switch
   // PART 1: Save state before switching (via event)
@@ -2966,6 +2984,65 @@ function DiagramEditor() {
 
   const toast = useToast();
   const [isSaving, setIsSaving] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+
+  const handleValidateBlockDiagram = useCallback(async () => {
+    setIsValidating(true);
+    try {
+      const currentNodes = nodesRef.current || nodes || [];
+      const currentEdges = edgesRef.current || edges || [];
+      const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
+      const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+      const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
+      const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
+
+      const productDetails = getProductCreationDetails(effectiveProductId, effectiveProjectId, effectiveProductName);
+
+      const validationResult = await validationManager.validateAction(ValidationAction.BLOCK_DIAGRAM_VALIDATE, {
+        blockDiagram: { nodes: currentNodes, edges: currentEdges },
+        nodes: currentNodes,
+        edges: currentEdges,
+        currentScreen: 'BlockDiagram',
+        action: 'blockDiagram.validate',
+        projectId: effectiveProjectId,
+        productId: effectiveProductId,
+        projectName: effectiveProjectName,
+        productName: effectiveProductName,
+        product: productDetails,
+        productDetails: productDetails,
+        isProductDefined: Boolean(effectiveProductId && effectiveProductId !== 'default'),
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR) || validationResult.violations[0];
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          return;
+        }
+      }
+
+      toast({
+        title: "Block Diagram Valid",
+        description: "All defined product components match the Block Diagram.",
+        status: "success",
+        duration: 3500,
+        isClosable: true,
+        position: "top-right",
+      });
+    } catch (err) {
+      console.error("[BlockDiagram] Validation error:", err);
+      toast({
+        title: "Validation Error",
+        description: err.message || "Failed to validate block diagram against defined product.",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+        position: "top-right",
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  }, [nodes, edges, activeProductId, activeProjectId, activeProductName, activeProjectName, toast]);
 
   const saveTab = useCallback(async () => {
     setIsSaving(true);
@@ -2974,6 +3051,44 @@ function DiagramEditor() {
       id: effectiveTabId,
       name: activeProjectName || 'Untitled Project'
     };
+
+    // InnoIDE Centralized Workflow Validation for Block Diagram Save
+    try {
+      const currentNodes = nodesRef.current || nodes || [];
+      const currentEdges = edgesRef.current || edges || [];
+      const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
+      const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+      const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
+      const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
+
+      const productDetails = getProductCreationDetails(effectiveProductId, effectiveProjectId, effectiveProductName);
+
+      const validationResult = await validationManager.validateAction(ValidationAction.BLOCK_DIAGRAM_SAVE, {
+        blockDiagram: { nodes: currentNodes, edges: currentEdges },
+        nodes: currentNodes,
+        edges: currentEdges,
+        currentScreen: 'BlockDiagram',
+        action: 'blockDiagram.save',
+        projectId: effectiveProjectId,
+        productId: effectiveProductId,
+        projectName: effectiveProjectName,
+        productName: effectiveProductName,
+        product: productDetails,
+        productDetails: productDetails,
+        isProductDefined: Boolean(effectiveProductId && effectiveProductId !== 'default'),
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR);
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          setIsSaving(false);
+          return;
+        }
+      }
+    } catch (valErr) {
+      console.warn("[BlockDiagram] Validation check warning:", valErr);
+    }
 
     let viewport = { x: 0, y: 0, zoom: 1 };
     try {
@@ -3061,10 +3176,48 @@ function DiagramEditor() {
     } finally {
       setIsSaving(false);
     }
-  }, [activeTabId, tabs, activeTab, activeProjectName, rf, activeProjectId, activeProductId, activeProductName, dispatch, userId, saveDiagramData, toast]);
+  }, [activeTabId, tabs, activeTab, activeProjectName, rf, activeProjectId, activeProductId, activeProductName, dispatch, userId, saveDiagramData, toast, nodes, edges]);
 
   const saveDiagram = async () => {
     setIsSaving(true);
+
+    // InnoIDE Centralized Workflow Validation for Block Diagram Save
+    try {
+      const currentNodes = nodesRef.current || nodes || [];
+      const currentEdges = edgesRef.current || edges || [];
+      const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
+      const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+      const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
+      const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
+
+      const productDetails = getProductCreationDetails(effectiveProductId, effectiveProjectId, effectiveProductName);
+
+      const validationResult = await validationManager.validateAction(ValidationAction.BLOCK_DIAGRAM_SAVE, {
+        blockDiagram: { nodes: currentNodes, edges: currentEdges },
+        nodes: currentNodes,
+        edges: currentEdges,
+        currentScreen: 'BlockDiagram',
+        action: 'blockDiagram.save',
+        projectId: effectiveProjectId,
+        productId: effectiveProductId,
+        projectName: effectiveProjectName,
+        productName: effectiveProductName,
+        product: productDetails,
+        productDetails: productDetails,
+        isProductDefined: Boolean(effectiveProductId && effectiveProductId !== 'default'),
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR);
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          setIsSaving(false);
+          return;
+        }
+      }
+    } catch (valErr) {
+      console.warn("[BlockDiagram] Validation check warning:", valErr);
+    }
 
     // 1. Resolve active tab safely so it never silently returns without saving
     const effectiveTabId = activeTabId || tabs[0]?.id || 'default_tab';
@@ -3580,6 +3733,18 @@ function DiagramEditor() {
           }}>
             <DiagramTabs title="Block Diagram Workspace" kind="blockDiagram" onSaveTab={saveTab} onSaveJSON={saveDiagram} />
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <Button
+                size="sm"
+                colorScheme="blue"
+                variant="outline"
+                leftIcon={<CheckCircle size={15} />}
+                onClick={handleValidateBlockDiagram}
+                isLoading={isValidating}
+                loadingText="Validating..."
+                title="Validate Block Diagram against Defined Product"
+              >
+                Validate
+              </Button>
               <CreateProductButton />
             </div>
           </div>

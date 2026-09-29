@@ -43,6 +43,7 @@ import RuleEngineModal from './RuleEngine/RuleEngineModal';
 import { IconButton } from '@mui/material';
 import { Share as ShareIcon } from '@mui/icons-material';
 import { useProject } from '../ProjectContext';
+import { ValidationBadge } from '../validation';
 // import DyteMeetingLauncher from './DyteMeetingLauncher';
 
 const IDENTITY_FIELDS = [
@@ -218,6 +219,14 @@ const EditorNavbar = ({
       return Promise.resolve(onLogout?.());
     }).finally(() => {
       setAccountOpen(false);
+      try {
+        localStorage.removeItem('innoide:last_active_route');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userData');
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn('Failed to clear storage on logout', e);
+      }
       window.location.assign(loginPath);
     });
   };
@@ -608,6 +617,11 @@ const EditorNavbar = ({
         {/* <button type="button" className="editor-navbar__icon-btn" title="Templates">
           <Braces size={18} />
         </button> */}
+        {/* Workflow Validation Status Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', marginRight: '6px' }}>
+          <ValidationBadge />
+        </div>
+
         <div className="editor-navbar__account" ref={accountRef}>
           <button
             type="button"
@@ -626,20 +640,6 @@ const EditorNavbar = ({
                 <UserCircle size={36} />
                 <div className="editor-navbar__account-name">{displayName}</div>
               </div>
-              <button
-                type="button"
-                className="editor-navbar__account-menu-action"
-                onClick={() => { setAccountOpen(false); navigate('/view-data'); }}
-              >
-                View Data
-              </button>
-              <button
-                type="button"
-                className="editor-navbar__account-menu-action"
-                onClick={() => { setAccountOpen(false); navigate('/createproductdefination'); }}
-              >
-                View Product
-              </button>
               <button type="button" className="editor-navbar__account-menu-item" onClick={handleLogout} role="menuitem">
                 Logout
               </button>

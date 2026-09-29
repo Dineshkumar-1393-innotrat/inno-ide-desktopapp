@@ -15,6 +15,7 @@ import {
 } from "@chakra-ui/react";
 import ProductDefinition from "../../CreateProduct";
 import { useProject } from "../../../ProjectContext";
+import { workflowValidator, validationManager, WorkflowStage } from "../../../validation";
 
 const CreateProductDefintionModal = ({
   // activeProductId,
@@ -35,6 +36,21 @@ const CreateProductDefintionModal = ({
   const projectStatus = localStorage.getItem(`innoide:project_status_${currentProjectId}`);
   const isNew = (projectStatus === "new" || !projectStatus) && !isMissed;
 
+  const handleOpen = () => {
+    const result = workflowValidator.canEnterStage(WorkflowStage.DEFINE_PRODUCT, {
+      projectId: currentProjectId,
+      activeProjectId,
+      currentScreen: 'Editor',
+      action: 'product.create',
+    });
+
+    if (!result.allowed && result.violation) {
+      validationManager.setActiveViolation(result.violation);
+      return;
+    }
+    onOpen();
+  };
+
   const handleClose = () => {
     if (isNew && currentProjectId) {
       localStorage.setItem(`innoide:product_create_missed_${currentProjectId}`, "true");
@@ -47,7 +63,7 @@ const CreateProductDefintionModal = ({
   return (
     <>
       <Button
-        onClick={onOpen}
+        onClick={handleOpen}
         size={"sm"}
         bg="#2563eb"
         color="#ffffff"

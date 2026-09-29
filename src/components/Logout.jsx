@@ -78,8 +78,11 @@ const AuthButton = () => {
     try {
       await axios.post(`${API.MAIN}/api/v1/auth/logout`, { token });
 
-      // On successful logout, clear session storage and navigate
+      // On successful logout, clear session and local storage and navigate
       sessionStorage.removeItem("token");
+      localStorage.removeItem("token");
+      localStorage.removeItem("userData");
+      localStorage.removeItem("innoide:last_active_route");
       setToken(null);
 
       toast({

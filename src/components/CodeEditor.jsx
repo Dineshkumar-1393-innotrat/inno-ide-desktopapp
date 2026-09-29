@@ -257,17 +257,15 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   const addNewTab = useCallback(() => {
     const newId = Date.now();
-    const projName = activeProjectName || localStorage.getItem("activeProjectName") || "ESP32";
-    const starterContent = `#include <stdio.h>\n#include "freertos/FreeRTOS.h"\n#include "freertos/task.h"\n\nvoid app_main(void)\n{\n    printf("Hello from ${projName}!\\n");\n    while (1) {\n        vTaskDelay(pdMS_TO_TICKS(1000));\n    }\n}\n`;
     dispatch(
       addTab({
         id: newId,
         name: `file-${tabs.length + 1}.c`,
-        content: CODE_SNIPPETS["c"] || starterContent,
-        dirty: true,
+        content: "",
+        dirty: false,
       }),
     );
-  }, [dispatch, tabs.length, activeProjectName]);
+  }, [dispatch, tabs.length]);
 
   const updateTabContent = useCallback(
     (id, content) => {
@@ -351,12 +349,10 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       dispatch(setTabs(loadedTabs));
       dispatch(setActiveTab(loadedActiveId || loadedTabs[0].id));
     } else {
-      const projName = activeProjectName || localStorage.getItem("activeProjectName") || "ESP32";
-      const cleanStarterCode = `#include <stdio.h>\n#include "freertos/FreeRTOS.h"\n#include "freertos/task.h"\n\nvoid app_main(void)\n{\n    printf("Hello from ${projName}!\\n");\n    while (1) {\n        vTaskDelay(pdMS_TO_TICKS(1000));\n    }\n}\n`;
       const freshTab = {
         id: Date.now(),
         name: "file-1.c",
-        content: cleanStarterCode,
+        content: "",
         dirty: false,
       };
       dispatch(setTabs([freshTab]));

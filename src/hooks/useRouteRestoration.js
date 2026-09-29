@@ -29,6 +29,9 @@ const EXCLUDED_ROUTES = new Set([
   "/logout",
   "/autosave-demo",
   "/userbutton",
+  "/defineproductone",
+  "/defineproducttwo",
+  "/defineproduct",
 ]);
 
 export function useRouteRestoration() {
@@ -46,20 +49,35 @@ export function useRouteRestoration() {
         ROUTE_KEY,
         JSON.stringify({ path, ts: Date.now() })
       );
-    } catch (e) {
+    } catch {
       // localStorage might be full or unavailable; fail silently
     }
   }, [location.pathname]);
 
   // ── Step 2: Restore route on first mount only ───────────────────────────────
-  // Only navigates if the current path is "/" (the hash-router starting point)
-  // and the stored route is still within the TTL window.
+  // Only navigates if the current path is "/" (the hash-router starting point),
+  // user is authenticated, and the stored route is valid & within TTL window.
   useEffect(() => {
     if (hasRestored.current) return;
     hasRestored.current = true;
 
     // Only restore if we're at the hash root (haven't navigated anywhere yet)
     if (location.pathname !== "/") return;
+
+    // Check authentication: If user is not logged in, stay on the Login screen
+    const token =
+      localStorage.getItem("token") || sessionStorage.getItem("token");
+    const userData =
+      localStorage.getItem("userData") || sessionStorage.getItem("userData");
+
+    if (!token && !userData) {
+      try {
+        localStorage.removeItem(ROUTE_KEY);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
 
     try {
       const raw = localStorage.getItem(ROUTE_KEY);
@@ -69,21 +87,21 @@ export function useRouteRestoration() {
       const { path, ts } = parsed;
       const age = Date.now() - (ts || 0);
 
-      if (
-        path &&
-        typeof path === "string" &&
-        age < ROUTE_TTL_MS &&
-        !EXCLUDED_ROUTES.has(path) &&
-        path !== "/"
-      ) {
-        console.log(`[RouteRestoration] Restoring route: ${path} (age: ${Math.round(age / 1000)}s)`);
-        navigate(path, { replace: true });
+      // If stored route is excluded or expired, remove it and stay on root
+      if (!path || typeof path !== "string" || EXCLUDED_ROUTES.has(path) || path === "/" || age >= ROUTE_TTL_MS) {
+        localStorage.removeItem(ROUTE_KEY);
+        return;
       }
-    } catch (e) {
+
+      console.log(`[RouteRestoration] Restoring route: ${path} (age: ${Math.round(age / 1000)}s)`);
+      navigate(path, { replace: true });
+    } catch {
       // Corrupt data — clear it
       try {
         localStorage.removeItem(ROUTE_KEY);
-      } catch (_) {}
+      } catch {
+        /* ignore */
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

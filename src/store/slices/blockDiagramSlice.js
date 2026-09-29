@@ -1,9 +1,20 @@
 import { createSlice } from "@reduxjs/toolkit";
 import { RESET_WORKSPACE } from "../resetAction";
 
+const createDefaultTab = () => ({
+    id: "tab_1",
+    name: "Tab 1",
+    state: {
+        nodes: [],
+        edges: [],
+        viewport: null,
+    },
+    dirty: false,
+});
+
 const initialState = {
-    tabs: [],
-    activeTabId: null,
+    tabs: [createDefaultTab()],
+    activeTabId: "tab_1",
 };
 
 const blockDiagramSlice = createSlice({
@@ -11,7 +22,12 @@ const blockDiagramSlice = createSlice({
     initialState,
     reducers: {
         setTabs: (state, action) => {
-            state.tabs = action.payload;
+            state.tabs = (Array.isArray(action.payload) && action.payload.length > 0)
+                ? action.payload
+                : [createDefaultTab()];
+            if (!state.activeTabId || !state.tabs.some((t) => t.id === state.activeTabId)) {
+                state.activeTabId = state.tabs[0]?.id || "tab_1";
+            }
         },
         setActiveTab: (state, action) => {
             state.activeTabId = action.payload;
@@ -23,7 +39,11 @@ const blockDiagramSlice = createSlice({
         closeTab: (state, action) => {
             const tabId = action.payload;
             state.tabs = state.tabs.filter((tab) => tab.id !== tabId);
-            if (state.activeTabId === tabId) {
+            if (state.tabs.length === 0) {
+                const freshTab = createDefaultTab();
+                state.tabs = [freshTab];
+                state.activeTabId = freshTab.id;
+            } else if (state.activeTabId === tabId) {
                 state.activeTabId = state.tabs[0]?.id || null;
             }
         },
@@ -63,7 +83,10 @@ const blockDiagramSlice = createSlice({
         },
     },
   extraReducers: (builder) => {
-    builder.addCase(RESET_WORKSPACE, () => ({ ...initialState }));
+    builder.addCase(RESET_WORKSPACE, () => ({
+        tabs: [createDefaultTab()],
+        activeTabId: "tab_1",
+    }));
   },
 });
 

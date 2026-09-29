@@ -209,8 +209,8 @@ const MathCodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
             addTab({
                 id: newId,
                 name: `file-${tabs.length + 1}.c`,
-                content: CODE_SNIPPETS["C"] || "",
-                dirty: true,
+                content: "",
+                dirty: false,
             }),
         );
     }, [dispatch, tabs.length]);

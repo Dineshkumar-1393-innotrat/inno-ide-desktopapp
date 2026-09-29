@@ -9,6 +9,7 @@ import {
   renameTab as renameFlowchartTab
 } from '../store/slices/flowchartSlice';
 import {
+  setTabs as setBlockDiagramTabs,
   setActiveTab as setBlockDiagramActiveTab,
   addTab as addBlockDiagramTab,
   closeTab as closeBlockDiagramTab,
@@ -54,6 +55,20 @@ const DiagramTabs = ({ title = 'Tabs', kind, onSaveJSON, onSaveTab }) => {
 
   const tabs = reduxTabs || context.tabs || [];
   const activeTabId = reduxActiveTabId || context.activeTabId || (tabs.length > 0 ? tabs[0]?.id : 'default_tab');
+
+  // Ensure by default at least one tab is open for block diagram
+  React.useEffect(() => {
+    if (kind === 'blockDiagram' && (!tabs || tabs.length === 0)) {
+      const defaultTab = {
+        id: 'tab_1',
+        name: 'Tab 1',
+        state: { nodes: [], edges: [], viewport: null },
+        dirty: false,
+      };
+      dispatch(setBlockDiagramTabs([defaultTab]));
+      dispatch(setBlockDiagramActiveTab(defaultTab.id));
+    }
+  }, [kind, tabs, dispatch]);
 
   React.useEffect(() => {
     if (!reduxActiveTabId && tabs.length > 0 && tabs[0]?.id) {

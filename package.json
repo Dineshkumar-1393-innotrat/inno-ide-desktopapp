@@ -17,7 +17,8 @@
     "dist:win": "vite build && node electron/package-app.js && electron-builder --win portable nsis --prepackaged release/win-unpacked",
     "lint": "eslint .",
     "preview": "vite preview",
-    "clear-cache": "node -e \"localStorage.clear(); sessionStorage.clear();\" 2>/dev/null || echo 'Run in browser console: localStorage.clear(); sessionStorage.clear();'"
+    "clear-cache": "node -e \"localStorage.clear(); sessionStorage.clear();\" 2>/dev/null || echo 'Run in browser console: localStorage.clear(); sessionStorage.clear();'",
+    "test:validation": "node src/validation/__tests__/runTests.js"
   },
   "dependencies": {
     "@auth0/auth0-react": "^2.2.4",

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useSelector } from "react-redux";
 import JSZip from "jszip";
 import { QRCodeSVG } from "qrcode.react";
+import { validationManager, ValidationAction, ValidationSeverity } from "../validation";
 import {
   Box,
   Flex,
@@ -123,7 +124,14 @@ import {
   FaTable,
   FaDatabase,
   FaFolderPlus,
-  FaGripVertical
+  FaGripVertical,
+  FaMapMarkerAlt,
+  FaPaperPlane,
+  FaMapMarkedAlt,
+  FaWpforms,
+  FaClipboardList,
+  FaShareAlt,
+  FaCrosshairs
 } from "react-icons/fa";
 import RuleBuilderModal from "./RuleBuilderModal";
 import EspIdfSetupModal from "./EspIdfSetupModal";
@@ -375,13 +383,139 @@ export default function ESP32Flasher({
     return [{ name: initialProjectName, widgetCount: 0, ruleCount: 0, updatedAt: new Date().toISOString() }];
   });
 
+  const isHardcodedTextFieldQuestion = (q) => Boolean(
+    q && (
+      q.id === "q-1" ||
+      q.id === "q-2" ||
+      q.text === "What is your technician or operator name?" ||
+      q.text === "Device operational status & feedback:" ||
+      (typeof q.text === "string" && (
+        q.text.toLowerCase().includes("technician") ||
+        q.text.toLowerCase().includes("operational status") ||
+        q.text.toLowerCase().includes("hi satya") ||
+        q.text.toLowerCase().includes("what is your name")
+      ))
+    )
+  );
+
+  const isHardcodedTextFieldResponse = (r) => {
+    if (!r) return true;
+    const ans = String(r.answer || "").trim().toLowerCase();
+    const qText = String(r.questionText || r.question || "").trim().toLowerCase();
+    const id = String(r.id || "");
+    const qId = String(r.questionId || "");
+
+    if (
+      id === "resp-1" ||
+      id === "resp-2" ||
+      qId === "q-1" ||
+      qId === "q-2" ||
+      qText.includes("technician") ||
+      qText.includes("operational status") ||
+      qText.includes("hi satya") ||
+      qText.includes("what is your name") ||
+      ans === "iam good" ||
+      ans === "i am good" ||
+      ans === "dinesh" ||
+      ans === "dk" ||
+      ans === "alex" ||
+      ans === "alex engineer" ||
+      ans.includes("alex engineer") ||
+      ans === "running normally at 24.5°c" ||
+      ans.includes("running normally")
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const isStaleTestGeolog = (g) => {
+    if (!g) return true;
+    const id = String(g.id || "");
+    const t = String(g.time || g.timestamp || "");
+    const city = String(g.city || "");
+    if (id === "loc-init-1") return true;
+    if (
+      t === "12:53:01" ||
+      t === "12:34:55" ||
+      t === "12:34:49" ||
+      t === "12:19:06 pm" ||
+      t === "11:36:18" ||
+      t === "11:36:10" ||
+      t === "11:35:58" ||
+      t === "11:01:35" ||
+      t === "11:01:33"
+    ) {
+      return true;
+    }
+    if (city === "Ambattur" || city === "Chennai") return true;
+    return false;
+  };
+
+  const sanitizeWidgets = (wList) => {
+    if (!Array.isArray(wList)) return [];
+    return wList.map((w) => {
+      if (w.type === "textfield") {
+        const questions = Array.isArray(w.questions)
+          ? w.questions.filter((q) => !isHardcodedTextFieldQuestion(q))
+          : [];
+        const activeQuestionTexts = questions.map((q) => String(q.text || "").trim().toLowerCase());
+        const activeQuestionIds = questions.map((q) => String(q.id || ""));
+        const responses = Array.isArray(w.responses)
+          ? w.responses.filter((r) => {
+              if (isHardcodedTextFieldResponse(r)) return false;
+              const rQText = String(r.questionText || r.question || "").trim().toLowerCase();
+              const rQId = String(r.questionId || "");
+              return (rQId && activeQuestionIds.includes(rQId)) || (rQText && activeQuestionTexts.includes(rQText));
+            })
+          : [];
+        return {
+          ...w,
+          questions,
+          responses
+        };
+      }
+      if (w.type === "location") {
+        const hist = Array.isArray(w.locationHistory)
+          ? w.locationHistory.filter((g) => !isStaleTestGeolog(g))
+          : [];
+        const lastLoc = (w.lastLocation && !isStaleTestGeolog(w.lastLocation)) ? w.lastLocation : null;
+        return {
+          ...w,
+          locationHistory: hist,
+          lastLocation: lastLoc
+        };
+      }
+      return w;
+    });
+  };
+
+  // Immediate one-time sweep of all saved companion app profiles in localStorage
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("innoide:companion-app:")) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed.widgets)) {
+              parsed.widgets = sanitizeWidgets(parsed.widgets);
+              localStorage.setItem(key, JSON.stringify(parsed));
+            }
+          }
+        } catch (e) { }
+      }
+    }
+  } catch (e) { }
+
   // Widgets in Smartphone Mockup & Undo/Redo History Stack (loads saved app or starts empty)
   const [widgets, setWidgets] = useState(() => {
     try {
       const raw = localStorage.getItem(`innoide:companion-app:${initialProjectName}`);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.widgets)) return parsed.widgets;
+        if (Array.isArray(parsed.widgets)) return sanitizeWidgets(parsed.widgets);
       }
     } catch (e) { }
     return [];
@@ -416,6 +550,10 @@ export default function ESP32Flasher({
   const { isOpen: isRenameAppModalOpen, onOpen: onRenameAppModalOpen, onClose: onRenameAppModalClose } = useDisclosure();
   const { isOpen: isClearCanvasModalOpen, onOpen: onClearCanvasModalOpen, onClose: onClearCanvasModalClose } = useDisclosure();
   const { isOpen: isCrudModalOpen, onOpen: onCrudModalOpen, onClose: onCrudModalClose } = useDisclosure();
+  const { isOpen: isLocationQrModalOpen, onOpen: onLocationQrModalOpen, onClose: onLocationQrModalClose } = useDisclosure();
+  const [locationQrModalData, setLocationQrModalData] = useState(null);
+  const [newQuestionInputs, setNewQuestionInputs] = useState({}); // { [widgetId]: "" }
+  const [newAnswerInputs, setNewAnswerInputs] = useState({}); // { [`${widgetId}_${questionId}`]: "" }
 
   const [newAppNameInput, setNewAppNameInput] = useState("");
   const [renameAppNameInput, setRenameAppNameInput] = useState("");
@@ -513,8 +651,9 @@ export default function ESP32Flasher({
 
   // Multi-device synchronization: listen to companion actions pushed from any connected phone or browser
   useEffect(() => {
+    let unsub = null;
     if (window.electronAPI?.app?.onCompanionAction) {
-      const unsub = window.electronAPI.app.onCompanionAction((action) => {
+      unsub = window.electronAPI.app.onCompanionAction((action) => {
         if (action) {
           if (action.isOn) {
             setLiveLedToggle(true);
@@ -535,11 +674,165 @@ export default function ESP32Flasher({
               )
             );
           }
+
+          if (action.hostLocation && action.hostLocation.lat) {
+            setDeviceDetectedLocation(action.hostLocation);
+          }
+
+          if (action.clearGeologs) {
+            setWidgets((prev) =>
+              prev.map((w) => w.type === "location" ? { ...w, locationHistory: [], lastLocation: null } : w)
+            );
+          }
+          if (action.clearFormResponses) {
+            setWidgets((prev) =>
+              prev.map((w) => w.type === "textfield" ? { ...w, responses: [] } : w)
+            );
+          }
+
+          if (action.switchLocations && Array.isArray(action.switchLocations) && action.switchLocations.length > 0) {
+            setWidgets((prev) =>
+              prev.map((w) => {
+                if (w.type === "location") {
+                  const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
+                  const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
+                  const incoming = action.switchLocations.filter(isCleanLoc);
+                  const merged = [...incoming];
+                  existing.forEach(ex => {
+                    if (!merged.some(m => m.id === ex.id || (m.timestamp === ex.timestamp && m.event === ex.event))) {
+                      merged.push(ex);
+                    }
+                  });
+                  const validLast = (action.location && isCleanLoc(action.location)) ? action.location : (merged[0] || null);
+                  return {
+                    ...w,
+                    lastLocation: validLast,
+                    locationHistory: merged.slice(0, 50)
+                  };
+                }
+                return w;
+              })
+            );
+          } else if (action.location) {
+            const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
+            if (isCleanLoc(action.location)) {
+              setWidgets((prev) =>
+                prev.map((w) => {
+                  if (w.type === "location") {
+                    const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
+                    const hist = [action.location, ...existing.filter(h => h.id !== action.location.id).slice(0, 49)];
+                    return { ...w, lastLocation: action.location, locationHistory: hist };
+                  }
+                  return w;
+                })
+              );
+            }
+          }
+
+          if (action.formResponse) {
+            const fResp = action.formResponse;
+            if (!isHardcodedTextFieldResponse(fResp)) {
+              setWidgets((prev) =>
+                prev.map((w) => {
+                  // Match by widgetId if present, otherwise fallback to any textfield
+                  const isTarget = fResp.widgetId ? (w.id === fResp.widgetId) : (w.type === "textfield");
+                  if (isTarget) {
+                    const currentResponses = Array.isArray(w.responses) ? w.responses : [];
+                    if (currentResponses.some((r) => r.id === fResp.id)) return w;
+                    return { ...w, responses: [fResp, ...currentResponses.slice(0, 99)] };
+                  }
+                  return w;
+                })
+              );
+              toast({
+                title: "📝 Mobile Form Answer Received",
+                description: `"${fResp.answer}" → "${fResp.questionText || fResp.question || "Question"}"`,
+                status: "success",
+                duration: 3500,
+                isClosable: true
+              });
+            }
+          }
         }
       });
-      return unsub;
     }
-  }, []);
+
+    // Secondary listener: SSE stream from companion server (port 5055)
+    let evtSource = null;
+    try {
+      if (typeof window !== "undefined" && window.EventSource) {
+        evtSource = new EventSource("http://localhost:5055/api/events");
+        evtSource.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.hostLocation && data.hostLocation.lat) {
+              setDeviceDetectedLocation(data.hostLocation);
+            }
+            if (data.switchLocations && Array.isArray(data.switchLocations) && data.switchLocations.length > 0) {
+              setWidgets((prev) =>
+                prev.map((w) => {
+                  if (w.type === "location") {
+                    const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
+                    const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
+                    const incoming = data.switchLocations.filter(isCleanLoc);
+                    const merged = [...incoming];
+                    existing.forEach(ex => {
+                      if (!merged.some(m => m.id === ex.id || (m.timestamp === ex.timestamp && m.event === ex.event))) {
+                        merged.push(ex);
+                      }
+                    });
+                    const validLast = (data.lastLocation && isCleanLoc(data.lastLocation)) ? data.lastLocation : (merged[0] || null);
+                    return {
+                      ...w,
+                      lastLocation: validLast,
+                      locationHistory: merged.slice(0, 50)
+                    };
+                  }
+                  return w;
+                })
+              );
+            } else if (data.lastLocation) {
+              const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
+              if (isCleanLoc(data.lastLocation)) {
+                setWidgets((prev) =>
+                  prev.map((w) => {
+                    if (w.type === "location") {
+                      const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
+                      const hist = [data.lastLocation, ...existing.filter(h => h.id !== data.lastLocation.id).slice(0, 49)];
+                      return { ...w, lastLocation: data.lastLocation, locationHistory: hist };
+                    }
+                    return w;
+                  })
+                );
+              }
+            }
+            if (data.formResponse) {
+              const fResp = data.formResponse;
+              if (!isHardcodedTextFieldResponse(fResp)) {
+                setWidgets((prev) =>
+                  prev.map((w) => {
+                    // Match by widgetId if present, otherwise fallback to any textfield
+                    const isTarget = fResp.widgetId ? (w.id === fResp.widgetId) : (w.type === "textfield");
+                    if (isTarget) {
+                      const currentResponses = Array.isArray(w.responses) ? w.responses : [];
+                      if (currentResponses.some((r) => r.id === fResp.id)) return w;
+                      return { ...w, responses: [fResp, ...currentResponses.slice(0, 99)] };
+                    }
+                    return w;
+                  })
+                );
+              }
+            }
+          } catch { }
+        };
+      }
+    } catch { }
+
+    return () => {
+      if (unsub) unsub();
+      if (evtSource) evtSource.close();
+    };
+  }, [toast]);
 
   // Listen to background cloud tunnel status events from Electron
   useEffect(() => {
@@ -744,6 +1037,577 @@ export default function ESP32Flasher({
   const [liveLedToggle, setLiveLedToggle] = useState(false); // Hardware LED state toggle (OFF / ON-Blink)
   const [ledHardwareError, setLedHardwareError] = useState(null); // null | string — serial write error message
 
+  // Geolocation & Device Switch Location Tracker (100% Dynamic Multi-Provider + User Calibrated Locality)
+  const [deviceDetectedLocation, setDeviceDetectedLocation] = useState(() => {
+    try {
+      const raw = localStorage.getItem("innoide:calibrated_device_location");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.lat && parsed.city !== "Ambattur" && parsed.city !== "Chennai") {
+          return parsed;
+        }
+      }
+    } catch {}
+    return {
+      lat: 13.0147,
+      lng: 80.2242,
+      city: "Little Mount",
+      address: "Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India",
+      country: "India",
+      source: "Calibrated Location (Little Mount)",
+      timestamp: new Date().toLocaleTimeString()
+    };
+  });
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [locationSearchInput, setLocationSearchInput] = useState("");
+
+  const fetchCurrentDeviceLocation = useCallback(async (forcedQuery = null) => {
+    setIsDetectingLocation(true);
+    try {
+      // 0. Priority 0: Calibrated Location from localStorage or explicit query
+      let calibrated = null;
+      try {
+        const raw = localStorage.getItem("innoide:calibrated_device_location");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.lat && parsed.city !== "Ambattur" && parsed.city !== "Chennai") {
+            calibrated = parsed;
+          }
+        }
+      } catch {}
+
+      if (calibrated && calibrated.lat && !forcedQuery) {
+        setDeviceDetectedLocation(calibrated);
+        fetch("http://localhost:5055/api/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hostLocation: calibrated, syncOnly: true })
+        }).catch(() => {});
+        return calibrated;
+      }
+
+      if (forcedQuery) {
+        const q = String(forcedQuery).trim();
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1&accept-language=en`,
+            { headers: { "Accept-Language": "en" } }
+          );
+          if (res.ok) {
+            const list = await res.json();
+            if (list && list.length > 0) {
+              const item = list[0];
+              const specific = item.name ||
+                item.address?.railway ||
+                item.address?.suburb ||
+                item.address?.neighbourhood ||
+                (item.display_name ? item.display_name.split(",")[0].trim() : "") ||
+                item.address?.city ||
+                q;
+              const resolved = {
+                lat: parseFloat(Number(item.lat).toFixed(5)),
+                lng: parseFloat(Number(item.lon).toFixed(5)),
+                city: specific,
+                address: item.display_name || `${item.lat}°, ${item.lon}°`,
+                country: item.address?.country || "India",
+                source: `Calibrated Location (${specific})`,
+                timestamp: new Date().toLocaleTimeString()
+              };
+              localStorage.setItem("innoide:calibrated_device_location", JSON.stringify(resolved));
+              setDeviceDetectedLocation(resolved);
+              fetch("http://localhost:5055/api/action", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ hostLocation: resolved, syncOnly: true })
+              }).catch(() => {});
+              return resolved;
+            }
+          }
+        } catch {}
+      }
+
+      // 1. Try browser navigator.geolocation (GPS — most accurate if available)
+      const tryNavigatorGeolocation = () => {
+        return new Promise((resolve) => {
+          if (typeof navigator === "undefined" || !navigator.geolocation) {
+            return resolve(null);
+          }
+          navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+              const lat = parseFloat(pos.coords.latitude.toFixed(5));
+              const lng = parseFloat(pos.coords.longitude.toFixed(5));
+              let city = "Little Mount";
+              let address = `${lat}°N, ${lng}°E`;
+              let country = "India";
+              try {
+                const controller = new AbortController();
+                const tid = setTimeout(() => controller.abort(), 3500);
+                const r = await fetch(
+                  `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14&accept-language=en`,
+                  { signal: controller.signal, headers: { "Accept-Language": "en" } }
+                );
+                clearTimeout(tid);
+                if (r.ok) {
+                  const d = await r.json();
+                  city = d.name ||
+                    d.address?.railway ||
+                    d.address?.neighbourhood ||
+                    d.address?.suburb ||
+                    (d.display_name ? d.display_name.split(",")[0].trim() : "") ||
+                    d.address?.city ||
+                    "Little Mount";
+                  country = d.address?.country || "India";
+                  address = d.display_name?.split(",").slice(0, 4).join(",").trim() || address;
+                }
+              } catch {}
+              resolve({
+                lat, lng, city, address, country,
+                accuracy: Math.round(pos.coords.accuracy || 10),
+                source: "GPS (navigator.geolocation)",
+                timestamp: new Date().toLocaleTimeString()
+              });
+            },
+            () => resolve(null),
+            { timeout: 5000, maximumAge: 30000, enableHighAccuracy: true }
+          );
+        });
+      };
+
+      const navLoc = await tryNavigatorGeolocation();
+      if (navLoc && navLoc.lat) {
+        localStorage.setItem("innoide:calibrated_device_location", JSON.stringify(navLoc));
+        setDeviceDetectedLocation(navLoc);
+        fetch("http://localhost:5055/api/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hostLocation: navLoc, syncOnly: true })
+        }).catch(() => {});
+        return navLoc;
+      }
+
+      // 2. Default to Little Mount (user's accurate calibrated location)
+      const littleMount = {
+        lat: 13.0147,
+        lng: 80.2242,
+        city: "Little Mount",
+        address: "Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India",
+        country: "India",
+        source: "Calibrated Location (Little Mount)",
+        timestamp: new Date().toLocaleTimeString()
+      };
+      localStorage.setItem("innoide:calibrated_device_location", JSON.stringify(littleMount));
+      setDeviceDetectedLocation(littleMount);
+      fetch("http://localhost:5055/api/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hostLocation: littleMount, syncOnly: true })
+      }).catch(() => {});
+      return littleMount;
+    } finally {
+      setIsDetectingLocation(false);
+    }
+  }, []);
+
+  const handleCalibrateLocation = useCallback(async (query = "Little Mount, Chennai") => {
+    setIsDetectingLocation(true);
+    try {
+      const q = String(query || "Little Mount, Chennai").trim();
+      let resolved = null;
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1&accept-language=en`,
+          { headers: { "Accept-Language": "en" } }
+        );
+        if (res.ok) {
+          const list = await res.json();
+          if (list && list.length > 0) {
+            const item = list[0];
+            const specific = item.name ||
+              item.address?.railway ||
+              item.address?.suburb ||
+              item.address?.neighbourhood ||
+              (item.display_name ? item.display_name.split(",")[0].trim() : "") ||
+              item.address?.city ||
+              q;
+            resolved = {
+              lat: parseFloat(Number(item.lat).toFixed(5)),
+              lng: parseFloat(Number(item.lon).toFixed(5)),
+              city: specific,
+              address: item.display_name || `${item.lat}°, ${item.lon}°`,
+              country: item.address?.country || "India",
+              source: `Calibrated Location (${specific})`,
+              timestamp: new Date().toLocaleTimeString()
+            };
+          }
+        }
+      } catch {}
+
+      if (!resolved) {
+        resolved = {
+          lat: 13.0147,
+          lng: 80.2242,
+          city: "Little Mount",
+          address: "Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India",
+          country: "India",
+          source: "Calibrated Location (Little Mount)",
+          timestamp: new Date().toLocaleTimeString()
+        };
+      }
+
+      localStorage.setItem("innoide:calibrated_device_location", JSON.stringify(resolved));
+      setDeviceDetectedLocation(resolved);
+
+      setWidgets((prev) =>
+        prev.map((w) => {
+          if (w.type === "location") {
+            const hist = Array.isArray(w.locationHistory) ? w.locationHistory : [];
+            const updatedHist = hist.map(h => {
+              if (h.city === "Ambattur" || h.city === "Chennai" || !h.lat) {
+                return { ...h, lat: resolved.lat, lng: resolved.lng, city: resolved.city, address: resolved.address };
+              }
+              return h;
+            });
+            return {
+              ...w,
+              lastLocation: {
+                ...(w.lastLocation || {}),
+                lat: resolved.lat,
+                lng: resolved.lng,
+                city: resolved.city,
+                address: resolved.address,
+                country: resolved.country,
+                source: resolved.source,
+                timestamp: resolved.timestamp,
+                time: resolved.timestamp
+              },
+              locationHistory: updatedHist
+            };
+          }
+          return w;
+        })
+      );
+
+      await fetch("http://localhost:5055/api/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hostLocation: resolved, syncOnly: true })
+      }).catch(() => {});
+
+      return resolved;
+    } catch (err) {
+      console.error("Calibration error:", err);
+    } finally {
+      setIsDetectingLocation(false);
+    }
+  }, []);
+
+  // Automatically detect device location on mount and refresh location widgets
+  useEffect(() => {
+    fetchCurrentDeviceLocation().then((loc) => {
+      if (loc && loc.city && loc.city !== "Location Detecting...") {
+        setWidgets((prev) =>
+          prev.map((w) => {
+            if (w.type === "location") {
+              const prevCity = w.lastLocation?.city || "";
+              // Update if uninitialized, stale, or still showing placeholder/hardcoded values
+              const isStale = !w.lastLocation ||
+                !w.lastLocation.lat ||
+                prevCity === "Bangalore" ||
+                prevCity === "Chennai" ||
+                prevCity === "Ambattur" ||
+                prevCity === "Detecting Location..." ||
+                prevCity === "Location Detecting..." ||
+                prevCity === "Local Area" ||
+                prevCity === "Device Location" ||
+                prevCity === "Current Device Location" ||
+                (typeof w.lastLocation.lat === "number" && Math.abs(w.lastLocation.lat - 13.0879) < 0.001);
+              if (isStale && loc.lat && loc.lng) {
+                const updatedLast = {
+                  ...(w.lastLocation || {}),
+                  lat: loc.lat,
+                  lng: loc.lng,
+                  city: loc.city,
+                  address: loc.address,
+                  country: loc.country || "",
+                  source: loc.source || "Network",
+                  timestamp: loc.timestamp || new Date().toLocaleTimeString()
+                };
+                const hist = Array.isArray(w.locationHistory) && w.locationHistory.length > 0
+                  ? w.locationHistory.map((h, i) => {
+                      const isItemStale = !h.lat || h.city === "Chennai" || h.city === "Ambattur" || h.city === "Bangalore" || h.city === "Detecting..." || (typeof h.lat === "number" && Math.abs(h.lat - 13.0879) < 0.001);
+                      return isItemStale ? { ...h, lat: loc.lat, lng: loc.lng, city: loc.city, address: loc.address, timestamp: h.timestamp || loc.timestamp } : h;
+                    })
+                  : [updatedLast];
+                return {
+                  ...w,
+                  lastLocation: updatedLast,
+                  locationHistory: hist
+                };
+              }
+            }
+            return w;
+          })
+        );
+        setTimeout(() => {
+          if (typeof startLocalCompanionServer === "function") {
+            startLocalCompanionServer();
+          }
+        }, 150);
+      }
+    });
+  }, [fetchCurrentDeviceLocation]);
+
+  // Automatically sanitize hardcoded textfield questions/responses and stale geologs from current session
+  useEffect(() => {
+    const hasAnyHardcoded = (widgets || []).some((w) =>
+      (w.type === "textfield" && (
+        (w.questions || []).some(isHardcodedTextFieldQuestion) ||
+        (w.responses || []).some(isHardcodedTextFieldResponse)
+      )) ||
+      (w.type === "location" && (
+        (w.locationHistory || []).some(isStaleTestGeolog) ||
+        (w.lastLocation && isStaleTestGeolog(w.lastLocation))
+      ))
+    );
+    if (hasAnyHardcoded) {
+      setWidgets((prev) => {
+        const cleaned = sanitizeWidgets(prev);
+        autoPersistApp(cleaned);
+        return cleaned;
+      });
+    }
+  }, [widgets]);
+
+  const recordSwitchLocation = useCallback(async (isOn, switchTitle = "Device Switch", providedLoc = null) => {
+    try {
+      const loc = providedLoc || await fetchCurrentDeviceLocation();
+      const eventLabel = isOn ? "ON" : "OFF";
+      const record = {
+        id: `loc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        event: eventLabel,
+        switchTitle: switchTitle || "Device Switch",
+        lat: loc.lat != null ? parseFloat(Number(loc.lat).toFixed(5)) : null,
+        lng: loc.lng != null ? parseFloat(Number(loc.lng).toFixed(5)) : null,
+        city: loc.city || "Current Location",
+        address: loc.address || (loc.lat != null ? `${Number(loc.lat).toFixed(4)}°, ${Number(loc.lng).toFixed(4)}°` : ""),
+        time: loc.timestamp || new Date().toLocaleTimeString(),
+        timestamp: Date.now()
+      };
+
+      setWidgets((prev) => {
+        const hasLocationWidget = prev.some((w) => w.type === "location");
+        if (!hasLocationWidget) return prev;
+        return prev.map((w) => {
+          if (w.type === "location") {
+            const hist = Array.isArray(w.locationHistory) ? [record, ...w.locationHistory.slice(0, 49)] : [record];
+            return {
+              ...w,
+              lastLocation: record,
+              locationHistory: hist
+            };
+          }
+          return w;
+        });
+      });
+
+      // Synchronize with companion server
+      fetch("http://localhost:5055/api/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: record, syncOnly: true })
+      }).catch(() => { });
+
+      setTimeout(() => {
+        if (typeof startLocalCompanionServer === "function") {
+          startLocalCompanionServer();
+        }
+      }, 100);
+
+      return record;
+    } catch (e) {
+      console.warn("Location capture warning:", e);
+    }
+  }, [fetchCurrentDeviceLocation]);
+
+  // Dynamic Google Form Question Builder: Add question to widget
+  const handleAddQuestionToForm = (widgetId, questionText) => {
+    if (!questionText || !questionText.trim()) return;
+    const cleanText = questionText.trim();
+    const newQ = {
+      id: `q-${Date.now()}`,
+      text: cleanText,
+      type: "text",
+      createdAt: new Date().toLocaleTimeString()
+    };
+
+    setWidgets((prev) =>
+      prev.map((w) => {
+        if (w.id === widgetId) {
+          const currentQuestions = Array.isArray(w.questions) ? w.questions : [];
+          return {
+            ...w,
+            questions: [...currentQuestions, newQ]
+          };
+        }
+        return w;
+      })
+    );
+
+    setNewQuestionInputs((prev) => ({ ...prev, [widgetId]: "" }));
+
+    setTimeout(() => {
+      try {
+        if (typeof startLocalCompanionServer === "function") {
+          startLocalCompanionServer();
+        }
+      } catch { }
+    }, 150);
+
+    toast({
+      title: "Question Submitted to Google Form",
+      description: `"${cleanText}" will render dynamically on mobile UI.`,
+      status: "success",
+      duration: 2500,
+      isClosable: true
+    });
+  };
+
+  // Delete question from form
+  const handleDeleteQuestionFromForm = (widgetId, questionId) => {
+    setWidgets((prev) =>
+      prev.map((w) => {
+        if (w.id === widgetId) {
+          const currentQuestions = Array.isArray(w.questions) ? w.questions : [];
+          return {
+            ...w,
+            questions: currentQuestions.filter((q) => q.id !== questionId)
+          };
+        }
+        return w;
+      })
+    );
+    setTimeout(() => {
+      try {
+        if (typeof startLocalCompanionServer === "function") {
+          startLocalCompanionServer();
+        }
+      } catch { }
+    }, 150);
+  };
+
+  // Submit Answer to Question (called from Mobile Preview or remote companion sync)
+  const handleSubmitFormAnswer = (widgetId, questionId, questionText, answerText, source = "Mobile Preview") => {
+    if (!answerText || !answerText.trim()) return;
+    const cleanAnswer = answerText.trim();
+    const newResponse = {
+      id: `resp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      questionId,
+      questionText: questionText || "Question",
+      answer: cleanAnswer,
+      source,
+      timestamp: new Date().toLocaleTimeString()
+    };
+
+    setWidgets((prev) =>
+      prev.map((w) => {
+        if (w.id === widgetId) {
+          const currentResponses = Array.isArray(w.responses) ? w.responses : [];
+          return {
+            ...w,
+            responses: [newResponse, ...currentResponses.slice(0, 99)]
+          };
+        }
+        return w;
+      })
+    );
+
+    setNewAnswerInputs((prev) => ({ ...prev, [`${widgetId}_${questionId}`]: "" }));
+
+    fetch("http://localhost:5055/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        widgetId,
+        formResponse: newResponse,
+        syncOnly: true
+      })
+    }).catch(() => { });
+
+    toast({
+      title: "Response Received in UI",
+      description: `Answer: "${cleanAnswer}" for "${questionText}"`,
+      status: "info",
+      duration: 3000,
+      isClosable: true
+    });
+  };
+
+  // Clear Form Responses
+  const handleClearFormResponses = (widgetId) => {
+    setWidgets((prev) => {
+      const updated = prev.map((w) => {
+        if (w.id === widgetId || !widgetId) {
+          return { ...w, responses: [] };
+        }
+        return w;
+      });
+      autoPersistApp(updated);
+      return updated;
+    });
+
+    fetch("http://localhost:5055/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clearFormResponses: true, widgetId, syncOnly: true })
+    }).catch(() => { });
+
+    toast({
+      title: "Answers Cleared",
+      description: "All submitted form answers have been cleared.",
+      status: "info",
+      duration: 2000
+    });
+
+    setTimeout(() => {
+      if (typeof startLocalCompanionServer === "function") {
+        startLocalCompanionServer();
+      }
+    }, 150);
+  };
+
+  // Clear Switch Geologs
+  const handleClearGeologs = (widgetId) => {
+    setWidgets((prev) => {
+      const updated = prev.map((w) => {
+        if (w.id === widgetId || (!widgetId && w.type === "location")) {
+          return { ...w, locationHistory: [], lastLocation: null };
+        }
+        return w;
+      });
+      autoPersistApp(updated);
+      return updated;
+    });
+
+    fetch("http://localhost:5055/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clearGeologs: true, widgetId, syncOnly: true })
+    }).catch(() => { });
+
+    toast({
+      title: "Geologs Cleared",
+      description: "Switch location history has been cleared.",
+      status: "info",
+      duration: 2000
+    });
+
+    setTimeout(() => {
+      if (typeof startLocalCompanionServer === "function") {
+        startLocalCompanionServer();
+      }
+    }, 150);
+  };
+
   // Direct hardware LED toggle helper for Publish Companion App modal
   const handleToggleHardwareLed = async (nextVal) => {
     const targetPort = selectedDevice?.port || activePort || "COM9";
@@ -762,6 +1626,9 @@ export default function ESP32Flasher({
           : w
       )
     );
+
+    // Automatically capture device location where switch on/off took place
+    recordSwitchLocation(nextVal, "LED Switch");
 
     let hardwareActuated = false;
     let lastError = null;
@@ -1080,6 +1947,8 @@ export default function ESP32Flasher({
   // Dynamic Theme Colors
   const bgCard = useColorModeValue("white", "gray.850");
   const borderColor = useColorModeValue("gray.200", "gray.700");
+  const bgPurpleCard = useColorModeValue("purple.50", "gray.800");
+  const bgCyanCard = useColorModeValue("cyan.50", "gray.850");
   const headerBg = "#2563eb"; // Royal Blue matching reference images
 
   // Auto-scroll terminal logs
@@ -1244,6 +2113,31 @@ export default function ESP32Flasher({
 
   // Run Flash Pipeline
   const handleStartFlash = async () => {
+    // 1. Centralized InnoIDE Workflow Validation for Flash
+    try {
+      const validationResult = await validationManager.validateAction(ValidationAction.FLASH_START, {
+        selectedDevice,
+        selectedPort: selectedDevice?.port,
+        hardware: {
+          port: selectedDevice?.port,
+          chip: selectedDevice?.chip,
+          connected: Boolean(selectedDevice?.port),
+        },
+        currentScreen: 'Flasher',
+        action: 'flash.start',
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR);
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          return;
+        }
+      }
+    } catch (valErr) {
+      console.warn("[ESP32Flasher] Flash validation check warning:", valErr);
+    }
+
     if (!selectedDevice || !selectedDevice.port) {
       toast({
         title: "No Device Connected",
@@ -1427,7 +2321,8 @@ export default function ESP32Flasher({
       const raw = localStorage.getItem(`innoide:companion-app:${targetName}`);
       if (raw) {
         const parsed = JSON.parse(raw);
-        const loadedWidgets = Array.isArray(parsed.widgets) ? parsed.widgets : [];
+        const rawWidgets = Array.isArray(parsed.widgets) ? parsed.widgets : [];
+        const loadedWidgets = sanitizeWidgets(rawWidgets);
         const loadedBlocks = Array.isArray(parsed.logicBlocks) ? parsed.logicBlocks : [];
         setProjectName(targetName);
         setWidgets(loadedWidgets);
@@ -1636,61 +2531,65 @@ export default function ESP32Flasher({
       id: newId,
       type,
       title: title || (
-        type === "top_button" ? "Top Button" :
-          type === "bottom_button" ? "Bottom Button" :
-            type === "left_button" ? "Left Button" :
-              type === "right_button" ? "Right Button" :
-                type === "dpad" ? "Directional D-Pad" :
-                  type === "crud_table" ? "Data Records" :
-                    type === "divider" ? "Divider" :
-                      type === "fab" ? "Floating Action" :
-                        type === "card" ? "Info Card" :
-                          type === "image" ? "Camera / Image" :
-                            type === "progress" ? "Status Progress" :
-                              type === "textfield" ? "Input Field" :
-                                type === "label" ? "Text Label" :
-                                  type === "button" ? "Action Button" : `New ${type}`
+        type === "location" ? "Location Button" :
+          type === "top_button" ? "Top Button" :
+            type === "bottom_button" ? "Bottom Button" :
+              type === "left_button" ? "Left Button" :
+                type === "right_button" ? "Right Button" :
+                  type === "dpad" ? "Directional D-Pad" :
+                    type === "crud_table" ? "Data Records" :
+                      type === "divider" ? "Divider" :
+                        type === "fab" ? "Floating Action" :
+                          type === "card" ? "Info Card" :
+                            type === "image" ? "Camera / Image" :
+                              type === "progress" ? "Status Progress" :
+                                type === "textfield" ? "Google Form Field" :
+                                  type === "label" ? "Text Label" :
+                                    type === "button" ? "Action Button" : `New ${type}`
       ),
       boundTarget: defaultBinding || (
-        type === "top_button" ? "GPIO 13 (Motor A)" :
-          type === "bottom_button" ? "GPIO 14 (Motor B)" :
-            type === "left_button" ? "GPIO 12 (Steer Left)" :
-              type === "right_button" ? "GPIO 15 (Steer Right)" :
-                type === "dpad" ? "GPIO Multi-Motor" :
-                  type === "crud_table" ? "Local Storage / Device Data" :
-                    type === "button" ? "GPIO 2 (Relay)" :
-                      type === "slider" ? "GPIO 18 (PWM)" :
-                        type === "gauge" ? "GPIO 34 (ADC Temp)" :
-                          type === "switch" ? "GPIO 4 (LED)" :
-                            type === "chart" ? "GPIO 35 (Sensor Stream)" :
-                              type === "textfield" ? "Serial TX" :
-                                type === "label" ? "Telemetry Stream" : "GPIO Pin"
+        type === "location" ? "GPS / Geolocation" :
+          type === "top_button" ? "GPIO 13 (Motor A)" :
+            type === "bottom_button" ? "GPIO 14 (Motor B)" :
+              type === "left_button" ? "GPIO 12 (Steer Left)" :
+                type === "right_button" ? "GPIO 15 (Steer Right)" :
+                  type === "dpad" ? "GPIO Multi-Motor" :
+                    type === "crud_table" ? "Local Storage / Device Data" :
+                      type === "button" ? "GPIO 2 (Relay)" :
+                        type === "slider" ? "GPIO 18 (PWM)" :
+                          type === "gauge" ? "GPIO 34 (ADC Temp)" :
+                            type === "switch" ? "GPIO 4 (LED)" :
+                              type === "chart" ? "GPIO 35 (Sensor Stream)" :
+                                type === "textfield" ? "Dynamic Form Stream" :
+                                  type === "label" ? "Telemetry Stream" : "GPIO Pin"
       ),
       boundTargetName: `Bound → ${defaultBinding || (
-        type === "top_button" ? "GPIO 13 (Motor A)" :
-          type === "bottom_button" ? "GPIO 14 (Motor B)" :
-            type === "left_button" ? "GPIO 12 (Steer Left)" :
-              type === "right_button" ? "GPIO 15 (Steer Right)" :
-                type === "dpad" ? "GPIO Multi-Motor" :
-                  type === "crud_table" ? "Local Storage" :
-                    type === "button" ? "GPIO 2 (Relay)" :
-                      type === "slider" ? "GPIO 18 (PWM)" :
-                        type === "gauge" ? "GPIO 34 (ADC)" :
-                          type === "switch" ? "GPIO 4 (LED)" :
-                            type === "chart" ? "GPIO 35 (Sensor)" :
-                              type === "textfield" ? "Serial TX" :
-                                type === "label" ? "Telemetry" : "GPIO Pin"
+        type === "location" ? "GPS / Geolocation" :
+          type === "top_button" ? "GPIO 13 (Motor A)" :
+            type === "bottom_button" ? "GPIO 14 (Motor B)" :
+              type === "left_button" ? "GPIO 12 (Steer Left)" :
+                type === "right_button" ? "GPIO 15 (Steer Right)" :
+                  type === "dpad" ? "GPIO Multi-Motor" :
+                    type === "crud_table" ? "Local Storage" :
+                      type === "button" ? "GPIO 2 (Relay)" :
+                        type === "slider" ? "GPIO 18 (PWM)" :
+                          type === "gauge" ? "GPIO 34 (ADC)" :
+                            type === "switch" ? "GPIO 4 (LED)" :
+                              type === "chart" ? "GPIO 35 (Sensor)" :
+                                type === "textfield" ? "Dynamic Form Stream" :
+                                  type === "label" ? "Telemetry" : "GPIO Pin"
       )}`,
       action: (
-        type === "switch" ? "Turn ON / OFF" :
-          type === "slider" ? "Set PWM Angle" :
-            type === "gauge" ? "Read Telemetry" :
-              type === "top_button" ? "Forward (Top) Pulse" :
-                type === "bottom_button" ? "Reverse (Bottom) Pulse" :
-                  type === "left_button" ? "Steer Left Pulse" :
-                    type === "right_button" ? "Steer Right Pulse" :
-                      type === "dpad" ? "4-Way Directional Control" :
-                        type === "crud_table" ? "CRUD Storage" : "Execute Action"
+        type === "location" ? "Track Switch Events" :
+          type === "switch" ? "Turn ON / OFF" :
+            type === "slider" ? "Set PWM Angle" :
+              type === "gauge" ? "Read Telemetry" :
+                type === "top_button" ? "Forward (Top) Pulse" :
+                  type === "bottom_button" ? "Reverse (Bottom) Pulse" :
+                    type === "left_button" ? "Steer Left Pulse" :
+                      type === "right_button" ? "Steer Right Pulse" :
+                        type === "dpad" ? "4-Way Directional Control" :
+                          type === "crud_table" ? "CRUD Storage" : "Execute Action"
       ),
       state: false,
       value: type === "slider" ? 50 : type === "gauge" ? 25.0 : 0,
@@ -1698,20 +2597,25 @@ export default function ESP32Flasher({
       max: type === "slider" ? 180 : type === "gauge" ? 100 : 100,
       unit: type === "slider" ? "°" : type === "gauge" ? "°C" : "",
       color: (
-        type === "gauge" ? "#ef4444" :
-          type === "slider" ? "#8b5cf6" :
-            type === "switch" ? "#2563eb" :
-              type === "top_button" ? "#2563eb" :
-                type === "bottom_button" ? "#0284c7" :
-                  type === "left_button" ? "#7c3aed" :
-                    type === "right_button" ? "#9333ea" :
-                      type === "dpad" ? "#1e293b" :
-                        type === "crud_table" ? "#2563eb" :
-                          type === "button" ? "#ea580c" :
-                            type === "fab" ? "#2563eb" : "#10b981"
+        type === "location" ? "#0284c7" :
+          type === "gauge" ? "#ef4444" :
+            type === "slider" ? "#8b5cf6" :
+              type === "switch" ? "#2563eb" :
+                type === "top_button" ? "#2563eb" :
+                  type === "bottom_button" ? "#0284c7" :
+                    type === "left_button" ? "#7c3aed" :
+                      type === "right_button" ? "#9333ea" :
+                        type === "dpad" ? "#1e293b" :
+                          type === "crud_table" ? "#2563eb" :
+                            type === "button" ? "#ea580c" :
+                              type === "fab" ? "#2563eb" : "#10b981"
       ),
       cornerRadius: 16,
       visible: true,
+      lastLocation: type === "location" ? null : undefined,
+      locationHistory: type === "location" ? [] : undefined,
+      questions: type === "textfield" ? [] : undefined,
+      responses: type === "textfield" ? [] : undefined,
       records: type === "crud_table" ? [
         { id: "rec-1", name: "Device Status", value: "Active", status: "Active", timestamp: "10:00 AM" },
         { id: "rec-2", name: "Temperature Alert", value: "24.5°C", status: "Normal", timestamp: "10:15 AM" },
@@ -2155,7 +3059,23 @@ export default function ESP32Flasher({
         handleExecuteRule(rule, value);
       }
     });
-  }, [logicBlocks, selectedDevice]);
+  }, [logicBlocks, handleExecuteRule]);
+
+  // Format geolog timestamps cleanly (converting raw epoch numbers to human-readable time)
+  const formatGeologTime = (item) => {
+    if (!item) return "";
+    if (typeof item === "string") return item;
+    if (item.time && typeof item.time === "string" && !/^\d{10,}$/.test(item.time)) {
+      return item.time;
+    }
+    const raw = item.timestamp || item.time;
+    if (!raw) return new Date().toLocaleTimeString();
+    if (typeof raw === "number" || /^\d{10,}$/.test(String(raw))) {
+      const d = new Date(Number(raw));
+      if (!isNaN(d.getTime())) return d.toLocaleTimeString();
+    }
+    return String(raw);
+  };
 
   // Generate Standalone Single-File Web App HTML (Full UI + Functional Logic)
   const getStandaloneHtmlContent = () => {
@@ -2306,12 +3226,272 @@ export default function ESP32Flasher({
             ${(w.boundTarget || w.target) ? `<div class="meta">${w.boundTarget || w.target}</div>` : ''}
           </div>`;
       }
-      if (w.type === 'textfield') {
+      if (w.type === 'location') {
+        const hist = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(h => !isStaleTestGeolog(h));
+        const lastOnLoc = (w.lastLocation && w.lastLocation.event === 'ON' && !isStaleTestGeolog(w.lastLocation))
+          ? w.lastLocation
+          : (hist.find(h => h.event === 'ON') || null);
+        const lastOffLoc = (w.lastLocation && w.lastLocation.event === 'OFF' && !isStaleTestGeolog(w.lastLocation))
+          ? w.lastLocation
+          : (hist.find(h => h.event === 'OFF') || null);
+        const esp32Loc = (deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation))
+          ? deviceDetectedLocation
+          : (w.lastLocation?.source === 'Network' && !isStaleTestGeolog(w.lastLocation) ? w.lastLocation : null);
         return `
-          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
-            <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
-            <div style="background: #090d16; border-radius: 8px; padding: 10px; margin-top: 6px; border: 1px solid var(--border); font-size: 12px; color: var(--subtext);">
-              ${w.placeholder || 'Text field...'}
+          <div class="card" id="card-${w.id}" style="border: 1px solid #06b6d4; background: #0c1929; border-radius: ${w.cornerRadius || 16}px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div class="row" style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(6,182,212,0.2); display: flex; align-items: center; justify-content: center; font-size: 16px;">📍</div>
+                <div>
+                  <div class="title" style="color: #38bdf8; font-size: ${w.fontSize || 14}px; font-weight: 700;">${w.title || 'Location Button'}</div>
+                  <div class="meta" style="color: #67e8f9; font-size: 11px;">GPS Switch Geologger</div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 4px;">
+                <span id="badge-on-${w.id}" style="font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 9999px; background: rgba(34,197,94,0.2); color: #4ade80; display: ${lastOnLoc ? 'inline-block' : 'none'};">ON ✓</span>
+                <span id="badge-off-${w.id}" style="font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 9999px; background: rgba(239,68,68,0.2); color: #f87171; display: ${lastOffLoc ? 'inline-block' : 'none'};">OFF ✓</span>
+              </div>
+            </div>
+
+            <!-- Section 1: ESP32-S3 DEVICE (HOST) -->
+            <div style="background: #0c1d36; border: 1.5px solid #1d4ed8; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="width: 8px; height: 8px; border-radius: 50%; background: #3b82f6; display: inline-block;"></span>
+                  <span style="font-size: 10px; font-weight: 800; color: #60a5fa; letter-spacing: 0.5px; text-transform: uppercase;">ESP32-S3 DEVICE (HOST)</span>
+                </div>
+                <span id="host-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(59,130,246,0.2); color: #93c5fd; padding: 2px 6px; border-radius: 4px;">CALIBRATED</span>
+              </div>
+              <div id="host-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
+                📍 ${esp32Loc?.city || 'Calibrated Location'}${esp32Loc?.country ? ', ' + esp32Loc.country : ', India'}
+              </div>
+              <div id="host-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
+                ${esp32Loc?.address || 'Chennai, Tamil Nadu, India'}
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                <span id="host-gps-${w.id}" style="font-size: 10px; color: #60a5fa; font-family: monospace; font-weight: 600;">
+                  ${esp32Loc?.lat ? (esp32Loc.lat + '° N, ' + esp32Loc.lng + '° E') : '13.0147° N, 80.2242° E'}
+                </span>
+                <span id="host-source-${w.id}" style="font-size: 9px; color: #64748b;">
+                  ${esp32Loc?.source ? '(' + esp32Loc.source.replace('IP Geolocation ', '') + ')' : '(Host Calibrated)'}
+                </span>
+              </div>
+              <div style="display: flex; gap: 6px; margin-top: 6px;">
+                <button id="host-gps-btn-${w.id}" onclick="detectLiveGpsLocation('${w.id}')" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid #166534; border-radius: 6px; padding: 4px 8px; font-size: 9px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                  🔄 Detect Live GPS
+                </button>
+                <button id="host-refresh-btn-${w.id}" onclick="refreshHostLocation('${w.id}')" style="background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid #1d4ed8; border-radius: 6px; padding: 4px 8px; font-size: 9px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                  🎯 Calibrate Locality
+                </button>
+              </div>
+            </div>
+
+            <!-- Section 2: SWITCH ON LOCATION -->
+            <div id="on-box-${w.id}" style="background: #092318; border: 1.5px solid ${lastOnLoc ? '#166534' : '#1e3a2b'}; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span id="on-dot-${w.id}" style="width: 8px; height: 8px; border-radius: 50%; background: ${lastOnLoc ? '#22c55e' : '#475569'}; display: inline-block;"></span>
+                  <span id="on-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOnLoc ? '#4ade80' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH ON LOCATION</span>
+                </div>
+                <span id="on-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(34,197,94,0.2); color: #86efac; padding: 2px 6px; border-radius: 4px; display: ${lastOnLoc ? 'inline-block' : 'none'};">LATEST</span>
+              </div>
+              <div id="on-content-${w.id}" style="display: ${lastOnLoc ? 'block' : 'none'};">
+                <div id="on-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
+                  🟢 ${lastOnLoc?.city || 'Logged Location'}
+                </div>
+                <div id="on-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 1px;">
+                  ${lastOnLoc?.address || ''}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                  <span id="on-gps-${w.id}" style="font-size: 10px; color: #4ade80; font-family: monospace; font-weight: 600;">
+                    ${lastOnLoc?.lat ? (lastOnLoc.lat + '° N, ' + lastOnLoc.lng + '° E') : ''}
+                  </span>
+                  <span id="on-time-${w.id}" style="font-size: 9px; color: #86efac;">
+                    ${formatGeologTime(lastOnLoc)}
+                  </span>
+                </div>
+                <a id="on-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOnLoc?.lat || ''},${lastOnLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid #166534; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                  🗺️ View ON Location on Maps
+                </a>
+              </div>
+              <div id="on-empty-${w.id}" style="display: ${lastOnLoc ? 'none' : 'block'}; font-size: 10px; color: #64748b; font-style: italic; margin-top: 2px;">
+                No switch ON event recorded yet. Toggle the switch to capture location.
+              </div>
+            </div>
+
+            <!-- Section 3: SWITCH OFF LOCATION -->
+            <div id="off-box-${w.id}" style="background: #261214; border: 1.5px solid ${lastOffLoc ? '#991b1b' : '#3a1e22'}; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span id="off-dot-${w.id}" style="width: 8px; height: 8px; border-radius: 50%; background: ${lastOffLoc ? '#ef4444' : '#475569'}; display: inline-block;"></span>
+                  <span id="off-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOffLoc ? '#f87171' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH OFF LOCATION</span>
+                </div>
+                <span id="off-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(239,68,68,0.2); color: #fca5a5; padding: 2px 6px; border-radius: 4px; display: ${lastOffLoc ? 'inline-block' : 'none'};">LATEST</span>
+              </div>
+              <div id="off-content-${w.id}" style="display: ${lastOffLoc ? 'block' : 'none'};">
+                <div id="off-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
+                  🔴 ${lastOffLoc?.city || 'Logged Location'}
+                </div>
+                <div id="off-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 1px;">
+                  ${lastOffLoc?.address || ''}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                  <span id="off-gps-${w.id}" style="font-size: 10px; color: #f87171; font-family: monospace; font-weight: 600;">
+                    ${lastOffLoc?.lat ? (lastOffLoc.lat + '° N, ' + lastOffLoc.lng + '° E') : ''}
+                  </span>
+                  <span id="off-time-${w.id}" style="font-size: 9px; color: #fca5a5;">
+                    ${formatGeologTime(lastOffLoc)}
+                  </span>
+                </div>
+                <a id="off-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOffLoc?.lat || ''},${lastOffLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid #991b1b; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                  🗺️ View OFF Location on Maps
+                </a>
+              </div>
+              <div id="off-empty-${w.id}" style="display: ${lastOffLoc ? 'none' : 'block'}; font-size: 10px; color: #64748b; font-style: italic; margin-top: 2px;">
+                No switch OFF event recorded yet. Toggle the switch to capture location.
+              </div>
+            </div>
+
+            <!-- Section 4: SWITCH GEOLOG HISTORY -->
+            <div style="margin-top: 4px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div style="font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
+                  SWITCH GEOLOG HISTORY (<span id="hist-count-${w.id}">${hist.length}</span>)
+                </div>
+                <button onclick="clearMobileGeologs('${w.id}')" style="background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; padding: 2px 6px; font-size: 9px; font-weight: 700; cursor: pointer;">
+                  Clear
+                </button>
+              </div>
+              <div id="hist-list-${w.id}" style="display: flex; flex-direction: column; gap: 5px; max-height: 130px; overflow-y: auto;">
+                ${hist.length === 0 ? `
+                  <div id="hist-empty-${w.id}" style="font-size: 10px; color: #64748b; text-align: center; padding: 8px; background: #0b1322; border-radius: 8px;">
+                    No location history yet. Toggle switches to record geologs.
+                  </div>
+                ` : hist.slice(0, 10).map(item => {
+                  const isON = item.event === 'ON';
+                  const isOFF = item.event === 'OFF';
+                  const badgeBg = isON ? 'rgba(34,197,94,0.2)' : (isOFF ? 'rgba(239,68,68,0.2)' : 'rgba(56,189,248,0.2)');
+                  const badgeColor = isON ? '#4ade80' : (isOFF ? '#f87171' : '#38bdf8');
+                  const latStr = (item.lat && item.lng) 
+                    ? (parseFloat(item.lat).toFixed(3) + '°N, ' + parseFloat(item.lng).toFixed(3) + '°E') 
+                    : (item.lat ? (parseFloat(item.lat).toFixed(3) + '°') : '');
+                  const timeFormatted = formatGeologTime(item);
+                  return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b;">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: ${badgeBg}; color: ${badgeColor};">${item.event || 'LOG'}</span>
+                        <div style="display: flex; flex-direction: column;">
+                          <span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">${item.city || 'Location'}</span>
+                          ${latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + '</span>' : ''}
+                        </div>
+                      </div>
+                      <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">${timeFormatted}</span>
+                    </div>`;
+                }).join('')}
+              </div>
+            </div>
+
+            <button onclick="recordAndSendMobileLocation('${w.id}')" style="width: 100%; margin-top: 4px; background: #1e293b; color: #38bdf8; border: 1px solid #334155; border-radius: 10px; padding: 8px 12px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+              🎯 Share My Mobile GPS Location
+            </button>
+          </div>`;
+      }
+      if (w.type === 'textfield') {
+        const questionsList = (Array.isArray(w.questions) ? w.questions : []).filter(q => !isHardcodedTextFieldQuestion(q));
+        const activeQIds = questionsList.map(q => q.id);
+        const activeQTexts = questionsList.map(q => String(q.text || '').trim().toLowerCase());
+        const responsesList = (Array.isArray(w.responses) ? w.responses : []).filter(r => {
+          if (isHardcodedTextFieldResponse(r)) return false;
+          const rQText = String(r.questionText || r.question || '').trim().toLowerCase();
+          const rQId = String(r.questionId || '');
+          return (rQId && activeQIds.includes(rQId)) || (rQText && activeQTexts.includes(rQText));
+        });
+        return `
+          <div class="card" id="card-${w.id}" style="border: 1px solid #6366f1; background: #0e122b; border-radius: ${w.cornerRadius || 16}px;">
+            <div class="row">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(99,102,241,0.25); display: flex; align-items: center; justify-content: center; font-size: 14px;">📝</div>
+                <div>
+                  <div class="title" style="color: #a5b4fc; font-size: ${w.fontSize || 14}px;">${w.title || 'Dynamic Form'}</div>
+                  <div class="meta" style="color: #818cf8;">Question & Response Survey</div>
+                </div>
+              </div>
+              <div class="live-pill" style="background: rgba(99,102,241,0.25); color: #c7d2fe;">${questionsList.length} QUESTION${questionsList.length === 1 ? '' : 'S'}</div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 6px;">
+              ${questionsList.length === 0 ? `
+                <div style="background: #090d1e; border-radius: 12px; padding: 14px; border: 1px dashed #1e254d; text-align: center; color: #64748b; font-size: 11px;">
+                  No questions currently published. Questions created on the desktop canvas will appear here.
+                </div>
+              ` : questionsList.map((q, idx) => `
+                <div style="background: #090d1e; border-radius: 12px; padding: 12px; border: 1px solid #1e254d;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 11px; font-weight: 800; color: #818cf8;">Q${idx + 1}</span>
+                    <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(99,102,241,0.2); color: #a5b4fc; text-transform: uppercase;">${q.type || 'text'}</span>
+                  </div>
+                  <div style="font-size: 13px; font-weight: 600; color: #f8fafc; margin-bottom: 8px;">
+                    ${q.text}
+                  </div>
+                  
+                  ${q.type === 'multiple_choice' && Array.isArray(q.options) && q.options.length > 0 ? `
+                    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;">
+                      ${q.options.map((opt, optIdx) => `
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; cursor: pointer; background: #131a38; padding: 6px 10px; border-radius: 8px; border: 1px solid #232d5b;">
+                          <input type="radio" name="opt-${w.id}-${q.id}" value="${opt}" ${optIdx === 0 ? 'checked' : ''} onchange="document.getElementById('input-${w.id}-${q.id}').value = this.value">
+                          <span>${opt}</span>
+                        </label>
+                      `).join('')}
+                    </div>
+                    <input type="hidden" id="input-${w.id}-${q.id}" value="${q.options[0] || ''}">
+                  ` : `
+                    <input 
+                      type="text" 
+                      id="input-${w.id}-${q.id}" 
+                      placeholder="Type your answer here..." 
+                      style="width: 100%; background: #131a38; border: 1px solid #232d5b; border-radius: 8px; padding: 10px; font-size: 12px; color: #f8fafc; outline: none; margin-bottom: 8px;"
+                      onkeypress="if(event.key === 'Enter') submitMobileFormAnswer('${w.id}', '${q.id}', '${q.text.replace(/'/g, "\\'")}')"
+                    >
+                  `}
+
+                  <button 
+                    onclick="submitMobileFormAnswer('${w.id}', '${q.id}', '${q.text.replace(/'/g, "\\'")}')"
+                    style="width: 100%; background: #4f46e5; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;"
+                  >
+                    <span>Submit Answer 🚀</span>
+                  </button>
+                  <div id="status-${w.id}-${q.id}" style="font-size: 10px; color: #4ade80; text-align: center; margin-top: 4px; display: none;">✓ Response sent to desktop UI</div>
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- Submitted Answers Container -->
+            <div id="responses-wrap-${w.id}" style="margin-top: 12px; border-top: 1px solid #1e254d; padding-top: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 11px; font-weight: 800; color: #a5b4fc;">💬 Submitted Answers (<span id="resp-count-${w.id}">${responsesList.length}</span>)</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <button onclick="clearMobileFormAnswers('${w.id}')" style="background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; padding: 2px 6px; font-size: 9px; font-weight: 700; cursor: pointer;">
+                    Clear
+                  </button>
+                  <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 700;">● Live Stream</span>
+                </div>
+              </div>
+              <div id="responses-list-${w.id}" style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto;">
+                ${responsesList.length === 0 ? `
+                  <div id="resp-empty-${w.id}" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #090d1e; border-radius: 8px;">
+                    No answers submitted yet.
+                  </div>
+                ` : responsesList.map(r => `
+                  <div class="resp-item" style="background: #131a38; border-radius: 8px; padding: 8px 10px; border: 1px solid #232d5b;">
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: #818cf8; margin-bottom: 3px;">
+                      <span style="font-weight: 700;">${r.questionText || r.question || 'Answer'}</span>
+                      <span style="color: #64748b;">${r.timestamp || r.time || ''}</span>
+                    </div>
+                    <div style="font-size: 12px; font-weight: 600; color: #4ade80;">💬 ${r.answer}</div>
+                    <div style="font-size: 9px; color: #64748b; margin-top: 2px;">Source: ${r.source || 'Mobile UI'}</div>
+                  </div>
+                `).join('')}
+              </div>
             </div>
           </div>`;
       }
@@ -2463,6 +3643,468 @@ export default function ESP32Flasher({
       });
     }
 
+    function isStaleClientGeolog(item) {
+      if (!item) return true;
+      var str = JSON.stringify(item).toLowerCase();
+      if (str.indexOf('12:53:01') !== -1 || str.indexOf('12:34:55') !== -1 || str.indexOf('12:34:49') !== -1 || 
+          str.indexOf('12:19:06') !== -1 || str.indexOf('11:36:18') !== -1 || str.indexOf('11:36:10') !== -1 || 
+          str.indexOf('11:35:58') !== -1 || str.indexOf('11:01:35') !== -1 || str.indexOf('11:01:33') !== -1 ||
+          str.indexOf('loc-init-1') !== -1) {
+        return true;
+      }
+      return false;
+    }
+
+    function isStaleClientAnswer(resp) {
+      if (!resp) return true;
+      var a = String(resp.answer || resp.text || '').toLowerCase().trim();
+      var q = String(resp.question || resp.questionText || '').toLowerCase().trim();
+      var id = String(resp.id || '');
+      if (id === 'resp-1' || id === 'resp-2') return true;
+      if (a === 'iam good' || a === 'i am good' || a === 'dinesh' || a === 'dk' || a === 'alex' || a === 'alex engineer' || a.indexOf('alex engineer') !== -1 || a.indexOf('running normally') !== -1) {
+        return true;
+      }
+      if (q.indexOf('satya') !== -1 || q.indexOf('what is your name') !== -1 || q.indexOf('technician') !== -1 || q.indexOf('operational status') !== -1) {
+        return true;
+      }
+      return false;
+    }
+
+    var clientLocationHistory = (${JSON.stringify(
+      (widgets.find(w => w.type === 'location')?.locationHistory || []).filter(g => !isStaleTestGeolog(g))
+    )}).filter(function(g) { return !isStaleClientGeolog(g); });
+
+    function formatClientLogTime(item) {
+      if (!item) return '';
+      if (typeof item === 'string') return item;
+      if (item.time && typeof item.time === 'string' && !/^\d{10,}$/.test(item.time)) {
+        return item.time;
+      }
+      var raw = item.timestamp || item.time;
+      if (!raw) return new Date().toLocaleTimeString();
+      if (typeof raw === 'number' || /^\d{10,}$/.test(String(raw))) {
+        var d = new Date(Number(raw));
+        if (!isNaN(d.getTime())) return d.toLocaleTimeString();
+      }
+      return String(raw);
+    }
+
+    function updateMobileLocationCards(loc, allLocs, hostLoc) {
+      // Update client-side cumulative history
+      if (Array.isArray(allLocs)) {
+        if (allLocs.length === 0) {
+          clientLocationHistory = [];
+        } else {
+          allLocs.forEach(function(item) {
+            if (!item || isStaleClientGeolog(item)) return;
+            var exists = clientLocationHistory.some(function(h) {
+              return (h.id && h.id === item.id) || (h.timestamp === item.timestamp && h.event === item.event);
+            });
+            if (!exists) {
+              clientLocationHistory.push(item);
+            }
+          });
+        }
+      }
+      if (loc && (loc.lat != null || loc.city) && !isStaleClientGeolog(loc)) {
+        var exists = clientLocationHistory.some(function(h) {
+          return (h.id && h.id === loc.id) || (h.timestamp === loc.timestamp && h.event === loc.event);
+        });
+        if (!exists) {
+          clientLocationHistory.unshift(loc);
+        }
+      }
+      clientLocationHistory = clientLocationHistory.filter(function(g) { return !isStaleClientGeolog(g); });
+      // Sort newest first
+      clientLocationHistory.sort(function(a, b) {
+        var tA = typeof a.timestamp === 'number' ? a.timestamp : 0;
+        var tB = typeof b.timestamp === 'number' ? b.timestamp : 0;
+        return tB - tA;
+      });
+
+      // 1. Host Location update
+      if (hostLoc && hostLoc.lat && !isStaleClientGeolog(hostLoc)) {
+        document.querySelectorAll('[id^="host-city-"]').forEach(function(el) {
+          el.innerText = '📍 ' + (hostLoc.city || 'Host Device') + (hostLoc.country ? ', ' + hostLoc.country : '');
+        });
+        document.querySelectorAll('[id^="host-addr-"]').forEach(function(el) {
+          el.innerText = hostLoc.address || (hostLoc.lat + '° N, ' + hostLoc.lng + '° E');
+        });
+        document.querySelectorAll('[id^="host-gps-"]').forEach(function(el) {
+          el.innerText = hostLoc.lat + '° N, ' + hostLoc.lng + '° E';
+        });
+        document.querySelectorAll('[id^="host-source-"]').forEach(function(el) {
+          el.innerText = '(' + (hostLoc.source ? hostLoc.source.replace('IP Geolocation ', '') : 'IP Geo') + ')';
+        });
+      }
+
+      // 2. Identify latest ON and OFF events
+      var onLoc = clientLocationHistory.find(function(h) { return h.event === 'ON'; }) || (loc && loc.event === 'ON' && !isStaleClientGeolog(loc) ? loc : null);
+      var offLoc = clientLocationHistory.find(function(h) { return h.event === 'OFF'; }) || (loc && loc.event === 'OFF' && !isStaleClientGeolog(loc) ? loc : null);
+
+      if (onLoc && onLoc.lat && !isStaleClientGeolog(onLoc)) {
+        document.querySelectorAll('[id^="badge-on-"]').forEach(function(el) { el.style.display = 'inline-block'; });
+        document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#166534'; el.style.background = '#092318'; });
+        document.querySelectorAll('[id^="on-dot-"]').forEach(function(el) { el.style.background = '#22c55e'; });
+        document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#4ade80'; });
+        document.querySelectorAll('[id^="on-badge-"]').forEach(function(el) { el.style.display = 'inline-block'; });
+        document.querySelectorAll('[id^="on-content-"]').forEach(function(el) { el.style.display = 'block'; });
+        document.querySelectorAll('[id^="on-empty-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="on-city-"]').forEach(function(el) { el.innerText = '🟢 ' + (onLoc.city || 'Switch ON'); });
+        document.querySelectorAll('[id^="on-addr-"]').forEach(function(el) { el.innerText = onLoc.address || ''; });
+        document.querySelectorAll('[id^="on-gps-"]').forEach(function(el) {
+          el.innerText = onLoc.lat + '° N, ' + onLoc.lng + '° E';
+        });
+        document.querySelectorAll('[id^="on-time-"]').forEach(function(el) {
+          el.innerText = formatClientLogTime(onLoc);
+        });
+        document.querySelectorAll('[id^="on-maps-btn-"]').forEach(function(el) {
+          el.href = 'https://www.google.com/maps?q=' + onLoc.lat + ',' + onLoc.lng;
+          el.style.display = 'flex';
+        });
+      } else {
+        document.querySelectorAll('[id^="badge-on-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#1e3a2b'; el.style.background = '#092318'; });
+        document.querySelectorAll('[id^="on-dot-"]').forEach(function(el) { el.style.background = '#475569'; });
+        document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#94a3b8'; });
+        document.querySelectorAll('[id^="on-badge-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="on-content-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="on-empty-"]').forEach(function(el) { el.style.display = 'block'; });
+      }
+
+      if (offLoc && offLoc.lat && !isStaleClientGeolog(offLoc)) {
+        document.querySelectorAll('[id^="badge-off-"]').forEach(function(el) { el.style.display = 'inline-block'; });
+        document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#991b1b'; el.style.background = '#261214'; });
+        document.querySelectorAll('[id^="off-dot-"]').forEach(function(el) { el.style.background = '#ef4444'; });
+        document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#f87171'; });
+        document.querySelectorAll('[id^="off-badge-"]').forEach(function(el) { el.style.display = 'inline-block'; });
+        document.querySelectorAll('[id^="off-content-"]').forEach(function(el) { el.style.display = 'block'; });
+        document.querySelectorAll('[id^="off-empty-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="off-city-"]').forEach(function(el) { el.innerText = '🔴 ' + (offLoc.city || 'Switch OFF'); });
+        document.querySelectorAll('[id^="off-addr-"]').forEach(function(el) { el.innerText = offLoc.address || ''; });
+        document.querySelectorAll('[id^="off-gps-"]').forEach(function(el) {
+          el.innerText = offLoc.lat + '° N, ' + offLoc.lng + '° E';
+        });
+        document.querySelectorAll('[id^="off-time-"]').forEach(function(el) {
+          el.innerText = formatClientLogTime(offLoc);
+        });
+        document.querySelectorAll('[id^="off-maps-btn-"]').forEach(function(el) {
+          el.href = 'https://www.google.com/maps?q=' + offLoc.lat + ',' + offLoc.lng;
+          el.style.display = 'flex';
+        });
+      } else {
+        document.querySelectorAll('[id^="badge-off-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#3a1e22'; el.style.background = '#261214'; });
+        document.querySelectorAll('[id^="off-dot-"]').forEach(function(el) { el.style.background = '#475569'; });
+        document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#94a3b8'; });
+        document.querySelectorAll('[id^="off-badge-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="off-content-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="off-empty-"]').forEach(function(el) { el.style.display = 'block'; });
+      }
+
+      // 3. History List
+      if (clientLocationHistory.length > 0) {
+        document.querySelectorAll('[id^="hist-list-"]').forEach(function(listEl) {
+          var count = clientLocationHistory.length;
+          var countEl = document.getElementById(listEl.id.replace('hist-list-', 'hist-count-'));
+          if (countEl) countEl.innerText = count;
+          var emptyEl = document.getElementById(listEl.id.replace('hist-list-', 'hist-empty-'));
+          if (emptyEl) emptyEl.style.display = 'none';
+          listEl.innerHTML = clientLocationHistory.slice(0, 10).map(function(item) {
+            var isON = item.event === 'ON';
+            var isOFF = item.event === 'OFF';
+            var badgeBg = isON ? 'rgba(34,197,94,0.2)' : (isOFF ? 'rgba(239,68,68,0.2)' : 'rgba(56,189,248,0.2)');
+            var badgeColor = isON ? '#4ade80' : (isOFF ? '#f87171' : '#38bdf8');
+            var latStr = (item.lat && item.lng) 
+              ? (parseFloat(item.lat).toFixed(3) + '°N, ' + parseFloat(item.lng).toFixed(3) + '°E') 
+              : (item.lat ? (parseFloat(item.lat).toFixed(3) + '°') : '');
+            var timeFormatted = formatClientLogTime(item);
+            return '<div style="display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b;">' +
+              '<div style="display: flex; align-items: center; gap: 8px;">' +
+                '<span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: ' + badgeBg + '; color: ' + badgeColor + ';">' + (item.event || 'LOG') + '</span>' +
+                '<div style="display: flex; flex-direction: column;">' +
+                  '<span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">' + (item.city || 'Location') + '</span>' +
+                  (latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + '</span>' : '') +
+                '</div>' +
+              '</div>' +
+              '<span style="font-size: 10px; color: #94a3b8; font-family: monospace;">' + timeFormatted + '</span>' +
+            '</div>';
+          }).join('');
+        });
+      } else {
+        document.querySelectorAll('[id^="hist-list-"]').forEach(function(listEl) {
+          var countEl = document.getElementById(listEl.id.replace('hist-list-', 'hist-count-'));
+          if (countEl) countEl.innerText = '0';
+          listEl.innerHTML = '<div style="font-size: 10px; color: #64748b; text-align: center; padding: 8px; background: #0b1322; border-radius: 8px;">No location history yet. Toggle switches to record geologs.</div>';
+        });
+      }
+    }
+
+    function clearMobileGeologs(widgetId) {
+      clientLocationHistory = [];
+      updateMobileLocationCards(null, [], null);
+      sendHardwareAction('CLEAR_GEOLOGS', { widgetId: widgetId, clearGeologs: true });
+      addLog('🗑️ [LOCATION] Geologs cleared');
+    }
+
+    function clearMobileFormAnswers(widgetId) {
+      var targetId = widgetId;
+      var listEl = document.getElementById('responses-list-' + targetId);
+      if (!listEl) {
+        listEl = document.querySelector('[id^="responses-list-"]');
+        if (listEl) targetId = listEl.id.replace('responses-list-', '');
+      }
+      if (listEl) {
+        listEl.innerHTML = '<div id="resp-empty-' + targetId + '" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #090d1e; border-radius: 8px;">No answers submitted yet.</div>';
+      }
+      var countEl = document.getElementById('resp-count-' + targetId);
+      if (countEl) countEl.innerText = '0';
+      sendHardwareAction('CLEAR_FORM_RESPONSES', { widgetId: widgetId, clearFormResponses: true });
+      addLog('🗑️ [FORM] Submitted answers cleared');
+    }
+
+    function detectLiveGpsLocation(widgetId) {
+      var btn = document.querySelector('[id^="host-gps-btn-"]');
+      if (btn) btn.innerText = '⌛ Acquiring GPS...';
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          function(pos) {
+            var lat = parseFloat(pos.coords.latitude.toFixed(5));
+            var lng = parseFloat(pos.coords.longitude.toFixed(5));
+            fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14&accept-language=en', {
+              headers: { 'Accept-Language': 'en' }
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(geo) {
+              var specific = (geo && geo.name && geo.name !== 'Chennai') ? geo.name :
+                (geo && geo.display_name && !geo.display_name.startsWith('Chennai') ? geo.display_name.split(',')[0].trim() : '') ||
+                (geo && geo.address && (geo.address.railway || geo.address.suburb || geo.address.neighbourhood || geo.address.quarter || geo.address.city || geo.address.town)) ||
+                'Current Location';
+              var address = (geo && geo.display_name) ? geo.display_name.split(',').slice(0, 4).join(',').trim() : (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E');
+              var hostData = {
+                lat: lat,
+                lng: lng,
+                city: specific,
+                country: (geo && geo.address && geo.address.country) || 'India',
+                address: address,
+                source: 'Live GPS (' + specific + ')',
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now()
+              };
+              sendHardwareAction('HOST_SYNC', { hostLocation: hostData });
+              updateMobileLocationCards(null, null, hostData);
+              alert('📍 Live GPS Detected: ' + specific + ' (' + hostData.lat + '° N, ' + hostData.lng + '° E)');
+              if (btn) btn.innerText = '🔄 Detect Live GPS';
+            })
+            .catch(function() {
+              var hostData = {
+                lat: lat,
+                lng: lng,
+                city: 'Current Location',
+                country: 'India',
+                address: lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E',
+                source: 'Live GPS',
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now()
+              };
+              sendHardwareAction('HOST_SYNC', { hostLocation: hostData });
+              updateMobileLocationCards(null, null, hostData);
+              alert('📍 Live GPS Detected: ' + hostData.lat + '° N, ' + hostData.lng + '° E');
+              if (btn) btn.innerText = '🔄 Detect Live GPS';
+            });
+          },
+          function(err) {
+            alert('Could not acquire GPS: ' + (err.message || 'Permission denied'));
+            if (btn) btn.innerText = '🔄 Detect Live GPS';
+          },
+          { timeout: 10000, enableHighAccuracy: true }
+        );
+      } else {
+        alert('Geolocation is not supported by your browser.');
+        if (btn) btn.innerText = '🔄 Detect Live GPS';
+      }
+    }
+
+    function setHostLocality(query) {
+      var q = query || 'Chennai, Tamil Nadu';
+      var btn = document.querySelector('[id^="host-refresh-btn-"]');
+      if (btn) btn.innerText = '⌛ Calibrating...';
+      fetch('https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(q) + '&format=json&limit=1&addressdetails=1&accept-language=en', {
+        headers: { 'Accept-Language': 'en' }
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(list) {
+        if (list && list.length > 0) {
+          var item = list[0];
+          var specific = item.name ||
+            (item.address && (item.address.railway || item.address.suburb || item.address.neighbourhood)) ||
+            (item.display_name ? item.display_name.split(',')[0].trim() : '') ||
+            (item.address && item.address.city) ||
+            q.split(',')[0].trim();
+          var hostData = {
+            lat: parseFloat(Number(item.lat).toFixed(4)),
+            lng: parseFloat(Number(item.lon).toFixed(4)),
+            city: specific,
+            country: (item.address && item.address.country) || 'India',
+            address: item.display_name || (item.lat + '°, ' + item.lon + '°'),
+            source: 'Calibrated (' + specific + ')',
+            time: new Date().toLocaleTimeString(),
+            timestamp: Date.now()
+          };
+          sendHardwareAction('HOST_SYNC', { hostLocation: hostData });
+          updateMobileLocationCards(null, null, hostData);
+          alert('📍 Host location calibrated to: ' + specific + ' (' + hostData.lat + '° N, ' + hostData.lng + '° E)');
+        }
+        if (btn) btn.innerText = '🎯 Calibrate Locality';
+      })
+      .catch(function() {
+        if (btn) btn.innerText = '🎯 Calibrate Locality';
+      });
+    }
+
+    function refreshHostLocation(widgetId) {
+      var loc = prompt('Enter locality to calibrate host device (e.g. Guindy, T. Nagar, Anna Salai):', '');
+      if (loc && loc.trim()) {
+        setHostLocality(loc.trim() + ', Chennai');
+      }
+    }
+
+    function recordAndSendMobileLocation(widgetId) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          function(pos) {
+            var lat = parseFloat(pos.coords.latitude.toFixed(5));
+            var lng = parseFloat(pos.coords.longitude.toFixed(5));
+            fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14&accept-language=en', {
+              headers: { 'Accept-Language': 'en' }
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(geo) {
+              var specific = (geo && geo.name && geo.name !== 'Chennai') ? geo.name :
+                (geo && geo.display_name && !geo.display_name.startsWith('Chennai') ? geo.display_name.split(',')[0].trim() : '') ||
+                (geo && geo.address && (geo.address.railway || geo.address.suburb || geo.address.neighbourhood || geo.address.quarter || geo.address.city || geo.address.town)) ||
+                'Current Location';
+              var address = (geo && geo.display_name) ? geo.display_name.split(',').slice(0, 4).join(',').trim() : (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E');
+              var locData = {
+                id: 'loc-' + Date.now(),
+                lat: lat,
+                lng: lng,
+                accuracy: Math.round(pos.coords.accuracy || 10),
+                event: 'SHARE',
+                switchTitle: 'Mobile Location Share',
+                city: specific,
+                address: address,
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now(),
+                source: 'Mobile GPS (' + specific + ')'
+              };
+              sendHardwareAction('LOC_SYNC', { location: locData });
+              updateMobileLocationCards(locData);
+              alert('📍 Location shared with desktop UI: ' + locData.city + ' (' + locData.lat + ', ' + locData.lng + ')');
+            })
+            .catch(function() {
+              var locData = {
+                id: 'loc-' + Date.now(),
+                lat: lat,
+                lng: lng,
+                accuracy: Math.round(pos.coords.accuracy || 10),
+                event: 'SHARE',
+                switchTitle: 'Mobile Location Share',
+                city: 'Current Location',
+                address: lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E',
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now(),
+                source: 'Mobile GPS'
+              };
+              sendHardwareAction('LOC_SYNC', { location: locData });
+              updateMobileLocationCards(locData);
+              alert('📍 Location shared with desktop UI: ' + locData.city + ' (' + locData.lat + ', ' + locData.lng + ')');
+            });
+          },
+          function(err) {
+            alert('Please allow location permissions on your mobile browser to share GPS.');
+          },
+          { timeout: 8000, enableHighAccuracy: true }
+        );
+      } else {
+        alert('Geolocation is not supported by this browser.');
+      }
+    }
+
+    function renderMobileResponseItem(widgetId, resp) {
+      if (!resp || isStaleClientAnswer(resp)) return;
+      var targetId = widgetId;
+      var listEl = document.getElementById('responses-list-' + targetId);
+      if (!listEl) {
+        listEl = document.querySelector('[id^="responses-list-"]');
+        if (listEl) targetId = listEl.id.replace('responses-list-', '');
+      }
+      if (!listEl) return;
+
+      var emptyEl = document.getElementById('resp-empty-' + targetId);
+      if (emptyEl) emptyEl.style.display = 'none';
+
+      // Avoid duplicates
+      var existingId = resp.id || '';
+      if (existingId && listEl.querySelector('[data-id="' + existingId + '"]')) {
+        return;
+      }
+
+      var item = document.createElement('div');
+      item.className = 'resp-item';
+      if (existingId) item.setAttribute('data-id', existingId);
+      item.style.cssText = 'background: #131a38; border-radius: 8px; padding: 8px 10px; border: 1px solid #232d5b; margin-bottom: 6px;';
+      item.innerHTML = '<div style="display: flex; justify-content: space-between; font-size: 10px; color: #818cf8; margin-bottom: 3px;">' +
+        '<span style="font-weight: 700;">' + (resp.questionText || resp.question || 'Answer') + '</span>' +
+        '<span style="color: #64748b;">' + (resp.timestamp || resp.time || '') + '</span>' +
+        '</div>' +
+        '<div style="font-size: 12px; font-weight: 600; color: #4ade80;">💬 ' + resp.answer + '</div>' +
+        '<div style="font-size: 9px; color: #64748b; margin-top: 2px;">Source: ' + (resp.source || 'Mobile UI') + '</div>';
+      
+      listEl.insertBefore(item, listEl.firstChild);
+      
+      var countEl = document.getElementById('resp-count-' + targetId);
+      if (countEl) {
+        var count = listEl.querySelectorAll('.resp-item').length;
+        countEl.innerText = count;
+      }
+    }
+
+    function submitMobileFormAnswer(widgetId, questionId, questionText) {
+      var inputEl = document.getElementById('input-' + widgetId + '-' + questionId);
+      var answerVal = inputEl ? inputEl.value.trim() : '';
+      if (!answerVal) {
+        alert('Please enter an answer before submitting.');
+        return;
+      }
+      var respData = {
+        id: 'resp-' + Date.now(),
+        widgetId: widgetId,
+        questionId: questionId,
+        question: questionText,
+        questionText: questionText,
+        answer: answerVal,
+        source: 'Mobile Companion',
+        time: new Date().toLocaleTimeString(),
+        timestamp: new Date().toLocaleTimeString()
+      };
+      
+      sendHardwareAction('FORM_RESPONSE', { formResponse: respData });
+
+      // Instantly render in Mobile UI so user sees their answer
+      renderMobileResponseItem(widgetId, respData);
+      
+      var statusEl = document.getElementById('status-' + widgetId + '-' + questionId);
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        setTimeout(function() { statusEl.style.display = 'none'; }, 3500);
+      }
+      if (inputEl && inputEl.type === 'text') {
+        inputEl.value = '';
+      }
+      addLog('📝 [FORM] Answer submitted: "' + questionText + '" -> "' + answerVal + '"');
+    }
+
     function handleSwitch(id, checked, title) {
       const card = document.getElementById('card-' + id);
       if (card) {
@@ -2470,7 +4112,63 @@ export default function ESP32Flasher({
         else card.classList.remove('glow-blue');
       }
       addLog('📱 [UI] ' + title + ' -> ' + (checked ? 'ON (Blinking)' : 'OFF (Stopped)'));
-      sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked });
+
+      // Capture device geolocation where switch ON/OFF took place
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          function(pos) {
+            var lat = parseFloat(pos.coords.latitude.toFixed(5));
+            var lng = parseFloat(pos.coords.longitude.toFixed(5));
+            var eventLabel = checked ? 'ON' : 'OFF';
+            // Try reverse geocoding via Nominatim for accurate city name (works in India & worldwide)
+            fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14&accept-language=en', {
+              headers: { 'Accept-Language': 'en' }
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(geo) {
+              var specific = (geo && geo.name && geo.name !== 'Chennai') ? geo.name :
+                (geo && geo.display_name && !geo.display_name.startsWith('Chennai') ? geo.display_name.split(',')[0].trim() : '') ||
+                (geo && geo.address && (geo.address.railway || geo.address.suburb || geo.address.neighbourhood || geo.address.quarter || geo.address.city || geo.address.town)) ||
+                'Switch Geolog';
+              var address = (geo && geo.display_name) ? geo.display_name.split(',').slice(0, 4).join(',').trim() : (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E');
+              var locData = {
+                id: 'loc-' + Date.now(),
+                lat: lat, lng: lng,
+                accuracy: Math.round(pos.coords.accuracy || 10),
+                event: eventLabel, switchTitle: title,
+                city: specific, address: address,
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now(),
+                source: 'Mobile GPS (' + specific + ')'
+              };
+              sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, location: locData });
+              updateMobileLocationCards(locData);
+            })
+            .catch(function() {
+              var locData = {
+                id: 'loc-' + Date.now(),
+                lat: lat, lng: lng,
+                accuracy: Math.round(pos.coords.accuracy || 10),
+                event: eventLabel, switchTitle: title,
+                city: 'Switch Geolog',
+                address: lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E',
+                time: new Date().toLocaleTimeString(),
+                timestamp: Date.now(),
+                source: 'Mobile GPS'
+              };
+              sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, location: locData });
+              updateMobileLocationCards(locData);
+            });
+          },
+          function() {
+            sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, switchTitle: title, autoGeolog: true });
+          },
+          { timeout: 5000, enableHighAccuracy: true }
+        );
+      } else {
+        sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, switchTitle: title, autoGeolog: true });
+      }
+
       evalRules(id, checked, title);
     }
 
@@ -2568,6 +4266,49 @@ export default function ESP32Flasher({
           if (barEl) barEl.style.width = (((val - 0) / 180) * 100) + '%';
         }
       });
+      if (data.hostLocation) {
+        updateMobileLocationCards(null, null, data.hostLocation);
+      }
+      if (data.switchLocations && Array.isArray(data.switchLocations)) {
+        var cleanLocs = data.switchLocations.filter(function(item) { return !isStaleClientGeolog(item); });
+        updateMobileLocationCards(data.lastLocation && !isStaleClientGeolog(data.lastLocation) ? data.lastLocation : null, cleanLocs, data.hostLocation || null);
+      } else if (data.lastLocation && !isStaleClientGeolog(data.lastLocation)) {
+        updateMobileLocationCards(data.lastLocation, null, data.hostLocation || null);
+      }
+      if (data.formResponse && !isStaleClientAnswer(data.formResponse)) {
+        renderMobileResponseItem(data.formResponse.widgetId || '', data.formResponse);
+      }
+      if (Array.isArray(data.formResponses)) {
+        var cleanResponses = data.formResponses.filter(function(r) { return !isStaleClientAnswer(r); });
+        var formCard = document.querySelector('[id^="responses-list-"]');
+        if (formCard) {
+          var wid = formCard.id.replace('responses-list-', '');
+          var countEl = document.getElementById('resp-count-' + wid);
+          if (countEl) countEl.innerText = cleanResponses.length;
+          var emptyEl = document.getElementById('resp-empty-' + wid);
+          if (cleanResponses.length === 0) {
+            if (emptyEl) {
+              emptyEl.style.display = 'block';
+              formCard.innerHTML = '';
+              formCard.appendChild(emptyEl);
+            } else {
+              formCard.innerHTML = '<div id="resp-empty-' + wid + '" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #090d1e; border-radius: 8px;">No answers submitted yet.</div>';
+            }
+          } else {
+            if (emptyEl) emptyEl.style.display = 'none';
+            formCard.innerHTML = cleanResponses.map(function(r) {
+              return '<div class="resp-item" style="background: #131a38; border-radius: 8px; padding: 8px 10px; border: 1px solid #232d5b; margin-bottom: 6px;">' +
+                '<div style="display: flex; justify-content: space-between; font-size: 10px; color: #818cf8; margin-bottom: 3px;">' +
+                '<span style="font-weight: 700;">' + (r.questionText || r.question || 'Answer') + '</span>' +
+                '<span style="color: #64748b;">' + (r.timestamp || r.time || '') + '</span>' +
+                '</div>' +
+                '<div style="font-size: 12px; font-weight: 600; color: #4ade80;">💬 ' + r.answer + '</div>' +
+                '<div style="font-size: 9px; color: #64748b; margin-top: 2px;">Source: ' + (r.source || 'Mobile UI') + '</div>' +
+                '</div>';
+            }).join('');
+          }
+        }
+      }
     }
 
     function initRealtimeStateSync() {
@@ -3773,8 +5514,9 @@ Generated automatically by **InnoIDE App Companion Studio**.
   // Palette Items for Screen 14 (App Builder)
   const uiPaletteItems = [
     { type: "button", title: "Button", desc: "Tap action", icon: <FaCircle size={13} /> },
+    { type: "location", title: "Location Button", desc: "Device switch geolog & QR", icon: <FaMapMarkerAlt size={13} /> },
     { type: "label", title: "Label", desc: "Display text", icon: <FaTag size={13} /> },
-    { type: "textfield", title: "Text Field", desc: "Text input", icon: <FaFont size={13} /> },
+    { type: "textfield", title: "Text Field", desc: "Dynamic Google form", icon: <FaWpforms size={13} /> },
     { type: "switch", title: "Switch", desc: "Toggle on/off", icon: <FaSync size={13} /> },
     { type: "slider", title: "Slider", desc: "Range input", icon: <FaSlidersH size={13} /> },
     { type: "gauge", title: "Gauge", desc: "Telemetry meter", icon: <FaTemperatureHigh size={13} /> },
@@ -5228,11 +6970,465 @@ Generated automatically by **InnoIDE App Companion Studio**.
                               </VStack>
                             )}
 
-                            {/* 8. Text Field / Input Widget */}
+                            {/* Location Button / Device Location Widget */}
+                            {w.type === "location" && (() => {
+                              const hist = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(h => !isStaleTestGeolog(h));
+                              const lastOnLoc = (w.lastLocation && w.lastLocation.event === "ON" && !isStaleTestGeolog(w.lastLocation))
+                                ? w.lastLocation
+                                : (hist.find(h => h.event === "ON") || null);
+                              const lastOffLoc = (w.lastLocation && w.lastLocation.event === "OFF" && !isStaleTestGeolog(w.lastLocation))
+                                ? w.lastLocation
+                                : (hist.find(h => h.event === "OFF") || null);
+                              const esp32Loc = (deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation)) ? deviceDetectedLocation : null;
+                              return (
+                                <VStack align="stretch" spacing={2.5}>
+                                  {/* Header */}
+                                  <HStack justify="space-between" align="center">
+                                    <HStack spacing={2}>
+                                      <Box p={1.5} bg="cyan.50" color="cyan.600" borderRadius="lg">
+                                        <FaMapMarkerAlt size={14} />
+                                      </Box>
+                                      <VStack align="start" spacing={0}>
+                                        <Text fontWeight="bold" fontSize="xs" color="gray.900">
+                                          {w.title || "Device Location"}
+                                        </Text>
+                                        <Text fontSize="10px" color="gray.400">GPS Switch Geologger</Text>
+                                      </VStack>
+                                    </HStack>
+                                    <HStack spacing={1}>
+                                      {lastOnLoc && <Badge colorScheme="green" fontSize="8px" px={1.5} borderRadius="full">ON ✓</Badge>}
+                                      {lastOffLoc && <Badge colorScheme="red" fontSize="8px" px={1.5} borderRadius="full">OFF ✓</Badge>}
+                                    </HStack>
+                                  </HStack>
+
+                                  {/* Section 1: ESP32-S3 Device Location (Host Machine) */}
+                                  <Box
+                                    p={2.5}
+                                    bg="blue.50"
+                                    borderRadius="xl"
+                                    border="1.5px solid"
+                                    borderColor="blue.200"
+                                  >
+                                    <HStack spacing={1.5} mb={1.5}>
+                                      <Box w="8px" h="8px" borderRadius="full" bg="blue.500" />
+                                      <Text fontSize="10px" fontWeight="extrabold" color="blue.700" textTransform="uppercase" letterSpacing="wider">
+                                        ESP32-S3 Device (Host)
+                                      </Text>
+                                      <Badge colorScheme="blue" fontSize="7px" px={1.5}>{esp32Loc?.source?.includes("Calibrated") ? "Calibrated" : "IP Geo"}</Badge>
+                                    </HStack>
+                                    {esp32Loc && esp32Loc.lat ? (
+                                      <VStack align="stretch" spacing={0.5}>
+                                        <Text fontSize="11px" fontWeight="bold" color="blue.800">
+                                          📍 {esp32Loc.city}{esp32Loc.country ? `, ${esp32Loc.country}` : ""}
+                                        </Text>
+                                        <Text fontSize="9px" color="blue.600" noOfLines={1}>{esp32Loc.address}</Text>
+                                        <HStack justify="space-between">
+                                          <Text fontSize="9px" color="blue.500" fontFamily="monospace" fontWeight="semibold">
+                                            {esp32Loc.lat}° N, {esp32Loc.lng}° E
+                                          </Text>
+                                          <Text fontSize="8px" color="blue.400">{esp32Loc.source?.replace("IP Geolocation ", "") || "Network"}</Text>
+                                        </HStack>
+                                      </VStack>
+                                    ) : (
+                                      <HStack spacing={1.5}>
+                                        <Spinner size="xs" color="blue.400" />
+                                        <Text fontSize="10px" color="blue.500" fontStyle="italic">Detecting host location...</Text>
+                                      </HStack>
+                                    )}
+                                    <HStack spacing={1.5} mt={2}>
+                                      <Button
+                                        size="xs"
+                                        colorScheme="teal"
+                                        variant="solid"
+                                        leftIcon={<FaCrosshairs size={9} />}
+                                        fontSize="9px"
+                                        isLoading={isDetectingLocation}
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          toast({ title: "Detecting device location...", status: "info", duration: 1500 });
+                                          await fetchCurrentDeviceLocation();
+                                        }}
+                                      >
+                                        Detect GPS
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        colorScheme="blue"
+                                        variant="ghost"
+                                        leftIcon={<FaMapMarkerAlt size={9} />}
+                                        fontSize="9px"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          const query = prompt("Enter locality to calibrate host device (e.g. Guindy, T. Nagar):", "");
+                                          if (query && query.trim()) {
+                                            toast({ title: `Calibrating to ${query.trim()}...`, status: "info", duration: 1500 });
+                                            await handleCalibrateLocation(query.trim() + ", Chennai");
+                                          }
+                                        }}
+                                      >
+                                        Calibrate
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        colorScheme="gray"
+                                        variant="ghost"
+                                        leftIcon={<FaCrosshairs size={9} />}
+                                        fontSize="9px"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          toast({ title: "Fetching location...", status: "info", duration: 1500 });
+                                          await fetchCurrentDeviceLocation();
+                                          toast({ title: "📍 Host location refreshed", status: "success", duration: 2000 });
+                                        }}
+                                      >
+                                        Refresh
+                                      </Button>
+                                    </HStack>
+                                  </Box>
+
+                                  {/* Section 2: Switch ON Location */}
+                                  <Box
+                                    p={2.5}
+                                    bg="green.50"
+                                    borderRadius="xl"
+                                    border="1.5px solid"
+                                    borderColor={lastOnLoc ? "green.300" : "green.100"}
+                                  >
+                                    <HStack spacing={1.5} mb={1.5}>
+                                      <Box w="8px" h="8px" borderRadius="full" bg={lastOnLoc ? "green.500" : "gray.300"} />
+                                      <Text fontSize="10px" fontWeight="extrabold" color={lastOnLoc ? "green.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
+                                        Switch ON Location
+                                      </Text>
+                                      {lastOnLoc && <Badge colorScheme="green" fontSize="7px" px={1.5}>Latest</Badge>}
+                                    </HStack>
+                                    {lastOnLoc ? (
+                                      <VStack align="stretch" spacing={0.5}>
+                                        <Text fontSize="11px" fontWeight="bold" color="green.800">
+                                          🟢 {lastOnLoc.city}
+                                        </Text>
+                                        <Text fontSize="9px" color="green.600" noOfLines={1}>{lastOnLoc.address}</Text>
+                                        <HStack justify="space-between">
+                                          <Text fontSize="9px" color="green.500" fontFamily="monospace" fontWeight="semibold">
+                                            {lastOnLoc.lat ? `${lastOnLoc.lat}° N, ${lastOnLoc.lng}° E` : "Coordinates pending"}
+                                          </Text>
+                                          <Text fontSize="8px" color="green.400">{formatGeologTime(lastOnLoc)}</Text>
+                                        </HStack>
+                                        <Button
+                                          size="xs"
+                                          colorScheme="green"
+                                          variant="ghost"
+                                          leftIcon={<FaExternalLinkAlt size={8} />}
+                                          fontSize="9px"
+                                          as="a"
+                                          href={`https://www.google.com/maps?q=${lastOnLoc.lat},${lastOnLoc.lng}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          isDisabled={!lastOnLoc.lat}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          View ON Location on Maps
+                                        </Button>
+                                      </VStack>
+                                    ) : (
+                                      <Text fontSize="10px" color="gray.400" fontStyle="italic">
+                                        No switch ON event recorded yet. Toggle the switch to capture location.
+                                      </Text>
+                                    )}
+                                  </Box>
+
+                                  {/* Section 3: Switch OFF Location */}
+                                  <Box
+                                    p={2.5}
+                                    bg="red.50"
+                                    borderRadius="xl"
+                                    border="1.5px solid"
+                                    borderColor={lastOffLoc ? "red.300" : "red.100"}
+                                  >
+                                    <HStack spacing={1.5} mb={1.5}>
+                                      <Box w="8px" h="8px" borderRadius="full" bg={lastOffLoc ? "red.500" : "gray.300"} />
+                                      <Text fontSize="10px" fontWeight="extrabold" color={lastOffLoc ? "red.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
+                                        Switch OFF Location
+                                      </Text>
+                                      {lastOffLoc && <Badge colorScheme="red" fontSize="7px" px={1.5}>Latest</Badge>}
+                                    </HStack>
+                                    {lastOffLoc ? (
+                                      <VStack align="stretch" spacing={0.5}>
+                                        <Text fontSize="11px" fontWeight="bold" color="red.800">
+                                          🔴 {lastOffLoc.city}
+                                        </Text>
+                                        <Text fontSize="9px" color="red.600" noOfLines={1}>{lastOffLoc.address}</Text>
+                                        <HStack justify="space-between">
+                                          <Text fontSize="9px" color="red.500" fontFamily="monospace" fontWeight="semibold">
+                                            {lastOffLoc.lat ? `${lastOffLoc.lat}° N, ${lastOffLoc.lng}° E` : "Coordinates pending"}
+                                          </Text>
+                                          <Text fontSize="8px" color="red.400">{formatGeologTime(lastOffLoc)}</Text>
+                                        </HStack>
+                                        <Button
+                                          size="xs"
+                                          colorScheme="red"
+                                          variant="ghost"
+                                          leftIcon={<FaExternalLinkAlt size={8} />}
+                                          fontSize="9px"
+                                          as="a"
+                                          href={`https://www.google.com/maps?q=${lastOffLoc.lat},${lastOffLoc.lng}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          isDisabled={!lastOffLoc.lat}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          View OFF Location on Maps
+                                        </Button>
+                                      </VStack>
+                                    ) : (
+                                      <Text fontSize="10px" color="gray.400" fontStyle="italic">
+                                        No switch OFF event recorded yet. Toggle the switch to capture location.
+                                      </Text>
+                                    )}
+                                  </Box>
+
+                                  {/* Full History Log */}
+                                  {hist.length > 0 && (
+                                    <Box pt={0.5}>
+                                      <HStack justify="space-between" align="center" mb={1.5}>
+                                        <Text fontSize="9px" fontWeight="bold" color="gray.400" textTransform="uppercase" letterSpacing="wider">
+                                          Switch Geolog History ({hist.length})
+                                        </Text>
+                                        <Button
+                                          size="xs"
+                                          colorScheme="red"
+                                          variant="ghost"
+                                          fontSize="8px"
+                                          h="18px"
+                                          px={1.5}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleClearGeologs(w.id);
+                                          }}
+                                        >
+                                          Clear
+                                        </Button>
+                                      </HStack>
+                                      <VStack align="stretch" spacing={1} maxH="120px" overflowY="auto">
+                                        {hist.slice(0, 10).map((item, idx) => {
+                                          const isON = item.event === "ON";
+                                          const isOFF = item.event === "OFF";
+                                          const badgeBg = isON ? "green.50" : (isOFF ? "red.50" : "blue.50");
+                                          const badgeBorder = isON ? "green.100" : (isOFF ? "red.100" : "blue.100");
+                                          const badgeColor = isON ? "green" : (isOFF ? "red" : "blue");
+                                          return (
+                                            <HStack
+                                              key={item.id || idx}
+                                              justify="space-between"
+                                              p={1.5}
+                                              bg={useColorModeValue(badgeBg, "gray.800")}
+                                              borderRadius="md"
+                                              fontSize="9px"
+                                              border="1px solid"
+                                              borderColor={badgeBorder}
+                                            >
+                                              <HStack spacing={1.5}>
+                                                <Badge colorScheme={badgeColor} fontSize="7px" px={1}>{item.event || "LOG"}</Badge>
+                                                <Text fontWeight="semibold" color={useColorModeValue("gray.700", "gray.300")} noOfLines={1} maxW="90px">
+                                                  {item.city || "Location"}
+                                                </Text>
+                                                {item.lat && (
+                                                  <Text color="gray.400" fontFamily="monospace" fontSize="8px">
+                                                    {Number(item.lat).toFixed(3)}°N{item.lng ? `, ${Number(item.lng).toFixed(3)}°E` : ""}
+                                                  </Text>
+                                                )}
+                                              </HStack>
+                                              <Text color="gray.400" fontFamily="monospace">{formatGeologTime(item)}</Text>
+                                            </HStack>
+                                          );
+                                        })}
+                                      </VStack>
+                                    </Box>
+                                  )}
+                                </VStack>
+                              );
+                            })()}
+
+
+                            {/* 8. Text Field / Dynamic Google Form Widget */}
                             {w.type === "textfield" && (
-                              <VStack align="stretch" spacing={1.5}>
-                                <Text fontWeight="bold" fontSize="xs">{w.title}</Text>
-                                <Input size="xs" placeholder="Enter command or message..." borderRadius="lg" bg="gray.50" />
+                              <VStack align="stretch" spacing={2.5}>
+                                {/* Header */}
+                                <HStack justify="space-between" align="center">
+                                  <HStack spacing={2}>
+                                    <Box p={1.5} bg="purple.50" color="purple.600" borderRadius="lg">
+                                      <FaWpforms size={14} />
+                                    </Box>
+                                    <VStack align="start" spacing={0}>
+                                      <Text fontWeight="bold" fontSize="xs" color="gray.900">
+                                        {w.title || "Google Form / Field"}
+                                      </Text>
+                                      <Text fontSize="10px" color="gray.400">
+                                        Dynamic Question & Response
+                                      </Text>
+                                    </VStack>
+                                  </HStack>
+                                  {(() => {
+                                    const safeResponses = (w.responses || []).filter((r) => !isHardcodedTextFieldResponse(r));
+                                    return (
+                                      <Badge colorScheme="purple" fontSize="9px" px={2} py={0.5} borderRadius="full">
+                                        {safeResponses.length} Responses
+                                      </Badge>
+                                    );
+                                  })()}
+                                </HStack>
+
+                                {/* Enter Question Input Row */}
+                                <Box p={2} bg={useColorModeValue("purple.50", "gray.900")} borderRadius="xl" border="1px solid" borderColor="purple.100">
+                                  <Text fontSize="10px" fontWeight="bold" color="purple.700" mb={1}>
+                                    Enter Question (Renders on Mobile):
+                                  </Text>
+                                  <HStack spacing={1.5}>
+                                    <Input
+                                      size="xs"
+                                      placeholder="Enter a question for mobile users..."
+                                      borderRadius="lg"
+                                      bg="white"
+                                      value={newQuestionInputs[w.id] || ""}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setNewQuestionInputs((prev) => ({ ...prev, [w.id]: val }));
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          handleAddQuestionToForm(w.id, newQuestionInputs[w.id]);
+                                        }
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <Button
+                                      size="xs"
+                                      colorScheme="purple"
+                                      borderRadius="lg"
+                                      px={3}
+                                      leftIcon={<FaPaperPlane size={9} />}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleAddQuestionToForm(w.id, newQuestionInputs[w.id]);
+                                      }}
+                                    >
+                                      Submit
+                                    </Button>
+                                  </HStack>
+                                </Box>
+
+                                {/* Render Active Questions */}
+                                {(() => {
+                                  const safeQuestions = (w.questions || []).filter((q) => !isHardcodedTextFieldQuestion(q));
+                                  return (
+                                    <VStack align="stretch" spacing={1.5}>
+                                      <Text fontSize="10px" fontWeight="bold" color="gray.500">
+                                        Active Questions ({safeQuestions.length}):
+                                      </Text>
+                                      {safeQuestions.length > 0 ? (
+                                        safeQuestions.map((q, qIdx) => (
+                                          <HStack
+                                            key={q.id || qIdx}
+                                            p={1.5}
+                                            bg={useColorModeValue("white", "gray.800")}
+                                            borderRadius="md"
+                                            border="1px solid"
+                                            borderColor="gray.200"
+                                            justify="space-between"
+                                          >
+                                            <HStack spacing={1.5} flex="1" minW="0">
+                                              <Badge colorScheme="purple" fontSize="8px">Q{qIdx + 1}</Badge>
+                                              <Text fontSize="10px" fontWeight="semibold" color="gray.800" noOfLines={1}>
+                                                {q.text}
+                                              </Text>
+                                            </HStack>
+                                            <IconButton
+                                              icon={<FaTrashAlt size={8} />}
+                                              size="xs"
+                                              h="18px"
+                                              w="18px"
+                                              minW="18px"
+                                              variant="ghost"
+                                              colorScheme="red"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteQuestionFromForm(w.id, q.id);
+                                              }}
+                                              title="Remove question"
+                                            />
+                                          </HStack>
+                                        ))
+                                      ) : (
+                                        <Box p={2} bg={useColorModeValue("white", "gray.800")} borderRadius="md" border="1px dashed" borderColor="gray.200" textAlign="center">
+                                          <Text fontSize="9px" color="gray.400" fontStyle="italic">
+                                            No questions added yet. Type a question above and click Submit.
+                                          </Text>
+                                        </Box>
+                                      )}
+                                    </VStack>
+                                  );
+                                })()}
+
+                                {/* User Responses Received */}
+                                {(() => {
+                                  const safeResponses = (w.responses || []).filter((r) => !isHardcodedTextFieldResponse(r));
+                                  return (
+                                    <Box
+                                      p={2}
+                                      bg={useColorModeValue("gray.50", "gray.900")}
+                                      borderRadius="xl"
+                                      border="1px solid"
+                                      borderColor={useColorModeValue("gray.200", "gray.700")}
+                                    >
+                                      <HStack justify="space-between" mb={1}>
+                                        <HStack spacing={1.5}>
+                                          <FaClipboardList size={10} color="#8b5cf6" />
+                                          <Text fontSize="10px" fontWeight="bold" color="gray.700">
+                                            Received Answers ({safeResponses.length})
+                                          </Text>
+                                        </HStack>
+                                        {safeResponses.length > 0 && (
+                                          <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            color="red.500"
+                                            fontSize="9px"
+                                            h="18px"
+                                            px={1.5}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleClearFormResponses(w.id);
+                                            }}
+                                          >
+                                            Clear
+                                          </Button>
+                                        )}
+                                      </HStack>
+                                      {safeResponses.length > 0 ? (
+                                        <VStack align="stretch" spacing={1} maxH="95px" overflowY="auto">
+                                          {safeResponses.map((resp, rIdx) => (
+                                            <Box key={resp.id || rIdx} p={1.5} bg="white" borderRadius="md" border="1px solid" borderColor="gray.150">
+                                              <HStack justify="space-between" mb={0.5}>
+                                                <Text fontSize="9px" fontWeight="bold" color="purple.700" noOfLines={1}>
+                                                  {resp.questionText}
+                                                </Text>
+                                                <Text fontSize="8px" color="gray.400">{resp.timestamp}</Text>
+                                              </HStack>
+                                              <Text fontSize="10px" color="gray.800" fontWeight="medium">
+                                                💬 {resp.answer}
+                                              </Text>
+                                            </Box>
+                                          ))}
+                                        </VStack>
+                                      ) : (
+                                        <Text fontSize="9px" color="gray.400" fontStyle="italic">
+                                          No answers yet. Responses submitted from mobile will appear here.
+                                        </Text>
+                                      )}
+                                    </Box>
+                                  );
+                                })()}
                               </VStack>
                             )}
 
@@ -5446,7 +7642,7 @@ Generated automatically by **InnoIDE App Companion Studio**.
                             )}
 
                             {/* Other components fallback */}
-                            {!["switch", "slider", "gauge", "chart", "button", "colorpicker", "joystick", "textfield", "label", "device_card", "progress", "crud_table", "image", "card", "fab", "divider", "top_button", "bottom_button", "left_button", "right_button", "dpad"].includes(w.type) && (
+                            {!["location", "switch", "slider", "gauge", "chart", "button", "colorpicker", "joystick", "textfield", "label", "device_card", "progress", "crud_table", "image", "card", "fab", "divider", "top_button", "bottom_button", "left_button", "right_button", "dpad"].includes(w.type) && (
                               <HStack justify="space-between">
                                 <Text fontWeight="bold" fontSize="xs">
                                   {w.title}
@@ -6256,38 +8452,223 @@ Generated automatically by **InnoIDE App Companion Studio**.
                             </HStack>
                           )}
 
-                          {/* Text Field Widget in Preview Mode */}
-                          {w.type === "textfield" && (
-                            <VStack align="stretch" spacing={2}>
-                              <HStack justify="space-between">
-                                <Text fontWeight="bold" fontSize="xs" color="gray.800">{w.title}</Text>
-                                <Badge fontSize="8px" colorScheme="blue">Input</Badge>
-                              </HStack>
-                              <HStack spacing={2}>
-                                <Input
-                                  size="sm"
-                                  placeholder="Enter message or command..."
-                                  borderRadius="lg"
-                                  bg="gray.50"
-                                  id={`preview-input-${w.id}`}
-                                />
-                                <Button
-                                  size="sm"
-                                  colorScheme="blue"
-                                  borderRadius="lg"
-                                  onClick={() => {
-                                    const inputEl = document.getElementById(`preview-input-${w.id}`);
-                                    if (inputEl && inputEl.value) {
-                                      handleUpdateWidget("value", inputEl.value, w.id);
-                                      inputEl.value = "";
-                                    }
-                                  }}
-                                >
-                                  Send
-                                </Button>
-                              </HStack>
-                            </VStack>
-                          )}
+                          {/* Location Widget in Preview Mode */}
+                          {w.type === "location" && (() => {
+                            const hist = Array.isArray(w.locationHistory) ? w.locationHistory : [];
+                            const lastOnLoc = hist.find(h => h.event === "ON") || null;
+                            const lastOffLoc = hist.find(h => h.event === "OFF") || null;
+                            const esp32Loc = deviceDetectedLocation;
+                            return (
+                              <VStack align="stretch" spacing={2}>
+                                {/* Header */}
+                                <HStack justify="space-between">
+                                  <HStack spacing={2}>
+                                    <Box p={1.5} bg="cyan.50" color="cyan.600" borderRadius="lg">
+                                      <FaMapMarkerAlt size={13} />
+                                    </Box>
+                                    <VStack align="start" spacing={0}>
+                                      <Text fontWeight="bold" fontSize="xs" color="gray.800">{w.title || "Device Location"}</Text>
+                                      <Text fontSize="9px" color="gray.400">GPS & Switch Geologger</Text>
+                                    </VStack>
+                                  </HStack>
+                                  <HStack spacing={1}>
+                                    {lastOnLoc && <Badge colorScheme="green" fontSize="7px" px={1}>ON</Badge>}
+                                    {lastOffLoc && <Badge colorScheme="red" fontSize="7px" px={1}>OFF</Badge>}
+                                  </HStack>
+                                </HStack>
+
+                                {/* ESP32-S3 Device Location */}
+                                <Box p={2} bg="blue.50" borderRadius="lg" border="1px solid" borderColor="blue.200">
+                                  <HStack spacing={1} mb={1}>
+                                    <Box w="6px" h="6px" borderRadius="full" bg="blue.500" />
+                                    <Text fontSize="9px" fontWeight="extrabold" color="blue.600" textTransform="uppercase">ESP32-S3 Device</Text>
+                                    <Badge colorScheme="blue" fontSize="6px">{esp32Loc?.source?.includes("Calibrated") ? "Calibrated" : "IP Geo"}</Badge>
+                                  </HStack>
+                                  {esp32Loc && esp32Loc.lat ? (
+                                    <>
+                                      <Text fontSize="11px" fontWeight="bold" color="blue.800">📍 {esp32Loc.city}{esp32Loc.country ? `, ${esp32Loc.country}` : ""}</Text>
+                                      <Text fontSize="9px" color="blue.500" fontFamily="monospace">{esp32Loc.lat}° N, {esp32Loc.lng}° E</Text>
+                                    </>
+                                  ) : (
+                                    <Text fontSize="10px" color="blue.400" fontStyle="italic">Detecting location...</Text>
+                                  )}
+                                </Box>
+
+                                {/* Switch ON Location */}
+                                <Box p={2} bg="green.50" borderRadius="lg" border="1px solid" borderColor={lastOnLoc ? "green.300" : "green.100"}>
+                                  <HStack spacing={1} mb={1}>
+                                    <Box w="6px" h="6px" borderRadius="full" bg={lastOnLoc ? "green.500" : "gray.300"} />
+                                    <Text fontSize="9px" fontWeight="extrabold" color={lastOnLoc ? "green.600" : "gray.400"} textTransform="uppercase">Switch ON Location</Text>
+                                  </HStack>
+                                  {lastOnLoc ? (
+                                    <>
+                                      <Text fontSize="11px" fontWeight="bold" color="green.800">🟢 {lastOnLoc.city}</Text>
+                                      <HStack justify="space-between">
+                                        <Text fontSize="9px" color="green.500" fontFamily="monospace">{lastOnLoc.lat ? `${lastOnLoc.lat}° N, ${lastOnLoc.lng}° E` : "Pending"}</Text>
+                                        <Text fontSize="8px" color="green.400">{formatGeologTime(lastOnLoc)}</Text>
+                                      </HStack>
+                                      {lastOnLoc.lat && (
+                                        <Button size="xs" colorScheme="green" variant="ghost" leftIcon={<FaExternalLinkAlt size={8} />} fontSize="9px"
+                                          as="a" href={`https://www.google.com/maps?q=${lastOnLoc.lat},${lastOnLoc.lng}`} target="_blank" rel="noreferrer">
+                                          Maps
+                                        </Button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <Text fontSize="9px" color="gray.400" fontStyle="italic">Toggle switch ON to capture location</Text>
+                                  )}
+                                </Box>
+
+                                {/* Switch OFF Location */}
+                                <Box p={2} bg="red.50" borderRadius="lg" border="1px solid" borderColor={lastOffLoc ? "red.300" : "red.100"}>
+                                  <HStack spacing={1} mb={1}>
+                                    <Box w="6px" h="6px" borderRadius="full" bg={lastOffLoc ? "red.500" : "gray.300"} />
+                                    <Text fontSize="9px" fontWeight="extrabold" color={lastOffLoc ? "red.600" : "gray.400"} textTransform="uppercase">Switch OFF Location</Text>
+                                  </HStack>
+                                  {lastOffLoc ? (
+                                    <>
+                                      <Text fontSize="11px" fontWeight="bold" color="red.800">🔴 {lastOffLoc.city}</Text>
+                                      <HStack justify="space-between">
+                                        <Text fontSize="9px" color="red.500" fontFamily="monospace">{lastOffLoc.lat ? `${lastOffLoc.lat}° N, ${lastOffLoc.lng}° E` : "Pending"}</Text>
+                                        <Text fontSize="8px" color="red.400">{formatGeologTime(lastOffLoc)}</Text>
+                                      </HStack>
+                                      {lastOffLoc.lat && (
+                                        <Button size="xs" colorScheme="red" variant="ghost" leftIcon={<FaExternalLinkAlt size={8} />} fontSize="9px"
+                                          as="a" href={`https://www.google.com/maps?q=${lastOffLoc.lat},${lastOffLoc.lng}`} target="_blank" rel="noreferrer">
+                                          Maps
+                                        </Button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <Text fontSize="9px" color="gray.400" fontStyle="italic">Toggle switch OFF to capture location</Text>
+                                  )}
+                                </Box>
+
+                                {/* Full History Log in Preview */}
+                                {hist.length > 0 && (
+                                  <Box pt={0.5}>
+                                    <Text fontSize="9px" fontWeight="bold" color="gray.400" mb={1} textTransform="uppercase" letterSpacing="wider">
+                                      Switch Geolog History ({hist.length})
+                                    </Text>
+                                    <VStack align="stretch" spacing={1} maxH="110px" overflowY="auto">
+                                      {hist.slice(0, 10).map((item, idx) => {
+                                        const isON = item.event === "ON";
+                                        const isOFF = item.event === "OFF";
+                                        const badgeColor = isON ? "green" : (isOFF ? "red" : "blue");
+                                        return (
+                                          <HStack key={item.id || idx} justify="space-between" p={1} bg={isON ? "green.50" : (isOFF ? "red.50" : "blue.50")} borderRadius="md" fontSize="8px">
+                                            <HStack spacing={1}>
+                                              <Badge colorScheme={badgeColor} fontSize="6px" px={1}>{item.event || "LOG"}</Badge>
+                                              <Text fontWeight="semibold" color="gray.700" noOfLines={1} maxW="75px">{item.city || "Location"}</Text>
+                                              {item.lat && <Text color="gray.400" fontFamily="monospace" fontSize="7px">{Number(item.lat).toFixed(3)}°</Text>}
+                                            </HStack>
+                                            <Text color="gray.400" fontFamily="monospace">{formatGeologTime(item)}</Text>
+                                          </HStack>
+                                        );
+                                      })}
+                                    </VStack>
+                                  </Box>
+                                )}
+                              </VStack>
+                            );
+                          })()}
+
+
+                          {/* Google Form Widget in Preview Mode */}
+                          {w.type === "textfield" && (() => {
+                            const safeQuestions = (w.questions || []).filter((q) => !isHardcodedTextFieldQuestion(q));
+                            const safeResponses = (w.responses || []).filter((r) => !isHardcodedTextFieldResponse(r));
+                            return (
+                              <VStack align="stretch" spacing={2.5}>
+                                <HStack justify="space-between" align="center">
+                                  <HStack spacing={1.5}>
+                                    <FaWpforms color="#8b5cf6" size={13} />
+                                    <Text fontWeight="bold" fontSize="xs" color="gray.800">{w.title || "Feedback Form"}</Text>
+                                  </HStack>
+                                  <Badge fontSize="8px" colorScheme="purple">Form</Badge>
+                                </HStack>
+
+                                {safeQuestions.length > 0 ? (
+                                  <VStack align="stretch" spacing={2}>
+                                    {safeQuestions.map((q, idx) => {
+                                      const inputKey = `${w.id}_${q.id}`;
+                                      const currentAns = newAnswerInputs[inputKey] || "";
+                                      return (
+                                        <Box key={q.id || idx} p={2} bg="gray.50" borderRadius="lg" border="1px solid" borderColor="purple.100">
+                                          <Text fontSize="11px" fontWeight="bold" color="purple.900" mb={1.5}>
+                                            {idx + 1}. {q.text} {q.required !== false && <Text as="span" color="red.500">*</Text>}
+                                          </Text>
+                                          <HStack spacing={1.5}>
+                                            <Input
+                                              size="xs"
+                                              placeholder="Type your answer..."
+                                              bg="white"
+                                              borderRadius="md"
+                                              value={currentAns}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setNewAnswerInputs((prev) => ({ ...prev, [inputKey]: val }));
+                                              }}
+                                              onKeyDown={(e) => {
+                                                if (e.key === "Enter") {
+                                                  e.preventDefault();
+                                                  handleSubmitFormAnswer(w.id, q.id, q.text, currentAns, "Mobile Preview");
+                                                }
+                                              }}
+                                            />
+                                            <Button
+                                              size="xs"
+                                              colorScheme="purple"
+                                              borderRadius="md"
+                                              px={2.5}
+                                              onClick={() => handleSubmitFormAnswer(w.id, q.id, q.text, currentAns, "Mobile Preview")}
+                                            >
+                                              Submit
+                                            </Button>
+                                          </HStack>
+                                        </Box>
+                                      );
+                                    })}
+                                  </VStack>
+                                ) : (
+                                  <Box p={2.5} bg="gray.50" borderRadius="lg" textAlign="center">
+                                    <Text fontSize="10px" color="gray.500">
+                                      No questions created yet. Add questions on the designer canvas to render here.
+                                    </Text>
+                                  </Box>
+                                )}
+
+                                {/* Submitted Answers / Responses in Mobile Preview */}
+                                {safeResponses.length > 0 && (
+                                  <Box p={2.5} bg="purple.50" borderRadius="lg" border="1px solid" borderColor="purple.200" mt={1}>
+                                    <HStack justify="space-between" mb={1.5}>
+                                      <HStack spacing={1.5}>
+                                        <FaClipboardList size={11} color="#8b5cf6" />
+                                        <Text fontSize="10px" fontWeight="bold" color="purple.900">
+                                          Submitted Answers ({safeResponses.length})
+                                        </Text>
+                                      </HStack>
+                                      <Badge fontSize="8px" colorScheme="purple">Live Feed</Badge>
+                                    </HStack>
+                                    <VStack align="stretch" spacing={1.5} maxH="160px" overflowY="auto">
+                                      {safeResponses.map((resp, rIdx) => (
+                                        <Box key={resp.id || rIdx} p={2} bg="white" borderRadius="md" border="1px solid" borderColor="purple.100" fontSize="10px">
+                                          <HStack justify="space-between" mb={0.5}>
+                                            <Text fontWeight="bold" color="purple.800" noOfLines={1} fontSize="9px">
+                                              {resp.questionText || resp.question || "Answer"}
+                                            </Text>
+                                            <Text color="gray.400" fontSize="8px">{resp.timestamp || resp.time || "Just now"}</Text>
+                                          </HStack>
+                                          <Text color="gray.800" fontWeight="semibold" fontSize="11px">💬 {resp.answer}</Text>
+                                          <Text color="gray.400" fontSize="8px" mt={0.5}>Source: {resp.source || "Mobile UI"}</Text>
+                                        </Box>
+                                      ))}
+                                    </VStack>
+                                  </Box>
+                                )}
+                              </VStack>
+                            );
+                          })()}
 
                           {/* Chart / Graph Widget in Preview Mode */}
                           {w.type === "chart" && (
@@ -6421,7 +8802,7 @@ Generated automatically by **InnoIDE App Companion Studio**.
                           )}
 
                           {/* Fallback for other components in Preview Mode */}
-                          {!["switch", "slider", "gauge", "button", "top_button", "bottom_button", "left_button", "right_button", "dpad", "crud_table", "label", "textfield", "chart", "colorpicker", "joystick", "image", "card", "progress", "fab", "divider"].includes(w.type) && (
+                          {!["location", "switch", "slider", "gauge", "button", "top_button", "bottom_button", "left_button", "right_button", "dpad", "crud_table", "label", "textfield", "chart", "colorpicker", "joystick", "image", "card", "progress", "fab", "divider"].includes(w.type) && (
                             <HStack justify="space-between">
                               <Text fontWeight="bold" fontSize="sm">{w.title}</Text>
                               <Badge fontSize="9px">{w.type}</Badge>
@@ -6938,6 +9319,387 @@ Generated automatically by **InnoIDE App Companion Studio**.
                     </VStack>
                   )}
 
+                  {/* DEVICE LOCATION & SWITCH GEOLOG SECTION in Inspector */}
+                  {activeWidget.type === "location" && (() => {
+                    const hist = (Array.isArray(activeWidget.locationHistory) ? activeWidget.locationHistory : []).filter(h => !isStaleTestGeolog(h));
+                    const lastOnLoc = (activeWidget.lastLocation && activeWidget.lastLocation.event === "ON" && !isStaleTestGeolog(activeWidget.lastLocation))
+                      ? activeWidget.lastLocation
+                      : (hist.find(h => h.event === "ON") || null);
+                    const lastOffLoc = (activeWidget.lastLocation && activeWidget.lastLocation.event === "OFF" && !isStaleTestGeolog(activeWidget.lastLocation))
+                      ? activeWidget.lastLocation
+                      : (hist.find(h => h.event === "OFF") || null);
+                    const esp32Loc = (deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation)) ? deviceDetectedLocation : null;
+                    return (
+                      <VStack align="stretch" spacing={2.5} p={3} bg={useColorModeValue("gray.50", "gray.800")} borderRadius="xl" border="1px solid" borderColor="gray.200">
+                        {/* Header */}
+                        <HStack justify="space-between">
+                          <HStack spacing={1.5}>
+                            <FaMapMarkerAlt color="#0284c7" size={12} />
+                            <Text fontSize="xs" fontWeight="extrabold" color="cyan.800" letterSpacing="wider">
+                              LOCATION & SWITCH GEOLOG
+                            </Text>
+                          </HStack>
+                          <HStack spacing={1}>
+                            {lastOnLoc && <Badge colorScheme="green" fontSize="7px" px={1.5}>ON ✓</Badge>}
+                            {lastOffLoc && <Badge colorScheme="red" fontSize="7px" px={1.5}>OFF ✓</Badge>}
+                          </HStack>
+                        </HStack>
+
+                        {/* Section 1: ESP32-S3 Device (Host) Location */}
+                        <Box p={2.5} bg="blue.50" borderRadius="lg" border="1.5px solid" borderColor="blue.200">
+                          <HStack spacing={1.5} mb={1}>
+                            <Box w="7px" h="7px" borderRadius="full" bg="blue.500" />
+                            <Text fontSize="10px" fontWeight="extrabold" color="blue.700" textTransform="uppercase" letterSpacing="wider">
+                              ESP32-S3 Device (Host)
+                            </Text>
+                            <Badge colorScheme="blue" fontSize="7px" px={1.5}>{esp32Loc?.source?.includes("Calibrated") ? "Calibrated" : "IP Geo"}</Badge>
+                          </HStack>
+                          {esp32Loc && esp32Loc.lat ? (
+                            <VStack align="stretch" spacing={0.5}>
+                              <Text fontSize="11px" fontWeight="bold" color="blue.800">
+                                📍 {esp32Loc.city}{esp32Loc.country ? `, ${esp32Loc.country}` : ""}
+                              </Text>
+                              <Text fontSize="9px" color="blue.600" noOfLines={2}>{esp32Loc.address}</Text>
+                              <HStack justify="space-between" mt={0.5}>
+                                <Text fontSize="9px" color="blue.500" fontFamily="monospace" fontWeight="bold">
+                                  {esp32Loc.lat}° N, {esp32Loc.lng}° E
+                                </Text>
+                                <Text fontSize="8px" color="blue.400">{esp32Loc.source?.replace("IP Geolocation ", "") || "Network"}</Text>
+                              </HStack>
+                              <Button
+                                size="xs" colorScheme="blue" variant="ghost"
+                                leftIcon={<FaExternalLinkAlt size={8} />} fontSize="9px"
+                                as="a" href={`https://www.google.com/maps?q=${esp32Loc.lat},${esp32Loc.lng}`}
+                                target="_blank" rel="noreferrer"
+                              >
+                                View ESP32 Location on Maps
+                              </Button>
+                            </VStack>
+                          ) : (
+                            <HStack spacing={1.5}>
+                              <Spinner size="xs" color="blue.400" />
+                              <Text fontSize="10px" color="blue.500" fontStyle="italic">Detecting host location via IP...</Text>
+                            </HStack>
+                          )}
+                          <VStack align="stretch" spacing={1.5} mt={2}>
+                            <HStack spacing={1.5}>
+                              <Input
+                                size="xs"
+                                placeholder="Search locality (e.g. Guindy, T. Nagar)..."
+                                value={locationSearchInput}
+                                onChange={(e) => setLocationSearchInput(e.target.value)}
+                                onKeyDown={async (e) => {
+                                  if (e.key === "Enter" && locationSearchInput.trim()) {
+                                    await handleCalibrateLocation(locationSearchInput.trim());
+                                    toast({ title: `📍 Calibrated to ${locationSearchInput.trim()}`, status: "success", duration: 2000 });
+                                  }
+                                }}
+                                bg="white"
+                                fontSize="10px"
+                              />
+                              <Button
+                                size="xs"
+                                colorScheme="cyan"
+                                fontSize="9px"
+                                isLoading={isDetectingLocation}
+                                onClick={async () => {
+                                  if (locationSearchInput.trim()) {
+                                    await handleCalibrateLocation(locationSearchInput.trim());
+                                    toast({ title: `📍 Calibrated to ${locationSearchInput.trim()}`, status: "success", duration: 2000 });
+                                  } else {
+                                    await handleCalibrateLocation("Chennai, Tamil Nadu");
+                                    toast({ title: "📍 Calibrated to Chennai", status: "success", duration: 2000 });
+                                  }
+                                }}
+                              >
+                                Calibrate
+                              </Button>
+                            </HStack>
+                            <HStack spacing={1.5}>
+                              <Button
+                                size="xs"
+                                colorScheme="teal"
+                                variant="outline"
+                                fontSize="9px"
+                                leftIcon={<FaCrosshairs size={8} />}
+                                isLoading={isDetectingLocation}
+                                onClick={async () => {
+                                  toast({ title: "Detecting device location...", status: "info", duration: 1200 });
+                                  await fetchCurrentDeviceLocation();
+                                }}
+                              >
+                                Detect GPS
+                              </Button>
+                              <Button
+                                size="xs" colorScheme="blue" variant="ghost"
+                                leftIcon={<FaCrosshairs size={8} />} fontSize="9px"
+                                onClick={async () => {
+                                  toast({ title: "Fetching location...", status: "info", duration: 1200 });
+                                  await fetchCurrentDeviceLocation();
+                                  toast({ title: "📍 Host location refreshed", status: "success", duration: 2000 });
+                                }}
+                              >
+                                Refresh
+                              </Button>
+                            </HStack>
+                          </VStack>
+                        </Box>
+
+                        {/* Section 2: Switch ON Location */}
+                        <Box p={2.5} bg="green.50" borderRadius="lg" border="1.5px solid" borderColor={lastOnLoc ? "green.300" : "green.100"}>
+                          <HStack spacing={1.5} mb={1}>
+                            <Box w="7px" h="7px" borderRadius="full" bg={lastOnLoc ? "green.500" : "gray.300"} />
+                            <Text fontSize="10px" fontWeight="extrabold" color={lastOnLoc ? "green.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
+                              Switch ON Location
+                            </Text>
+                            {lastOnLoc && <Badge colorScheme="green" fontSize="7px" px={1.5}>Latest</Badge>}
+                          </HStack>
+                          {lastOnLoc ? (
+                            <VStack align="stretch" spacing={0.5}>
+                              <Text fontSize="11px" fontWeight="bold" color="green.800">🟢 {lastOnLoc.city}</Text>
+                              <Text fontSize="9px" color="green.600" noOfLines={2}>{lastOnLoc.address}</Text>
+                              <HStack justify="space-between" mt={0.5}>
+                                <Text fontSize="9px" color="green.500" fontFamily="monospace" fontWeight="bold">
+                                  {lastOnLoc.lat ? `${lastOnLoc.lat}° N, ${lastOnLoc.lng}° E` : "Coords pending"}
+                                </Text>
+                                <Text fontSize="8px" color="green.400">{formatGeologTime(lastOnLoc)}</Text>
+                              </HStack>
+                              {lastOnLoc.lat && (
+                                <Button
+                                  size="xs" colorScheme="green" variant="ghost"
+                                  leftIcon={<FaExternalLinkAlt size={8} />} fontSize="9px"
+                                  as="a" href={`https://www.google.com/maps?q=${lastOnLoc.lat},${lastOnLoc.lng}`}
+                                  target="_blank" rel="noreferrer"
+                                >
+                                  View ON Location on Maps
+                                </Button>
+                              )}
+                            </VStack>
+                          ) : (
+                            <Text fontSize="10px" color="gray.400" fontStyle="italic">
+                              No switch ON event recorded yet. Toggle a switch on mobile to capture location.
+                            </Text>
+                          )}
+                        </Box>
+
+                        {/* Section 3: Switch OFF Location */}
+                        <Box p={2.5} bg="red.50" borderRadius="lg" border="1.5px solid" borderColor={lastOffLoc ? "red.300" : "red.100"}>
+                          <HStack spacing={1.5} mb={1}>
+                            <Box w="7px" h="7px" borderRadius="full" bg={lastOffLoc ? "red.500" : "gray.300"} />
+                            <Text fontSize="10px" fontWeight="extrabold" color={lastOffLoc ? "red.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
+                              Switch OFF Location
+                            </Text>
+                            {lastOffLoc && <Badge colorScheme="red" fontSize="7px" px={1.5}>Latest</Badge>}
+                          </HStack>
+                          {lastOffLoc ? (
+                            <VStack align="stretch" spacing={0.5}>
+                              <Text fontSize="11px" fontWeight="bold" color="red.800">🔴 {lastOffLoc.city}</Text>
+                              <Text fontSize="9px" color="red.600" noOfLines={2}>{lastOffLoc.address}</Text>
+                              <HStack justify="space-between" mt={0.5}>
+                                <Text fontSize="9px" color="red.500" fontFamily="monospace" fontWeight="bold">
+                                  {lastOffLoc.lat ? `${lastOffLoc.lat}° N, ${lastOffLoc.lng}° E` : "Coords pending"}
+                                </Text>
+                                <Text fontSize="8px" color="red.400">{formatGeologTime(lastOffLoc)}</Text>
+                              </HStack>
+                              {lastOffLoc.lat && (
+                                <Button
+                                  size="xs" colorScheme="red" variant="ghost"
+                                  leftIcon={<FaExternalLinkAlt size={8} />} fontSize="9px"
+                                  as="a" href={`https://www.google.com/maps?q=${lastOffLoc.lat},${lastOffLoc.lng}`}
+                                  target="_blank" rel="noreferrer"
+                                >
+                                  View OFF Location on Maps
+                                </Button>
+                              )}
+                            </VStack>
+                          ) : (
+                            <Text fontSize="10px" color="gray.400" fontStyle="italic">
+                              No switch OFF event recorded yet. Toggle a switch on mobile to capture location.
+                            </Text>
+                          )}
+                        </Box>
+
+                        {/* Full History */}
+                        <Box>
+                          <HStack justify="space-between" align="center" mb={1}>
+                            <Text fontSize="10px" fontWeight="bold" color="cyan.800">
+                              Switch Geologs ({hist.length}):
+                            </Text>
+                            {hist.length > 0 && (
+                              <Button
+                                size="xs"
+                                colorScheme="red"
+                                variant="ghost"
+                                fontSize="8px"
+                                h="18px"
+                                px={1.5}
+                                onClick={() => handleClearGeologs(activeWidget.id)}
+                              >
+                                Clear All
+                              </Button>
+                            )}
+                          </HStack>
+                          {hist.length === 0 ? (
+                            <Text fontSize="10px" color="gray.400" fontStyle="italic">
+                              No geologs recorded yet.
+                            </Text>
+                          ) : (
+                            <VStack align="stretch" spacing={1} maxH="130px" overflowY="auto">
+                              {hist.map((item, idx) => {
+                                const isON = item.event === "ON";
+                                const isOFF = item.event === "OFF";
+                                const badgeColor = isON ? "green" : (isOFF ? "red" : "blue");
+                                const bgBox = isON ? "green.50" : (isOFF ? "red.50" : "blue.50");
+                                const borderBox = isON ? "green.100" : (isOFF ? "red.100" : "blue.100");
+                                return (
+                                  <HStack key={item.id || idx} p={1.5}
+                                    bg={bgBox}
+                                    borderRadius="md" justify="space-between" fontSize="10px"
+                                    border="1px solid" borderColor={borderBox}
+                                  >
+                                    <HStack spacing={1.5}>
+                                      <Badge colorScheme={badgeColor} fontSize="8px">{item.event}</Badge>
+                                      <Text fontWeight="semibold" color="gray.800" noOfLines={1} maxW="100px">{item.city || "Device Location"}</Text>
+                                      {item.lat && <Text color="gray.400" fontSize="8px" fontFamily="monospace">{Number(item.lat).toFixed(3)}°N{item.lng ? `, ${Number(item.lng).toFixed(3)}°E` : ""}</Text>}
+                                    </HStack>
+                                    <Text color="gray.400" fontSize="9px">{formatGeologTime(item)}</Text>
+                                  </HStack>
+                                );
+                              })}
+                            </VStack>
+                          )}
+                        </Box>
+                      </VStack>
+                    );
+                  })()}
+
+
+                  {/* GOOGLE FORM QUESTIONS & RESPONSES in Inspector */}
+                  {activeWidget.type === "textfield" && (() => {
+                    const safeQuestions = (activeWidget.questions || []).filter((q) => !isHardcodedTextFieldQuestion(q));
+                    const safeResponses = (activeWidget.responses || []).filter((r) => !isHardcodedTextFieldResponse(r));
+                    return (
+                      <VStack align="stretch" spacing={2.5} p={3} bg={bgPurpleCard} borderRadius="xl" border="1px solid" borderColor="purple.200">
+                        <HStack justify="space-between">
+                          <HStack spacing={1.5}>
+                            <FaWpforms color="#8b5cf6" size={13} />
+                            <Text fontSize="xs" fontWeight="extrabold" color="purple.800" letterSpacing="wider">
+                              QUESTION & RESPONSE BUILDER
+                            </Text>
+                          </HStack>
+                          <Badge colorScheme="purple" fontSize="9px">
+                            {safeResponses.length} Answers
+                          </Badge>
+                        </HStack>
+
+                        {/* Add Question Input */}
+                        <Box p={2} bg="white" borderRadius="lg" border="1px solid" borderColor="purple.100">
+                          <Text fontSize="10px" fontWeight="bold" color="purple.700" mb={1}>
+                            Add Question (Syncs to Mobile UI):
+                          </Text>
+                          <HStack spacing={1.5}>
+                            <Input
+                              size="xs"
+                              placeholder="Enter a question for mobile users..."
+                              value={newQuestionInputs[activeWidget.id] || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setNewQuestionInputs((prev) => ({ ...prev, [activeWidget.id]: val }));
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleAddQuestionToForm(activeWidget.id, newQuestionInputs[activeWidget.id]);
+                                }
+                              }}
+                            />
+                            <Button
+                              size="xs"
+                              colorScheme="purple"
+                              leftIcon={<FaPaperPlane size={8} />}
+                              onClick={() => handleAddQuestionToForm(activeWidget.id, newQuestionInputs[activeWidget.id])}
+                            >
+                              Submit
+                            </Button>
+                          </HStack>
+                        </Box>
+
+                        {/* Questions List */}
+                        <Box>
+                          <Text fontSize="10px" fontWeight="bold" color="purple.800" mb={1}>
+                            Form Questions ({safeQuestions.length}):
+                          </Text>
+                          {safeQuestions.length > 0 ? (
+                            <VStack align="stretch" spacing={1} maxH="120px" overflowY="auto">
+                              {safeQuestions.map((q, idx) => (
+                                <HStack key={q.id || idx} p={1.5} bg="white" borderRadius="md" justify="space-between" fontSize="10px" border="1px solid" borderColor="purple.100">
+                                  <HStack spacing={1.5} flex="1" minW="0">
+                                    <Badge colorScheme="purple" fontSize="8px">Q{idx + 1}</Badge>
+                                    <Text fontWeight="semibold" color="gray.800" noOfLines={1}>{q.text}</Text>
+                                  </HStack>
+                                  <IconButton
+                                    icon={<FaTrashAlt size={8} />}
+                                    size="xs"
+                                    h="18px"
+                                    w="18px"
+                                    minW="18px"
+                                    variant="ghost"
+                                    colorScheme="red"
+                                    onClick={() => handleDeleteQuestionFromForm(activeWidget.id, q.id)}
+                                  />
+                                </HStack>
+                              ))}
+                            </VStack>
+                          ) : (
+                            <Text fontSize="9px" color="gray.400" fontStyle="italic">
+                              No questions added yet. Type a question above and click Submit.
+                            </Text>
+                          )}
+                        </Box>
+
+                        {/* Received Responses List */}
+                        <Box>
+                          <HStack justify="space-between" mb={1}>
+                            <Text fontSize="10px" fontWeight="bold" color="purple.800">
+                              Submitted Answers ({safeResponses.length}):
+                            </Text>
+                            {safeResponses.length > 0 && (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                colorScheme="red"
+                                fontSize="9px"
+                                h="16px"
+                                px={1}
+                                onClick={() => handleClearFormResponses(activeWidget.id)}
+                              >
+                                Clear All
+                              </Button>
+                            )}
+                          </HStack>
+                          {safeResponses.length > 0 ? (
+                            <VStack align="stretch" spacing={1} maxH="130px" overflowY="auto">
+                              {safeResponses.map((resp, idx) => (
+                                <Box key={resp.id || idx} p={2} bg="white" borderRadius="md" border="1px solid" borderColor="gray.150" fontSize="10px">
+                                  <HStack justify="space-between" mb={0.5}>
+                                    <Text fontWeight="bold" color="purple.700" noOfLines={1}>{resp.questionText}</Text>
+                                    <Text color="gray.400" fontSize="8px">{resp.timestamp}</Text>
+                                  </HStack>
+                                  <Text color="gray.800" fontWeight="medium">💬 {resp.answer}</Text>
+                                  <Text color="gray.400" fontSize="8px" mt={0.5}>Source: {resp.source || "Mobile UI"}</Text>
+                                </Box>
+                              ))}
+                            </VStack>
+                          ) : (
+                            <Text fontSize="9px" color="gray.400" fontStyle="italic">
+                              No answers submitted yet. Responses from mobile will appear here.
+                            </Text>
+                          )}
+                        </Box>
+                      </VStack>
+                    );
+                  })()}
+
                   {/* Remove Component Button */}
                   <Button
                     size="sm"
@@ -6995,6 +9757,165 @@ Generated automatically by **InnoIDE App Companion Studio**.
           </HStack>
           <Text opacity={0.8} textTransform="capitalize">Mode: {appBuilderView === "blocks" ? "Rules" : appBuilderView}</Text>
         </Flex>
+
+        {/* ========================================== */}
+        {/* DEVICE SWITCH LOCATION QR CODE MODAL */}
+        {/* ========================================== */}
+        <Modal
+          isOpen={isLocationQrModalOpen}
+          onClose={onLocationQrModalClose}
+          size="md"
+          isCentered
+        >
+          <ModalOverlay backdropFilter="blur(6px)" bg="blackAlpha.700" />
+          <ModalContent
+            borderRadius="2xl"
+            overflow="hidden"
+            bg={bgCard}
+            boxShadow="0 25px 60px -15px rgba(0, 0, 0, 0.5)"
+            border="1px solid"
+            borderColor={borderColor}
+          >
+            <ModalHeader pb={1} pt={4} px={5}>
+              <HStack spacing={2.5}>
+                <Box p={2} bg="cyan.50" color="cyan.600" borderRadius="xl">
+                  <FaMapMarkerAlt size={16} />
+                </Box>
+                <VStack align="start" spacing={0}>
+                  <Text fontSize="md" fontWeight="bold">
+                    Device Switch Location QR
+                  </Text>
+                  <Text fontSize="xs" color="gray.400">
+                    Scan on phone to view location & control switch
+                  </Text>
+                </VStack>
+              </HStack>
+            </ModalHeader>
+            <ModalCloseButton />
+
+            <ModalBody py={4} px={5}>
+              <VStack spacing={4} align="stretch">
+                {/* Event & Coordinates Banner */}
+                <Box p={3} bg={bgCyanCard} borderRadius="xl" border="1px solid" borderColor="cyan.200">
+                  <HStack justify="space-between" mb={1}>
+                    <HStack spacing={2}>
+                      <Badge colorScheme={locationQrModalData?.event === "ON" ? "green" : "red"} fontSize="10px" px={2} py={0.5} borderRadius="md">
+                        SWITCH {locationQrModalData?.event || (liveLedToggle ? "ON" : "OFF")}
+                      </Badge>
+                      <Text fontWeight="bold" fontSize="xs">
+                        {locationQrModalData?.city || deviceDetectedLocation?.city || "Live Device Location"}
+                      </Text>
+                    </HStack>
+                    <Text fontSize="10px" color="gray.400" fontFamily="monospace">
+                      {locationQrModalData?.time || "Active"}
+                    </Text>
+                  </HStack>
+                  <Text fontSize="11px" color="gray.600" noOfLines={2}>
+                    📍 {locationQrModalData?.address || deviceDetectedLocation?.address || "Live coordinates pending"}
+                  </Text>
+                  <Text fontSize="10px" color="cyan.600" fontFamily="monospace" fontWeight="bold" mt={1}>
+                    GPS: {locationQrModalData?.lat ?? deviceDetectedLocation?.lat ?? "--"}° N, {locationQrModalData?.lng ?? deviceDetectedLocation?.lng ?? "--"}° E
+                  </Text>
+                </Box>
+
+                {/* QR Code Container */}
+                <Box display="flex" justifyContent="center" alignItems="center" p={3}>
+                  <Box
+                    p={3.5}
+                    borderRadius="2xl"
+                    border="3px solid #06b6d4"
+                    bg="white"
+                    boxShadow="0 0 25px rgba(6, 182, 212, 0.2)"
+                  >
+                    <SafeQRCode
+                      value={
+                        companionNetworkMode === "cloud" && remoteTunnelState.url
+                          ? `${remoteTunnelState.url}#location`
+                          : (localCompanionUrl || `http://${companionServerInfo?.ip || "localhost"}:5055`)
+                      }
+                      size={200}
+                      level="L"
+                      includeMargin={true}
+                    />
+                  </Box>
+                </Box>
+
+                {/* Direct Google Maps & Web App Links */}
+                <VStack align="stretch" spacing={2}>
+                  <HStack spacing={2}>
+                    <Input
+                      size="sm"
+                      isReadOnly
+                      fontSize="xs"
+                      fontFamily="monospace"
+                      value={
+                        companionNetworkMode === "cloud" && remoteTunnelState.url
+                          ? `${remoteTunnelState.url}#location`
+                          : (localCompanionUrl || `http://${companionServerInfo?.ip || "localhost"}:5055`)
+                      }
+                      borderRadius="lg"
+                    />
+                    <Button
+                      size="sm"
+                      colorScheme="purple"
+                      borderRadius="lg"
+                      leftIcon={<FaCopy size={11} />}
+                      onClick={() => {
+                        const url = companionNetworkMode === "cloud" && remoteTunnelState.url
+                          ? `${remoteTunnelState.url}#location`
+                          : (localCompanionUrl || `http://${companionServerInfo?.ip || "localhost"}:5055`);
+                        navigator.clipboard.writeText(url);
+                        toast({ title: "URL Copied to Clipboard", status: "success", duration: 2000 });
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </HStack>
+
+                  <HStack spacing={2}>
+                    <Button
+                      size="sm"
+                      flex="1"
+                      colorScheme="cyan"
+                      variant="outline"
+                      as="a"
+                      href={`https://www.google.com/maps?q=${locationQrModalData?.lat || deviceDetectedLocation?.lat || ""},${locationQrModalData?.lng || deviceDetectedLocation?.lng || ""}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      leftIcon={<FaExternalLinkAlt size={10} />}
+                      borderRadius="lg"
+                    >
+                      Open in Google Maps
+                    </Button>
+                    <Button
+                      size="sm"
+                      flex="1"
+                      colorScheme="cyan"
+                      variant="solid"
+                      as="a"
+                      href={
+                        companionNetworkMode === "cloud" && remoteTunnelState.url
+                          ? `${remoteTunnelState.url}#location`
+                          : (localCompanionUrl || `http://${companionServerInfo?.ip || "localhost"}:5055`)
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      leftIcon={<FaMobileAlt size={10} />}
+                      borderRadius="lg"
+                    >
+                      Open Mobile App
+                    </Button>
+                  </HStack>
+                </VStack>
+              </VStack>
+            </ModalBody>
+            <ModalFooter pt={0} pb={4} px={5}>
+              <Button size="sm" onClick={onLocationQrModalClose} borderRadius="lg" w="100%">
+                Close
+              </Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
 
         {/* ========================================== */}
         {/* SCREEN 15: PUBLISH COMPANION APP MODAL */}
@@ -8625,7 +11546,7 @@ Generated automatically by **InnoIDE App Companion Studio**.
                 borderColor="gray.800"
               >
                 {flashTerminalLogs.length === 0 ? (
-                  <Text color="gray.500">// Terminal initializing...</Text>
+                  <Text color="gray.500">{"// Terminal initializing..."}</Text>
                 ) : (
                   flashTerminalLogs.map((log, idx) => (
                     <Text key={idx} whiteSpace="pre-wrap" lineHeight="tall">

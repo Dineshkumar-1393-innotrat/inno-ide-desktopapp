@@ -1919,8 +1919,18 @@ const shapeData = {
 
 const findShapeConfigById = (shapeId) => {
   if (!shapeId) return null;
+  const cleanId = String(shapeId).trim().toLowerCase();
   for (const group of Object.values(shapeData)) {
-    const match = group.find((shape) => shape.id === shapeId);
+    // 1. Exact match on id
+    let match = group.find((shape) => shape.id === shapeId || shape.id.toLowerCase() === cleanId);
+    if (match) return match;
+    // 2. Match on shape name
+    match = group.find((shape) => shape.name && shape.name.toLowerCase() === cleanId);
+    if (match) return match;
+    // 3. Match without prefix (e.g. flow-, basic-, uml-, dsa-)
+    match = group.find((shape) =>
+      shape.id.toLowerCase().replace(/^(flow|basic|uml|dsa)-/, "") === cleanId.replace(/^(flow|basic|uml|dsa)-/, "")
+    );
     if (match) return match;
   }
   return null;
@@ -3648,7 +3658,11 @@ function GenericShapeNode({ id, data, selected }) {
     setVal(data?.label ?? "");
   }, [data?.label]);
 
-  const shape = findShapeConfigById(data?.shapeId);
+  const shape =
+    findShapeConfigById(data?.shapeId) ||
+    findShapeConfigById(data?.label) ||
+    findShapeConfigById("flow-rectangle") ||
+    shapeData.Flowchart?.[0];
 
   const fallbackHandles = [
     {
@@ -5515,22 +5529,154 @@ function DiagramEditor() {
     scheduleSnapshot();
   }, [commitToRedux, scheduleSnapshot]);
 
+  const addShapeToCanvas = useCallback(
+    (shapePayload, targetPosition) => {
+      let type = "genericShape";
+      let extraData = {};
+
+      if (typeof shapePayload === "string") {
+        try {
+          const parsed = JSON.parse(shapePayload);
+          if (parsed && typeof parsed === "object") {
+            type = parsed.type || "genericShape";
+            extraData = parsed.data || {};
+            if (!extraData.shapeId && parsed.shapeId) {
+              extraData.shapeId = parsed.shapeId;
+            }
+            if (!extraData.label && parsed.label) {
+              extraData.label = parsed.label;
+            }
+          } else if (typeof parsed === "string") {
+            type = parsed;
+          }
+        } catch (_) {
+          type = shapePayload;
+        }
+      } else if (shapePayload && typeof shapePayload === "object") {
+        type = shapePayload.type || "genericShape";
+        extraData = shapePayload.data || {
+          shapeId: shapePayload.id || shapePayload.shapeId || shapePayload.type,
+          label: shapePayload.label || "",
+        };
+      }
+
+      // Check if type or shapeId maps to a shape config
+      const matchedShape =
+        findShapeConfigById(extraData.shapeId) ||
+        findShapeConfigById(extraData.label) ||
+        findShapeConfigById(type);
+
+      if (matchedShape) {
+        type = "genericShape";
+        if (!extraData.shapeId) {
+          extraData.shapeId = matchedShape.id;
+        }
+        if (!extraData.label) {
+          extraData.label = matchedShape.name;
+        }
+      } else if (!nodeTypes[type]) {
+        type = "genericShape";
+        if (!extraData.shapeId) {
+          extraData.shapeId = "flow-rectangle";
+          extraData.label = "Process";
+        }
+      }
+
+      const id = getId();
+      const baseData = {
+        label: extraData.label || "",
+        fill: "#ffffff",
+        stroke: "#000000",
+        text: "#000000",
+        strokeWidth: 2,
+        rotation: 0,
+        fontSize: 12,
+      };
+
+      const shapeConfig =
+        type === "genericShape"
+          ? findShapeConfigById(extraData.shapeId) ||
+            findShapeConfigById(extraData.label) ||
+            findShapeConfigById("flow-rectangle")
+          : null;
+      const slots = shapeConfig
+        ? buildSlotValues(shapeConfig, extraData.slots)
+        : undefined;
+
+      // Compute appropriate initial size based on shape type
+      let initialWidth = 100;
+      let initialHeight = 60;
+
+      const sid = String(extraData.shapeId || "").toLowerCase();
+      if (sid.includes("diamond") || type === "decision") {
+        initialWidth = 80;
+        initialHeight = 80;
+      } else if (sid.includes("rectangle") || sid.includes("process") || type === "process") {
+        initialWidth = 100;
+        initialHeight = 60;
+      } else if (sid.includes("oval") || sid.includes("terminator") || type === "terminator" || type === "ellipse") {
+        initialWidth = 100;
+        initialHeight = 50;
+      } else if (type === "text") {
+        initialWidth = 80;
+        initialHeight = 30;
+      } else if (type === "junction") {
+        initialWidth = 40;
+        initialHeight = 40;
+      } else if (sid === "uml-seq-lifeline") {
+        initialWidth = 20;
+        initialHeight = 250;
+      } else if (sid === "uml-seq-actor") {
+        initialWidth = 100;
+        initialHeight = 60;
+      }
+
+      const position = targetPosition || { x: 250, y: 150 };
+
+      const newNode = {
+        id,
+        type,
+        position,
+        data: {
+          ...baseData,
+          ...extraData,
+          ...(slots ? { slots } : {}),
+        },
+        style: { width: initialWidth, height: initialHeight },
+      };
+
+      setNodes((nds) => {
+        const nextNodes = nds.concat(newNode);
+        console.log("[Flowchart] Node added, new count:", nextNodes.length);
+        return nextNodes;
+      });
+
+      window.dispatchEvent(new Event("rf-change"));
+      scheduleSnapshot();
+    },
+    [setNodes, scheduleSnapshot],
+  );
+
   const handlePaletteDragStart = useCallback((event, item) => {
     let payload;
     if (item.id && item.label) {
       payload = JSON.stringify({
-        type: "genericShape",
-        data: { shapeId: item.id, label: item.label },
+        type: item.type || "genericShape",
+        data: { shapeId: item.id || item.shapeId || item.type, label: item.label },
       });
     } else {
-      payload = item.type || JSON.stringify(item);
+      payload = typeof item === "string" ? item : (item.type || JSON.stringify(item));
     }
     event.dataTransfer.setData("application/reactflow", payload);
+    event.dataTransfer.setData("text/plain", payload);
+    event.dataTransfer.setData("text", payload);
+    event.dataTransfer.setData("application/json", payload);
     event.dataTransfer.effectAllowed = "move";
   }, []);
 
   const onDragOver = useCallback((event) => {
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
   }, []);
 
@@ -5552,95 +5698,80 @@ function DiagramEditor() {
   const onDrop = useCallback(
     (event) => {
       event.preventDefault();
-      const payload = event.dataTransfer.getData("application/reactflow");
+      event.stopPropagation();
+      const payload =
+        event.dataTransfer.getData("application/reactflow") ||
+        event.dataTransfer.getData("text/plain") ||
+        event.dataTransfer.getData("text") ||
+        event.dataTransfer.getData("application/json");
+
       if (!payload) {
         console.warn("[Flowchart] onDrop: No payload found");
         return;
       }
 
-      let type = payload;
-      let extraData = {};
+      let position;
       try {
-        const parsed = JSON.parse(payload);
-        if (parsed && parsed.type) {
-          type = parsed.type;
-          extraData = parsed.data || {};
+        if (rf && typeof rf.screenToFlowPosition === "function") {
+          position = rf.screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
         }
-      } catch (_) {
-        // not JSON, fall back to string type
+      } catch (err) {
+        console.warn("[Flowchart] screenToFlowPosition error:", err);
       }
 
-      const position = rf.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
-
-      const id = getId();
-      const baseData = {
-        label: "",
-        fill: "#ffffff",
-        stroke: "#000000",
-        text: "#000000",
-        strokeWidth: 2,
-        rotation: 0,
-        fontSize: 12,
-      };
-      const shapeConfig =
-        type === "genericShape" ? findShapeConfigById(extraData.shapeId) : null;
-      const slots = shapeConfig
-        ? buildSlotValues(shapeConfig, extraData.slots)
-        : undefined;
-
-      // Compute appropriate initial size based on shape type
-      let initialWidth = 80;
-      let initialHeight = 80;
-
-      // Special handling for common flowchart shapes to have better aspect ratios
-      if (extraData.shapeId?.includes('diamond')) {
-        initialWidth = 80;
-        initialHeight = 80;
-      } else if (extraData.shapeId?.includes('rectangle') || extraData.shapeId?.includes('process')) {
-        initialWidth = 100;
-        initialHeight = 60;
-      } else if (extraData.shapeId?.includes('oval') || extraData.shapeId?.includes('terminator')) {
-        initialWidth = 100;
-        initialHeight = 50;
+      if (!position && reactFlowWrapper.current) {
+        const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+        const zoom = rf?.getZoom ? rf.getZoom() : 1;
+        const viewport = rf?.getViewport ? rf.getViewport() : { x: 0, y: 0, zoom: 1 };
+        position = {
+          x: (event.clientX - reactFlowBounds.left - viewport.x) / (viewport.zoom || 1),
+          y: (event.clientY - reactFlowBounds.top - viewport.y) / (viewport.zoom || 1),
+        };
       }
 
-      if (type === "decision" || type === "ellipse") {
-        initialWidth = 60;
-        initialHeight = 60;
-      } else if (type === "terminator") {
-        initialWidth = 80;
-        initialHeight = 40;
-      } else if (type === "text") {
-        initialWidth = 80;
-        initialHeight = 30;
-      } else if (extraData.shapeId === "uml-seq-lifeline") {
-        initialWidth = 20;
-        initialHeight = 250;
-      } else if (extraData.shapeId === "uml-seq-actor") {
-        initialWidth = 100;
-        initialHeight = 60;
+      if (!position) {
+        position = { x: 250, y: 150 };
       }
 
-      setNodes((nds) => {
-        const newNodes = nds.concat({
-          id,
-          type,
-          position,
-          data: {
-            ...baseData,
-            ...extraData,
-            ...(slots ? { slots } : {}),
-          },
-          style: { width: initialWidth, height: initialHeight },
-        });
-        console.log("[Flowchart] setNodes new count:", newNodes.length);
-        return newNodes;
-      });
+      addShapeToCanvas(payload, position);
     },
-    [rf, setNodes],
+    [rf, addShapeToCanvas],
+  );
+
+  const handlePaletteClick = useCallback(
+    (item) => {
+      let position;
+      if (reactFlowWrapper.current) {
+        const rect = reactFlowWrapper.current.getBoundingClientRect();
+        const centerClientX = rect.left + rect.width / 2 + (Math.random() * 60 - 30);
+        const centerClientY = rect.top + rect.height / 2 + (Math.random() * 60 - 30);
+        try {
+          if (rf && typeof rf.screenToFlowPosition === "function") {
+            position = rf.screenToFlowPosition({
+              x: centerClientX,
+              y: centerClientY,
+            });
+          }
+        } catch (_) {}
+        if (!position) {
+          const zoom = rf?.getZoom ? rf.getZoom() : 1;
+          const viewport = rf?.getViewport ? rf.getViewport() : { x: 0, y: 0, zoom: 1 };
+          position = {
+            x: (centerClientX - rect.left - viewport.x) / (viewport.zoom || 1),
+            y: (centerClientY - rect.top - viewport.y) / (viewport.zoom || 1),
+          };
+        }
+      }
+      if (!position) {
+        position = { x: 250 + Math.random() * 40, y: 150 + Math.random() * 40 };
+      }
+
+      addShapeToCanvas(item, position);
+    },
+    [rf, addShapeToCanvas],
   );
 
   const onSelectionChange = useCallback(({ nodes: nds, edges: eds }) => {
@@ -6677,7 +6808,8 @@ function DiagramEditor() {
                                   className="shape-card"
                                   draggable
                                   onDragStart={(e) => handlePaletteDragStart(e, s)}
-                                  title={s.label}
+                                  onClick={() => handlePaletteClick(s)}
+                                  title={`Drag to canvas or click to add ${s.label}`}
                                 >
                                   <div className="shape-svg">{s.icon}</div>
                                   <div className="shape-label">{s.label}</div>
@@ -6775,6 +6907,8 @@ function DiagramEditor() {
             <div
               className="rf-wrapper"
               ref={reactFlowWrapper}
+              onDrop={onDrop}
+              onDragOver={onDragOver}
               style={{
                 width: '100%',
                 height: '100%',
@@ -6784,6 +6918,8 @@ function DiagramEditor() {
               }}
             >
               <ReactFlow
+                onDrop={onDrop}
+                onDragOver={onDragOver}
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={onNodesChange}
