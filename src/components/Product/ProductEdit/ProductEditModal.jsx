@@ -69,6 +69,18 @@ function ProductEditModal({
     };
   }, [fetchFileSystem]);
 
+  useEffect(() => {
+    const handleOpenModal = () => {
+      onOpen();
+    };
+    window.addEventListener("innoide:open-view-product", handleOpenModal);
+    window.addEventListener("innoide:open-define-product", handleOpenModal);
+    return () => {
+      window.removeEventListener("innoide:open-view-product", handleOpenModal);
+      window.removeEventListener("innoide:open-define-product", handleOpenModal);
+    };
+  }, [onOpen]);
+
   return (
     <>
       <Button

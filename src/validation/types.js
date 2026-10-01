@@ -38,6 +38,8 @@ export const ValidationAction = {
   FLOWCHART_VALIDATE: 'flowchart.validate',
   SIMULATION_START: 'simulation.start',
   SIMULATION_STEP: 'simulation.step',
+  SIMULATION_VALIDATE: 'simulation.validate',
+  SIMULATION_SAVE: 'simulation.save',
   CODE_GENERATE: 'code.generate',
   CODE_COMPILE: 'code.compile',
   CODE_SAVE: 'code.save',

@@ -7,15 +7,14 @@ import React, {
   useMemo,
   useCallback,
 } from "react";
-import { DndProvider, useDrag, useDrop } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
+import { useDrag, useDrop } from "react-dnd";
 import { Rnd } from "react-rnd";
 import { Maximize, ZoomIn, ZoomOut, ArrowLeft, ArrowRight, Plus, Save } from "lucide-react";
 import { FiTrash } from "react-icons/fi";
 import { FaSearch } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { Monitor, Loader2 } from "lucide-react";
+import { Monitor, Loader2, CheckCircle } from "lucide-react";
 
 // --- Gold Standard Transition Components ---
 const DiagramLoader = () => (
@@ -126,6 +125,9 @@ import { buildTree } from "./EmbeddedFileManagement/EmbeddedFileManagement";
 import CreateProductButton from "./shared/CreateProductButton";
 import ProjectSelectionModal from "./ProjectSelectionModal/ProjectSelectionModal";
 import ProjectChangePopup from "./ProjectSelectionPopup/ProjectSelectionPopup";
+import { validationManager } from "../validation/ValidationManager";
+import { ValidationAction, ValidationSeverity } from "../validation/types";
+import { getProductCreationDetails } from "../utils/projectProductExportHelper";
 // ... (rest of your imports)
 
 import Navbar from "./Navbar";
@@ -257,9 +259,11 @@ import {
   addConnectionToTab,
   setTabSymbolsAndConnections,
   updateTabContent,
-  renameTab
+  renameTab,
+  markTabClean
 } from "../store/slices/simulationSlice";
 import { useResizableSidebar } from '../hooks/useResizableSidebar';
+import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
 
 // In-memory dragged symbol fallback for cross-platform Electron/browser DnD
 let globalDraggedSymbol = null;
@@ -1192,26 +1196,41 @@ const BlockDiagram = () => {
     transitionError
   } = useProject();
 
-  // start
-  // Add this effect to store productID in sessionStorage
+  const canvasIntegration = useCanvasFileIntegration('Simulation');
 
-  // --- Sync Redux Tabs with Central Project Data ---
+  // --- Sync Redux Tabs with Central Project Data or LocalStorage ---
   useEffect(() => {
     const data = diagramData?.simulation?.data;
     if (data) {
       console.log("[Simulation] Syncing Redux state with central data");
-      // Simulation usually has a specific structure or single tab behavior in this file
-      // If it's single-diagram, we update the active tab
-      const symbols = data.symbols || data.simulationDiagram || [];
-      const connections = data.connections || [];
+      if (Array.isArray(data.tabs) && data.tabs.length > 0) {
+        dispatch(setTabs(data.tabs));
+      } else {
+        const symbols = data.symbols || data.simulationDiagram || [];
+        const connections = data.connections || [];
 
-      dispatch(setTabSymbolsAndConnections({
-        tabId: activeTabId,
-        symbols: symbols,
-        connections: connections
-      }));
+        dispatch(setTabSymbolsAndConnections({
+          tabId: activeTabId,
+          symbols: symbols,
+          connections: connections
+        }));
+      }
+    } else if (activeProjectId) {
+      try {
+        const stored = localStorage.getItem(`innoide:simulation_tabs:${user?.userId || 'default'}:${activeProjectId}`) ||
+                       localStorage.getItem(`innoide:simulation_tabs:${activeProjectId}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed?.tabs) && parsed.tabs.length > 0) {
+            dispatch(setTabs(parsed.tabs));
+            if (parsed.activeTabId) {
+              dispatch(setActiveTab(parsed.activeTabId));
+            }
+          }
+        }
+      } catch (e) {}
     }
-  }, [diagramData?.simulation?.data, dispatch, activeTabId]);
+  }, [diagramData?.simulation?.data, dispatch, activeTabId, activeProjectId, user?.userId]);
 
   useEffect(() => {
     try {
@@ -1226,6 +1245,246 @@ const BlockDiagram = () => {
   useEffect(() => {
     checkProductDefinition(activeProductId, setIsProductDefined);
   }, [activeProductId]);
+
+  const [isValidating, setIsValidating] = useState(false);
+
+  const handleValidateSimulation = useCallback(async () => {
+    setIsValidating(true);
+    try {
+      const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
+      const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+      const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
+      const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
+
+      const productDetails = getProductCreationDetails(effectiveProductId, effectiveProjectId, effectiveProductName);
+
+      const validationResult = await validationManager.validateAction(ValidationAction.SIMULATION_VALIDATE, {
+        simulation: {
+          components: droppedItems,
+          droppedItems: droppedItems,
+          tabs: tabs,
+          symbols: droppedItems,
+        },
+        droppedItems: droppedItems,
+        symbols: droppedItems,
+        currentScreen: 'Simulation',
+        action: 'simulation.validate',
+        projectId: effectiveProjectId,
+        productId: effectiveProductId,
+        projectName: effectiveProjectName,
+        productName: effectiveProductName,
+        product: productDetails,
+        productDetails: productDetails,
+        isProductDefined: Boolean(effectiveProductId && effectiveProductId !== 'default'),
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR) || validationResult.violations[0];
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          return;
+        }
+      }
+
+      toast({
+        title: "Simulation Valid",
+        description: "All defined product components match the Simulation.",
+        status: "success",
+        duration: 3500,
+        isClosable: true,
+        position: "top-right",
+      });
+    } catch (err) {
+      console.error("[Simulation] Validation error:", err);
+      toast({
+        title: "Validation Error",
+        description: err.message || "Failed to validate simulation against defined product.",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+        position: "top-right",
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  }, [
+    activeProductId,
+    activeProjectId,
+    activeProductName,
+    activeProjectName,
+    droppedItems,
+    tabs,
+    toast,
+  ]);
+
+  const [isSavingTab, setIsSavingTab] = useState(false);
+
+  const saveTab = useCallback(async (tabId) => {
+    setIsSavingTab(true);
+    const effectiveTabId = tabId || activeTabId;
+    const effectiveTab = activeTab || tabs.find((t) => t?.id === effectiveTabId) || {
+      id: effectiveTabId,
+      name: activeProjectName || 'Simulation',
+    };
+
+    const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
+    const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+    const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
+    const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
+
+    // 1. InnoIDE Centralized Workflow Validation for Simulation Save
+    try {
+      const productDetails = getProductCreationDetails(effectiveProductId, effectiveProjectId, effectiveProductName);
+
+      const validationResult = await validationManager.validateAction(ValidationAction.SIMULATION_SAVE, {
+        simulation: {
+          components: droppedItems,
+          droppedItems: droppedItems,
+          tabs: tabs,
+          symbols: droppedItems,
+        },
+        droppedItems: droppedItems,
+        symbols: droppedItems,
+        currentScreen: 'Simulation',
+        action: 'simulation.save',
+        projectId: effectiveProjectId,
+        productId: effectiveProductId,
+        projectName: effectiveProjectName,
+        productName: effectiveProductName,
+        product: productDetails,
+        productDetails: productDetails,
+        isProductDefined: Boolean(effectiveProductId && effectiveProductId !== 'default'),
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation =
+          validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR) ||
+          validationResult.violations[0];
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          setIsSavingTab(false);
+          return;
+        }
+      }
+    } catch (valErr) {
+      console.warn("[Simulation] Validation check warning:", valErr);
+    }
+
+    const payload = {
+      symbols: droppedItems || [],
+      connections: Array.isArray(connections) ? connections : [],
+      projectId: activeProjectId,
+      projectName: activeProjectName || effectiveTab?.name || 'Simulation',
+      productId: activeProductId,
+      productName: activeProductName || 'Product',
+      timestamp: Date.now(),
+    };
+
+    const tabName = effectiveTab?.name || "Simulation";
+    const sanitizedName = tabName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const fileName = `${sanitizedName}.json`;
+
+    try {
+      // 1. Mark active tab clean in Redux (clears dirty dot)
+      if (effectiveTabId) {
+        dispatch(markTabClean(effectiveTabId));
+      }
+
+      // 2. Persist to project canvas storage
+      if (activeProjectId && canvasIntegration?.saveCanvasToFile) {
+        canvasIntegration
+          .saveCanvasToFile(payload, `Simulation/${fileName}`, activeProjectId)
+          .catch((err) => console.warn("[Simulation] Background file save warning:", err));
+      }
+
+      // 3. Update tabs state in Redux
+      const latestTabs = tabs.map((t) =>
+        t.id === effectiveTabId
+          ? { ...t, symbols: droppedItems, connections: connections || [], dirty: false }
+          : t
+      );
+      dispatch(setTabs(latestTabs));
+
+      // 4. Save to localStorage
+      if (effectiveProjectId) {
+        const storagePayload = {
+          tabs: latestTabs,
+          activeTabId: effectiveTabId,
+          projectId: effectiveProjectId,
+          projectName: activeProjectName,
+          savedAt: new Date().toISOString(),
+        };
+        localStorage.setItem(
+          `innoide:simulation_tabs:${user?.userId || 'default'}:${effectiveProjectId}`,
+          JSON.stringify(storagePayload)
+        );
+        localStorage.setItem(
+          `innoide:simulation_tabs:${effectiveProjectId}`,
+          JSON.stringify(storagePayload)
+        );
+        if (activeProjectName) {
+          localStorage.setItem(
+            `innoide:simulation_tabs:${activeProjectName}`,
+            JSON.stringify(storagePayload)
+          );
+        }
+      }
+
+      // 5. Backend diagramData save
+      if (typeof saveDiagramData === 'function') {
+        saveDiagramData(
+          {
+            symbols: droppedItems,
+            connections: Array.isArray(connections) ? connections : [],
+            tabs: latestTabs,
+          },
+          'simulation'
+        ).catch((err) => console.warn("[Simulation] Background diagramData save warning:", err));
+      }
+
+      // 6. Sync auto-save manager
+      if (saveSimulationNow) {
+        saveSimulationNow();
+      }
+
+      toast({
+        title: "Tab Saved",
+        description: `"${tabName}" has been saved successfully.`,
+        status: "success",
+        duration: 2500,
+        isClosable: true,
+        position: "top-right",
+      });
+    } catch (err) {
+      console.error("[Simulation] Save tab error:", err);
+      toast({
+        title: "Failed to Save Tab",
+        description: err.message || "An error occurred while saving the tab.",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+        position: "top-right",
+      });
+    } finally {
+      setIsSavingTab(false);
+    }
+  }, [
+    activeTabId,
+    activeTab,
+    tabs,
+    droppedItems,
+    connections,
+    activeProductId,
+    activeProjectId,
+    activeProductName,
+    activeProjectName,
+    dispatch,
+    user?.userId,
+    canvasIntegration,
+    saveDiagramData,
+    saveSimulationNow,
+    toast,
+  ]);
 
   // useEffect(() => {
   //   const savedData = localStorage.getItem("savedDesign");
@@ -1842,6 +2101,19 @@ const BlockDiagram = () => {
           <Box display="flex" alignItems="center" gap={3} justifyContent="flex-end" width="100%">
             <SimulationOne />
 
+            <Button
+              size="sm"
+              colorScheme="blue"
+              variant="outline"
+              leftIcon={<CheckCircle size={15} />}
+              onClick={handleValidateSimulation}
+              isLoading={isValidating}
+              loadingText="Validating..."
+              title="Validate Simulation against Defined Product"
+            >
+              Validate
+            </Button>
+
             {/* <SimulationPopup>
               <Button
                 size="sm"
@@ -1951,14 +2223,15 @@ const BlockDiagram = () => {
                   <button
                     type="button"
                     className="diagram-tabs__action"
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      if (saveSimulationNow) await saveSimulationNow();
+                      saveTab(activeTabId);
                     }}
-                    title="Save"
-                    style={{ zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', background: '#ffffff', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', color: '#374151' }}
+                    disabled={isSavingTab}
+                    title="Save Tab"
+                    style={{ zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', background: '#ffffff', border: '1px solid #d1d5db', borderRadius: '6px', cursor: isSavingTab ? 'not-allowed' : 'pointer', color: '#374151' }}
                   >
-                    <Save size={16} />
+                    {isSavingTab ? <Loader2 size={16} className="diagram-spinner" /> : <Save size={16} />}
                   </button>
                 </div>
 

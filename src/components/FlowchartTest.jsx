@@ -51,7 +51,7 @@ import DiagramTabs from "./DiagramTabs";
 import MobileMenuButton from "./MobileMenuButton";
 import { useResponsiveSidebar } from "../hooks/useResponsiveSidebar";
 import { useResizableSidebar } from "../hooks/useResizableSidebar";
-import { useToast } from "@chakra-ui/react";
+import { useToast, Button } from "@chakra-ui/react";
 import { Settings, ArrowLeftRight, RotateCcw, RotateCw, Monitor, Loader2, Trash, CheckCircle } from "lucide-react";
 
 // --- Gold Standard Transition Components ---
@@ -111,7 +111,9 @@ import { useCanvasFileIntegration } from "../hooks/useCanvasFileIntegration";
 import axios from "axios";
 import { baseURL } from "../utilities";
 import { loadSequenceDiagram } from "../utils/sequenceDiagramLoader";
-import { buildDiagramExportPayload } from "../utils/projectProductExportHelper";
+import { buildDiagramExportPayload, getProductCreationDetails } from "../utils/projectProductExportHelper";
+import { validationManager } from "../validation/ValidationManager";
+import { ValidationAction, ValidationSeverity } from "../validation/types";
 
 // Helper hook for updating node data via Redux
 // This ensures changes persist even when the controlled flow is re-rendered from the store
@@ -5980,6 +5982,65 @@ function DiagramEditor() {
 
   const toast = useToast();
   const [isSaving, setIsSaving] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+
+  const handleValidateFlowchart = useCallback(async () => {
+    setIsValidating(true);
+    try {
+      const currentNodes = nodesRef.current || nodes || [];
+      const currentEdges = edgesRef.current || edges || [];
+      const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
+      const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+      const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
+      const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
+
+      const productDetails = getProductCreationDetails(effectiveProductId, effectiveProjectId, effectiveProductName);
+
+      const validationResult = await validationManager.validateAction(ValidationAction.FLOWCHART_VALIDATE, {
+        flowchart: { nodes: currentNodes, edges: currentEdges },
+        nodes: currentNodes,
+        edges: currentEdges,
+        currentScreen: 'Flowchart',
+        action: 'flowchart.validate',
+        projectId: effectiveProjectId,
+        productId: effectiveProductId,
+        projectName: effectiveProjectName,
+        productName: effectiveProductName,
+        product: productDetails,
+        productDetails: productDetails,
+        isProductDefined: Boolean(effectiveProductId && effectiveProductId !== 'default'),
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR) || validationResult.violations[0];
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          return;
+        }
+      }
+
+      toast({
+        title: "Flowchart Valid",
+        description: "All defined product components match the Flowchart.",
+        status: "success",
+        duration: 3500,
+        isClosable: true,
+        position: "top-right",
+      });
+    } catch (err) {
+      console.error("[Flowchart] Validation error:", err);
+      toast({
+        title: "Validation Error",
+        description: err.message || "Failed to validate flowchart against defined product.",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+        position: "top-right",
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  }, [nodes, edges, activeProductId, activeProjectId, activeProductName, activeProjectName, toast]);
 
   const saveTab = useCallback(async () => {
     setIsSaving(true);
@@ -5988,6 +6049,44 @@ function DiagramEditor() {
       id: effectiveTabId,
       name: activeProjectName || 'Untitled Project'
     };
+
+    try {
+      const currentNodes = nodesRef.current || nodes || [];
+      const currentEdges = edgesRef.current || edges || [];
+      const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
+      const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+      const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
+      const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
+
+      const productDetails = getProductCreationDetails(effectiveProductId, effectiveProjectId, effectiveProductName);
+
+      const validationResult = await validationManager.validateAction(ValidationAction.FLOWCHART_SAVE, {
+        flowchart: { nodes: currentNodes, edges: currentEdges },
+        nodes: currentNodes,
+        edges: currentEdges,
+        currentScreen: 'Flowchart',
+        action: 'flowchart.save',
+        projectId: effectiveProjectId,
+        productId: effectiveProductId,
+        projectName: effectiveProjectName,
+        productName: effectiveProductName,
+        product: productDetails,
+        productDetails: productDetails,
+        isProductDefined: Boolean(effectiveProductId && effectiveProductId !== 'default'),
+      });
+
+      if (!validationResult.valid && validationResult.violations?.length > 0) {
+        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR);
+        if (errorViolation) {
+          validationManager.setActiveViolation(errorViolation);
+          setIsSaving(false);
+          return;
+        }
+      }
+    } catch (valErr) {
+      console.warn("[Flowchart] Validation check warning:", valErr);
+    }
+
 
     let viewport = { x: 0, y: 0, zoom: 1 };
     try {
@@ -6894,6 +6993,18 @@ function DiagramEditor() {
                 <ArrowLeftRight size={14} />
                 Load Sequence
               </button> */}
+              <Button
+                size="sm"
+                colorScheme="blue"
+                variant="outline"
+                leftIcon={<CheckCircle size={15} />}
+                onClick={handleValidateFlowchart}
+                isLoading={isValidating}
+                loadingText="Validating..."
+                title="Validate Flowchart against Defined Product"
+              >
+                Validate
+              </Button>
               <CreateProductButton />
             </div>
           </div>

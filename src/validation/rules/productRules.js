@@ -28,8 +28,8 @@ export const productRules = [
           message: 'Product configuration is incomplete.',
           reason: 'A unique Product ID is required to bind hardware configurations and diagram schemas.',
           recommendation: 'Specify a valid Product ID in the product definition.',
-          targetScreen: 'Define Product',
-          targetAction: 'open-define-product',
+          targetScreen: 'View Product',
+          targetAction: 'open-view-product',
           canAutoFix: false,
         };
       }
@@ -59,8 +59,8 @@ export const productRules = [
           message: 'Target MCU hardware architecture is not specified.',
           reason: 'The hardware configuration must declare the target microcontroller (e.g. ESP32-S3, STM32, NRF52) to compile firmware correctly.',
           recommendation: 'Select the target MCU in Define Product configuration.',
-          targetScreen: 'Define Product',
-          targetAction: 'open-define-product',
+          targetScreen: 'View Product',
+          targetAction: 'open-view-product',
           canAutoFix: false,
         };
       }
@@ -115,8 +115,8 @@ export const productRules = [
             message: 'One or more defined product components are missing required name or type fields.',
             reason: 'Every component must specify its functional name and sensor/actuator type.',
             recommendation: 'Edit the product component table and fill in all required fields.',
-            targetScreen: 'Define Product',
-            targetAction: 'open-define-product',
+            targetScreen: 'View Product',
+            targetAction: 'open-view-product',
             canAutoFix: false,
           };
         }

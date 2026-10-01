@@ -111,6 +111,13 @@ const simulationSlice = createSlice({
             if (tab) {
                 tab.name = newName;
             }
+        },
+        markTabClean: (state, action) => {
+            const tabId = action.payload;
+            const tab = state.tabs.find(t => String(t.id) === String(tabId));
+            if (tab) {
+                tab.dirty = false;
+            }
         }
     },
   extraReducers: (builder) => {
@@ -129,7 +136,8 @@ export const {
     addConnectionToTab,
     setTabSymbolsAndConnections,
     updateTabContent,
-    renameTab
+    renameTab,
+    markTabClean
 } = simulationSlice.actions;
 
 export default simulationSlice.reducer;

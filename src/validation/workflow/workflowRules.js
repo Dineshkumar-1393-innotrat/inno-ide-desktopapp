@@ -38,7 +38,12 @@ export const WORKFLOW_DEPENDENCIES = {
     previous: WorkflowStage.LOGIC_DIAGRAM,
     required: ['project', 'product', 'blockDiagram', 'logicDiagram'],
     displayName: 'Simulate',
-    actionTriggers: [ValidationAction.SIMULATION_START, ValidationAction.SIMULATION_STEP],
+    actionTriggers: [
+      ValidationAction.SIMULATION_START,
+      ValidationAction.SIMULATION_STEP,
+      ValidationAction.SIMULATION_VALIDATE,
+      ValidationAction.SIMULATION_SAVE,
+    ],
   },
 
   [WorkflowStage.WRITE_CODE]: {

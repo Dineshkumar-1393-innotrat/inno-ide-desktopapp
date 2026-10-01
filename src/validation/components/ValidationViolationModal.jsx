@@ -36,9 +36,153 @@ const ValidationViolationModal = ({
 }) => {
   if (!violation) return null;
 
-  const title = violation.title || 'Workflow Validation Violation';
-  const message = violation.message || 'Action cannot continue due to a workflow violation.';
-  const requiredStage = violation.requiredStage || violation.targetScreen;
+  const isSimpleModal =
+    violation.id === 'workflow.order.define-product.missing-project' ||
+    violation.id === 'product:component-definition-valid' ||
+    violation.id === 'product:id-required' ||
+    violation.id === 'product:mcu-required' ||
+    violation.id === 'blockDiagram:product-consistency' ||
+    violation.id === 'flowchart:product-consistency' ||
+    violation.id === 'simulation:product-consistency' ||
+    violation.ruleName === 'Component Definitions Valid' ||
+    violation.ruleName === 'Product ↔ Block Diagram Consistency' ||
+    violation.ruleName === 'Product ↔ Flowchart Consistency' ||
+    violation.ruleName === 'Product ↔ Simulation Consistency' ||
+    violation.ruleName === 'Workflow Sequence: Create Project Required' ||
+    violation.targetScreen === 'Define Product' ||
+    violation.targetScreen === 'View Product' ||
+    violation.requiredStage === 'Define Product' ||
+    violation.requiredStage === 'View Product' ||
+    violation.isSimple;
+
+  if (isSimpleModal) {
+    let rawRequiredStage = violation.requiredStage || violation.targetScreen || '';
+    if (
+      violation.id === 'blockDiagram:product-consistency' ||
+      violation.id === 'flowchart:product-consistency' ||
+      violation.id === 'simulation:product-consistency' ||
+      violation.ruleName === 'Product ↔ Block Diagram Consistency' ||
+      violation.ruleName === 'Product ↔ Flowchart Consistency' ||
+      violation.ruleName === 'Product ↔ Simulation Consistency'
+    ) {
+      rawRequiredStage = 'View Product';
+    }
+
+    const requiredStage =
+      rawRequiredStage === 'Define Product'
+        ? 'View Product'
+        : rawRequiredStage || (violation.id?.includes('define-product.missing-project') ? 'Create Project' : 'View Product');
+
+    let displayText =
+      violation.displayMessage ||
+      violation.message ||
+      'Action cannot continue due to a workflow violation.';
+    if (
+      violation.id === 'blockDiagram:product-consistency' ||
+      violation.ruleName === 'Product ↔ Block Diagram Consistency'
+    ) {
+      displayText = 'The defined product does not match the product specified in the block diagram.';
+    } else if (
+      violation.id === 'flowchart:product-consistency' ||
+      violation.ruleName === 'Product ↔ Flowchart Consistency'
+    ) {
+      displayText = 'The defined product does not match the product specified in the flowchart.';
+    } else if (
+      violation.id === 'simulation:product-consistency' ||
+      violation.ruleName === 'Product ↔ Simulation Consistency'
+    ) {
+      displayText = 'The defined product does not match the product specified in the simulation.';
+    } else if (
+      violation.id === 'workflow.order.define-product.missing-project' ||
+      violation.ruleName === 'Workflow Sequence: Create Project Required'
+    ) {
+      displayText = 'Please create a project before defining a product.';
+    }
+
+    return (
+      <Modal
+        isOpen={Boolean(open)}
+        onClose={onClose}
+        isCentered
+        size="md"
+        motionPreset="slideInBottom"
+      >
+        <ModalOverlay bg="blackAlpha.600" />
+        <ModalContent
+          bg="white"
+          borderRadius="xl"
+          boxShadow="2xl"
+          border="1px solid"
+          borderColor="gray.200"
+          overflow="hidden"
+          mx={4}
+        >
+          <ModalCloseButton color="gray.500" top={3} right={3} zIndex={10} />
+
+          <ModalBody px={6} pt={8} pb={6}>
+            <Text
+              fontSize="md"
+              fontWeight="medium"
+              color="gray.800"
+              textAlign="center"
+              lineHeight="tall"
+            >
+              {displayText}
+            </Text>
+          </ModalBody>
+
+          <ModalFooter
+            bg="gray.50"
+            px={6}
+            py={4}
+            borderTop="1px solid"
+            borderColor="gray.100"
+            gap={3}
+            justifyContent="flex-end"
+          >
+            {requiredStage && (
+              <Button
+                size="sm"
+                colorScheme="red"
+                rightIcon={<ArrowRight size={16} />}
+                onClick={() =>
+                  onNavigate?.({
+                    ...violation,
+                    targetScreen: requiredStage,
+                    targetAction:
+                      requiredStage === 'View Product'
+                        ? 'open-view-product'
+                        : violation.targetAction,
+                  })
+                }
+              >
+                Go to {requiredStage}
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    );
+  }
+
+  const title = violation.title || 'Workflow Rule Violation';
+  let message = violation.message || 'Action cannot continue due to a workflow violation.';
+  if (
+    violation.id === 'blockDiagram:product-consistency' ||
+    violation.ruleName === 'Product ↔ Block Diagram Consistency'
+  ) {
+    message = 'The defined product does not match the product specified in the block diagram.';
+  } else if (
+    violation.id === 'flowchart:product-consistency' ||
+    violation.ruleName === 'Product ↔ Flowchart Consistency'
+  ) {
+    message = 'The defined product does not match the product specified in the flowchart.';
+  }
+  let rawRequiredStage = violation.requiredStage || violation.targetScreen;
+  const requiredStage = rawRequiredStage === 'Define Product' ? 'View Product' : rawRequiredStage;
   const currentStage = violation.currentStage || violation.workflowArea || 'Current Action';
   const reason = violation.reason || violation.details?.reason || '';
   const recommendation = violation.recommendation || 'Satisfy the workflow requirements to proceed.';

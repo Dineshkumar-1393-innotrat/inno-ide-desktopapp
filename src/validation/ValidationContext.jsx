@@ -8,7 +8,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useNavigate } from 'react-router-dom';
 import { validationManager } from './ValidationManager';
 import { workflowValidator } from './workflow/workflowValidator';
-import { WORKFLOW_EVENTS, dispatchOpenCreateProject, dispatchOpenDefineProduct } from './workflow/workflowEvents';
+import { WORKFLOW_EVENTS, dispatchOpenCreateProject, dispatchOpenDefineProduct, dispatchOpenViewProduct } from './workflow/workflowEvents';
 import { STAGE_METADATA } from './types';
 import ValidationViolationModal from './components/ValidationViolationModal';
 import ValidationReportModal from './components/ValidationReportModal';
@@ -83,15 +83,24 @@ export const ValidationProvider = ({ children }) => {
       return;
     }
 
-    if (targetAction === 'open-define-product') {
-      if (window.location.pathname !== '/editor') {
-        navigate('/editor');
-        setTimeout(() => {
-          dispatchOpenDefineProduct();
-        }, 150);
-      } else {
-        dispatchOpenDefineProduct();
-      }
+    if (
+      targetAction === 'open-view-product' ||
+      targetAction === 'open-define-product' ||
+      violation.targetScreen === 'View Product' ||
+      violation.targetScreen === 'Define Product' ||
+      violation.requiredStage === 'View Product' ||
+      violation.requiredStage === 'Define Product'
+    ) {
+      dispatchOpenViewProduct();
+      dispatchOpenDefineProduct();
+      setTimeout(() => {
+        const viewBtn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim().toLowerCase().includes('view product')
+        );
+        if (viewBtn) {
+          viewBtn.click();
+        }
+      }, 50);
       return;
     }
 

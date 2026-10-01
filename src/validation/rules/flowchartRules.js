@@ -4,6 +4,47 @@
  */
 
 import { ValidationSeverity, ValidationAction } from '../types.js';
+import { extractProductComponents, matchesComponent } from './blockDiagramRules.js';
+
+export const extractFlowchartNodes = (context = {}) => {
+  let nodes = context.flowchart?.nodes || context.nodes || context.diagramData?.flowchart?.data;
+  if (Array.isArray(nodes) && nodes.length > 0) {
+    return nodes;
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    const projId = context.projectId || context.project?.id || localStorage.getItem('activeProjectId');
+    const projName = context.projectName || context.project?.name || localStorage.getItem('activeProjectName');
+    const userId = context.userId || 'default';
+
+    const keysToTry = [
+      projId && `innoide:flowchart_tabs:${userId}:${projId}`,
+      projId && `innoide:flowchart_tabs:${projId}`,
+      projName && `innoide:flowchart_tabs:${projName}`,
+      'innoide:flowchart_nodes',
+    ].filter(Boolean);
+
+    for (const key of keysToTry) {
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+          if (Array.isArray(parsed?.tabs)) {
+            const tabWithNodes = parsed.tabs.find((t) => Array.isArray(t?.state?.nodes) && t.state.nodes.length > 0);
+            if (tabWithNodes) {
+              return tabWithNodes.state.nodes;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  return Array.isArray(nodes) ? nodes : [];
+};
 
 export const flowchartRules = [
   {
@@ -181,6 +222,72 @@ export const flowchartRules = [
           assignedPins.set(pin, node.data?.label || `Node ${node.id}`);
         }
       }
+      return { valid: true };
+    },
+  },
+
+  {
+    id: 'flowchart:product-consistency',
+    workflowArea: 'logic-diagram',
+    ruleName: 'Product ↔ Flowchart Consistency',
+    severity: ValidationSeverity.ERROR,
+    trigger: [
+      ValidationAction.FLOWCHART_VALIDATE,
+      ValidationAction.FLOWCHART_SAVE,
+    ],
+    validate: async (context) => {
+      const productComponents = extractProductComponents(context);
+      if (productComponents.length === 0) {
+        return { valid: true };
+      }
+
+      const nodes = extractFlowchartNodes(context);
+      if (nodes.length === 0) {
+        return { valid: true };
+      }
+
+      const nodeLabels = nodes
+        .map((n) => {
+          return (
+            n.data?.label ||
+            n.data?.name ||
+            n.data?.component ||
+            n.data?.text ||
+            n.data?.action ||
+            n.label ||
+            n.name ||
+            n.type ||
+            ''
+          );
+        })
+        .filter(Boolean);
+
+      const missingComponents = productComponents.filter(
+        (comp) => !matchesComponent(comp, nodeLabels)
+      );
+
+      if (missingComponents.length > 0) {
+        return {
+          valid: false,
+          violationCode: 'PRODUCT_FLOWCHART_MISSING',
+          title: 'Workflow Rule Violation',
+          ruleName: 'Product ↔ Flowchart Consistency',
+          message: 'The defined product does not match the product specified in the flowchart.',
+          reason: `The Product defines ${productComponents.length} component(s) (${productComponents.join(', ')}), but the Flowchart is missing ${missingComponents.length} of them: ${missingComponents.join(', ')}.`,
+          details: {
+            definedComponents: productComponents,
+            missingComponents: missingComponents,
+            canvasComponents: nodeLabels,
+          },
+          recommendation: `Add or reference the missing component(s): ${missingComponents.join(', ')} in the Flowchart before proceeding.`,
+          sourceScreen: context.currentScreen || 'Flowchart',
+          targetScreen: 'Logic Diagram',
+          targetRoute: '/FlowchartTest',
+          affectedComponents: missingComponents,
+          canAutoFix: false,
+        };
+      }
+
       return { valid: true };
     },
   },

@@ -14,6 +14,27 @@ import { HTML5Backend } from "react-dnd-html5-backend";
 import { useRouteRestoration } from "./hooks/useRouteRestoration";
 import { ValidationProvider } from "./validation";
 
+// Safe HTML5Backend wrapper to prevent "Cannot have two HTML5 backends at the same time" errors during Fast Refresh, StrictMode, or route transitions
+const createSafeHTML5Backend = (manager, context, options) => {
+  const backend = HTML5Backend(manager, context, options);
+  const origSetup = backend.setup.bind(backend);
+  backend.setup = () => {
+    if (typeof window !== "undefined" && window.__isReactDndBackendSetUp) {
+      window.__isReactDndBackendSetUp = false;
+    }
+    try {
+      origSetup();
+    } catch (err) {
+      if (err.message && err.message.includes("Cannot have two HTML5 backends")) {
+        console.warn("[react-dnd] Suppressed duplicate HTML5Backend setup:", err);
+      } else {
+        throw err;
+      }
+    }
+  };
+  return backend;
+};
+
 // Eagerly loaded core / lightweight components
 import Home from "./components/Home";
 import Feedback from "./components/Feedback";
@@ -96,7 +117,10 @@ const App = () => {
           <AuthProvider>
             <MeetingProvider>
               <ValidationProvider>
-                <DndProvider backend={HTML5Backend}>
+                <DndProvider
+                  backend={createSafeHTML5Backend}
+                  context={typeof window !== "undefined" ? window : undefined}
+                >
                   <Box minH="100vh" display="flex" flexDirection="column" overflowX="hidden">
                     <Suspense fallback={<PageLoader />}>
                       <Routes>

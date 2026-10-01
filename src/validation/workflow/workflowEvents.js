@@ -9,6 +9,7 @@ export const WORKFLOW_EVENTS = {
   REVALIDATE: 'innoide:revalidate-requested',
   CREATE_PROJECT: 'innoide:create-new-project',
   DEFINE_PRODUCT: 'innoide:open-define-product',
+  VIEW_PRODUCT: 'innoide:open-view-product',
   NAVIGATE_STAGE: 'innoide:navigate-stage',
 };
 
@@ -50,4 +51,9 @@ export const dispatchOpenCreateProject = () => {
 export const dispatchOpenDefineProduct = () => {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(WORKFLOW_EVENTS.DEFINE_PRODUCT));
+};
+
+export const dispatchOpenViewProduct = () => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(WORKFLOW_EVENTS.VIEW_PRODUCT));
 };

@@ -130,7 +130,7 @@ const normalizeText = (str) => {
     .replace(/[^a-z0-9]/g, '');
 };
 
-const matchesComponent = (compName, nodeLabels) => {
+export const matchesComponent = (compName, nodeLabels) => {
   const normComp = normalizeText(compName);
   if (!normComp) return false;
 
@@ -258,7 +258,7 @@ export const blockDiagramRules = [
           violationCode: 'PRODUCT_COMPONENT_MISSING',
           title: 'Workflow Rule Violation',
           ruleName: 'Product ↔ Block Diagram Consistency',
-          message: 'The Block Diagram does not match the Product definition.',
+          message: 'The defined product does not match the product specified in the block diagram.',
           reason: `The Product defines ${productComponents.length} component(s) (${productComponents.join(', ')}), but the Block Diagram is missing ${missingComponents.length} of them: ${missingComponents.join(', ')}.`,
           details: {
             definedComponents: productComponents,

@@ -4,7 +4,7 @@
  * InnoIDE General Development Workflow Guide prerequisites.
  */
 
-import { WorkflowStage, ValidationSeverity, STAGE_METADATA } from '../types.js';
+import { WorkflowStage, ValidationSeverity, ValidationAction, STAGE_METADATA } from '../types.js';
 import { WORKFLOW_DEPENDENCIES } from './workflowRules.js';
 
 class WorkflowValidator {
@@ -42,6 +42,7 @@ class WorkflowValidator {
             requiredStage: 'Create Project',
             ruleName: 'Workflow Sequence: Create Project Required',
             message: 'You cannot create a Product yet.',
+            displayMessage: 'Please create a project before defining a product.',
             reason: 'No project has been created or selected. The project workspace must be created before a product can be defined.',
             recommendation: 'Please create a project first.',
             sourceScreen: resolvedContext.currentScreen || 'App',
@@ -152,29 +153,34 @@ class WorkflowValidator {
           resolvedContext
         );
       }
-      if (!this.isBlockDiagramComplete(resolvedContext)) {
-        return this.createOrderViolation(
-          'Simulation',
-          'Block Diagram',
-          'Simulation cannot start yet.',
-          'The Block Diagram must be mapped out with valid hardware components before running virtual simulation.',
-          'Complete and validate the Block Diagram first.',
-          'navigate-stage',
-          '/BlockDiagram',
-          resolvedContext
-        );
-      }
-      if (!this.isLogicDiagramComplete(resolvedContext)) {
-        return this.createOrderViolation(
-          'Simulation',
-          'Logic Diagram',
-          'Simulation cannot start yet.',
-          'The system logic flow or flowchart must be completed before running simulation.',
-          'Complete the Logic Diagram first.',
-          'navigate-stage',
-          '/FlowchartTest',
-          resolvedContext
-        );
+      if (
+        resolvedContext.action !== ValidationAction.SIMULATION_VALIDATE &&
+        resolvedContext.action !== ValidationAction.SIMULATION_SAVE
+      ) {
+        if (!this.isBlockDiagramComplete(resolvedContext)) {
+          return this.createOrderViolation(
+            'Simulation',
+            'Block Diagram',
+            'Simulation cannot start yet.',
+            'The Block Diagram must be mapped out with valid hardware components before running virtual simulation.',
+            'Complete and validate the Block Diagram first.',
+            'navigate-stage',
+            '/BlockDiagram',
+            resolvedContext
+          );
+        }
+        if (!this.isLogicDiagramComplete(resolvedContext)) {
+          return this.createOrderViolation(
+            'Simulation',
+            'Logic Diagram',
+            'Simulation cannot start yet.',
+            'The system logic flow or flowchart must be completed before running simulation.',
+            'Complete the Logic Diagram first.',
+            'navigate-stage',
+            '/FlowchartTest',
+            resolvedContext
+          );
+        }
       }
       return { allowed: true };
     }
