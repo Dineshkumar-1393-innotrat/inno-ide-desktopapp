@@ -6019,23 +6019,24 @@ function DiagramEditor() {
         }
       }
 
-      toast({
-        title: "Flowchart Valid",
-        description: "All defined product components match the Flowchart.",
-        status: "success",
-        duration: 3500,
-        isClosable: true,
-        position: "top-right",
+      validationManager.setActiveViolation({
+        id: 'flowchart:valid',
+        isSuccess: true,
+        ruleName: 'Flowchart Valid',
+        message: 'All defined product components match the Flowchart.',
+        displayMessage: 'All defined product components match the Flowchart.',
+        targetScreen: 'Logic Diagram',
+        sourceScreen: 'Flowchart',
       });
     } catch (err) {
       console.error("[Flowchart] Validation error:", err);
-      toast({
-        title: "Validation Error",
-        description: err.message || "Failed to validate flowchart against defined product.",
-        status: "error",
-        duration: 3000,
-        isClosable: true,
-        position: "top-right",
+      validationManager.setActiveViolation({
+        id: 'flowchart:error',
+        ruleName: 'Validation Error',
+        message: err.message || 'Failed to validate flowchart against defined product.',
+        displayMessage: err.message || 'Failed to validate flowchart against defined product.',
+        targetScreen: 'Logic Diagram',
+        sourceScreen: 'Flowchart',
       });
     } finally {
       setIsValidating(false);

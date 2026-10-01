@@ -52,19 +52,31 @@ import Logout from "./components/Logout";
 import UserButton from "./components/UserButton";
 import Toggle from "./components/Toggle/Toggle";
 
+// Resilient lazy loader with automatic retry on dynamic import failure / HMR refresh
+const lazyWithRetry = (componentImport) =>
+  lazy(async () => {
+    try {
+      return await componentImport();
+    } catch (error) {
+      console.warn("[App] Retrying dynamic import after transient failure:", error);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return await componentImport();
+    }
+  });
+
 // Lazy-loaded heavy components for instant app startup & route transition performance
-const CodeEditor = lazy(() => import("./components/CodeEditor"));
-const BlockDiagramTest = lazy(() => import("./components/BlockDiagramTest"));
-const FlowchartTest = lazy(() => import("./components/FlowchartTest"));
-const Simulation = lazy(() => import("./components/Simulation"));
-const BlockProgramming = lazy(() => import("./components/BlockProgramming"));
-const MathCodeEditor = lazy(() => import("./components/MathCodeEditor"));
-const MeetingPage = lazy(() => import("./components/MeetingPage"));
-const RuleEnginePage = lazy(() => import("./components/RuleEngine/RuleEnginePage"));
-const ESP32Flasher = lazy(() => import("./components/ESP32Flasher"));
-const VisualizeData = lazy(() => import("./components/dataVisualization/VisualizeData"));
-const CreateProductDefination = lazy(() => import("./components/Product/ProductDefinition/CreateProductDefinition"));
-const EmbeddedFileManagement = lazy(() => import("./components/EmbeddedFileManagement/EmbeddedFileManagement"));
+const CodeEditor = lazyWithRetry(() => import("./components/CodeEditor"));
+const BlockDiagramTest = lazyWithRetry(() => import("./components/BlockDiagramTest"));
+const FlowchartTest = lazyWithRetry(() => import("./components/FlowchartTest"));
+const Simulation = lazyWithRetry(() => import("./components/Simulation"));
+const BlockProgramming = lazyWithRetry(() => import("./components/BlockProgramming"));
+const MathCodeEditor = lazyWithRetry(() => import("./components/MathCodeEditor"));
+const MeetingPage = lazyWithRetry(() => import("./components/MeetingPage"));
+const RuleEnginePage = lazyWithRetry(() => import("./components/RuleEngine/RuleEnginePage"));
+const ESP32Flasher = lazyWithRetry(() => import("./components/ESP32Flasher"));
+const VisualizeData = lazyWithRetry(() => import("./components/dataVisualization/VisualizeData"));
+const CreateProductDefination = lazyWithRetry(() => import("./components/Product/ProductDefinition/CreateProductDefinition"));
+const EmbeddedFileManagement = lazyWithRetry(() => import("./components/EmbeddedFileManagement/EmbeddedFileManagement"));
 
 // Sleek fallback loader
 const PageLoader = () => (

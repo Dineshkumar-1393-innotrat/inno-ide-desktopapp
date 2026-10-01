@@ -3021,23 +3021,24 @@ function DiagramEditor() {
         }
       }
 
-      toast({
-        title: "Block Diagram Valid",
-        description: "All defined product components match the Block Diagram.",
-        status: "success",
-        duration: 3500,
-        isClosable: true,
-        position: "top-right",
+      validationManager.setActiveViolation({
+        id: 'blockDiagram:valid',
+        isSuccess: true,
+        ruleName: 'Block Diagram Valid',
+        message: 'All defined product components match the Block Diagram.',
+        displayMessage: 'All defined product components match the Block Diagram.',
+        targetScreen: 'Block Diagram',
+        sourceScreen: 'BlockDiagram',
       });
     } catch (err) {
       console.error("[BlockDiagram] Validation error:", err);
-      toast({
-        title: "Validation Error",
-        description: err.message || "Failed to validate block diagram against defined product.",
-        status: "error",
-        duration: 3000,
-        isClosable: true,
-        position: "top-right",
+      validationManager.setActiveViolation({
+        id: 'blockDiagram:error',
+        ruleName: 'Validation Error',
+        message: err.message || 'Failed to validate block diagram against defined product.',
+        displayMessage: err.message || 'Failed to validate block diagram against defined product.',
+        targetScreen: 'Block Diagram',
+        sourceScreen: 'BlockDiagram',
       });
     } finally {
       setIsValidating(false);

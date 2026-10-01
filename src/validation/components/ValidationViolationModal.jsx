@@ -1,7 +1,7 @@
 /**
  * InnoIDE ValidationViolationModal
  * Reusable modal displayed immediately upon any workflow rule or order violation.
- * Explains: What failed, Why it failed, How to fix it, and provides direct navigation.
+ * Provides a clean, modern, simplified popup matching all IDE screens.
  */
 
 import React from 'react';
@@ -9,23 +9,18 @@ import {
   Modal,
   ModalOverlay,
   ModalContent,
-  ModalHeader,
   ModalBody,
   ModalFooter,
   ModalCloseButton,
   Button,
-  Box,
-  Flex,
   Text,
-  Badge,
-  VStack,
-  HStack,
-  List,
-  ListItem,
-  ListIcon,
-  Divider,
 } from '@chakra-ui/react';
-import { AlertTriangle, ArrowRight, CheckCircle2, Wrench, XCircle } from 'lucide-react';
+import { ArrowRight, Wrench } from 'lucide-react';
+
+const normalizeScreen = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/[\s\-_/]+/g, '');
 
 const ValidationViolationModal = ({
   open,
@@ -36,168 +31,150 @@ const ValidationViolationModal = ({
 }) => {
   if (!violation) return null;
 
-  const isSimpleModal =
-    violation.id === 'workflow.order.define-product.missing-project' ||
-    violation.id === 'product:component-definition-valid' ||
-    violation.id === 'product:id-required' ||
-    violation.id === 'product:mcu-required' ||
+  // 1. Resolve Target / Required Stage
+  let rawRequiredStage = violation.requiredStage || violation.targetScreen || '';
+  if (
     violation.id === 'blockDiagram:product-consistency' ||
     violation.id === 'flowchart:product-consistency' ||
     violation.id === 'simulation:product-consistency' ||
-    violation.ruleName === 'Component Definitions Valid' ||
     violation.ruleName === 'Product ↔ Block Diagram Consistency' ||
     violation.ruleName === 'Product ↔ Flowchart Consistency' ||
-    violation.ruleName === 'Product ↔ Simulation Consistency' ||
-    violation.ruleName === 'Workflow Sequence: Create Project Required' ||
-    violation.targetScreen === 'Define Product' ||
-    violation.targetScreen === 'View Product' ||
-    violation.requiredStage === 'Define Product' ||
-    violation.requiredStage === 'View Product' ||
-    violation.isSimple;
-
-  if (isSimpleModal) {
-    let rawRequiredStage = violation.requiredStage || violation.targetScreen || '';
-    if (
-      violation.id === 'blockDiagram:product-consistency' ||
-      violation.id === 'flowchart:product-consistency' ||
-      violation.id === 'simulation:product-consistency' ||
-      violation.ruleName === 'Product ↔ Block Diagram Consistency' ||
-      violation.ruleName === 'Product ↔ Flowchart Consistency' ||
-      violation.ruleName === 'Product ↔ Simulation Consistency'
-    ) {
-      rawRequiredStage = 'View Product';
-    }
-
-    const requiredStage =
-      rawRequiredStage === 'Define Product'
-        ? 'View Product'
-        : rawRequiredStage || (violation.id?.includes('define-product.missing-project') ? 'Create Project' : 'View Product');
-
-    let displayText =
-      violation.displayMessage ||
-      violation.message ||
-      'Action cannot continue due to a workflow violation.';
-    if (
-      violation.id === 'blockDiagram:product-consistency' ||
-      violation.ruleName === 'Product ↔ Block Diagram Consistency'
-    ) {
-      displayText = 'The defined product does not match the product specified in the block diagram.';
-    } else if (
-      violation.id === 'flowchart:product-consistency' ||
-      violation.ruleName === 'Product ↔ Flowchart Consistency'
-    ) {
-      displayText = 'The defined product does not match the product specified in the flowchart.';
-    } else if (
-      violation.id === 'simulation:product-consistency' ||
-      violation.ruleName === 'Product ↔ Simulation Consistency'
-    ) {
-      displayText = 'The defined product does not match the product specified in the simulation.';
-    } else if (
-      violation.id === 'workflow.order.define-product.missing-project' ||
-      violation.ruleName === 'Workflow Sequence: Create Project Required'
-    ) {
-      displayText = 'Please create a project before defining a product.';
-    }
-
-    return (
-      <Modal
-        isOpen={Boolean(open)}
-        onClose={onClose}
-        isCentered
-        size="md"
-        motionPreset="slideInBottom"
-      >
-        <ModalOverlay bg="blackAlpha.600" />
-        <ModalContent
-          bg="white"
-          borderRadius="xl"
-          boxShadow="2xl"
-          border="1px solid"
-          borderColor="gray.200"
-          overflow="hidden"
-          mx={4}
-        >
-          <ModalCloseButton color="gray.500" top={3} right={3} zIndex={10} />
-
-          <ModalBody px={6} pt={8} pb={6}>
-            <Text
-              fontSize="md"
-              fontWeight="medium"
-              color="gray.800"
-              textAlign="center"
-              lineHeight="tall"
-            >
-              {displayText}
-            </Text>
-          </ModalBody>
-
-          <ModalFooter
-            bg="gray.50"
-            px={6}
-            py={4}
-            borderTop="1px solid"
-            borderColor="gray.100"
-            gap={3}
-            justifyContent="flex-end"
-          >
-            {requiredStage && (
-              <Button
-                size="sm"
-                colorScheme="red"
-                rightIcon={<ArrowRight size={16} />}
-                onClick={() =>
-                  onNavigate?.({
-                    ...violation,
-                    targetScreen: requiredStage,
-                    targetAction:
-                      requiredStage === 'View Product'
-                        ? 'open-view-product'
-                        : violation.targetAction,
-                  })
-                }
-              >
-                Go to {requiredStage}
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              Close
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
-    );
+    violation.ruleName === 'Product ↔ Simulation Consistency'
+  ) {
+    rawRequiredStage = 'View Product';
   }
 
-  const title = violation.title || 'Workflow Rule Violation';
-  let message = violation.message || 'Action cannot continue due to a workflow violation.';
+  const requiredStage =
+    rawRequiredStage === 'Define Product'
+      ? 'View Product'
+      : rawRequiredStage ||
+        (violation.id?.includes('define-product.missing-project')
+          ? 'Create Project'
+          : '');
+
+  // 2. Resolve Friendly Display Text
+  let displayText =
+    violation.displayMessage ||
+    violation.message ||
+    'Action cannot continue due to a workflow violation.';
+
   if (
+    violation.id === 'diagram:has-start' ||
+    violation.violationCode === 'START_NODE_MISSING' ||
+    violation.ruleName === 'Flowchart Start Node Required' ||
+    violation.ruleName === 'Start Node Exists'
+  ) {
+    displayText =
+      'The flowchart does not contain an entry point (Start / Terminator node).';
+  } else if (
     violation.id === 'blockDiagram:product-consistency' ||
     violation.ruleName === 'Product ↔ Block Diagram Consistency'
   ) {
-    message = 'The defined product does not match the product specified in the block diagram.';
+    displayText =
+      'The defined product does not match the product specified in the block diagram.';
   } else if (
     violation.id === 'flowchart:product-consistency' ||
     violation.ruleName === 'Product ↔ Flowchart Consistency'
   ) {
-    message = 'The defined product does not match the product specified in the flowchart.';
+    displayText =
+      'The defined product does not match the product specified in the flowchart.';
+  } else if (
+    violation.id === 'simulation:product-consistency' ||
+    violation.ruleName === 'Product ↔ Simulation Consistency'
+  ) {
+    displayText =
+      'The defined product does not match the product specified in the simulation.';
+  } else if (
+    violation.id === 'workflow.order.define-product.missing-project' ||
+    violation.ruleName === 'Workflow Sequence: Create Project Required' ||
+    violation.violationCode === 'PROJECT_MISSING'
+  ) {
+    displayText = 'Please create a project before defining a product.';
+  } else if (
+    violation.id === 'blockDiagram:has-components' ||
+    violation.violationCode === 'BLOCK_DIAGRAM_EMPTY'
+  ) {
+    displayText = 'The Block Diagram contains no components.';
+  } else if (
+    violation.id === 'simulation:has-components' ||
+    violation.violationCode === 'SIMULATION_EMPTY'
+  ) {
+    displayText = 'The Simulation contains no components.';
+  } else if (
+    violation.id === 'simulation:valid' ||
+    violation.ruleName === 'Simulation Valid'
+  ) {
+    displayText = 'All defined product components match the Simulation.';
+  } else if (
+    violation.id === 'flowchart:valid' ||
+    violation.ruleName === 'Flowchart Valid'
+  ) {
+    displayText = 'All defined product components match the Flowchart.';
+  } else if (
+    violation.id === 'blockDiagram:valid' ||
+    violation.ruleName === 'Block Diagram Valid'
+  ) {
+    displayText = 'All defined product components match the Block Diagram.';
+  } else if (
+    violation.reason &&
+    (violation.message === 'Flowchart validation failed.' ||
+      violation.message === 'Action cannot continue due to a workflow violation.' ||
+      !violation.message)
+  ) {
+    displayText = violation.reason;
   }
-  let rawRequiredStage = violation.requiredStage || violation.targetScreen;
-  const requiredStage = rawRequiredStage === 'Define Product' ? 'View Product' : rawRequiredStage;
-  const currentStage = violation.currentStage || violation.workflowArea || 'Current Action';
-  const reason = violation.reason || violation.details?.reason || '';
-  const recommendation = violation.recommendation || 'Satisfy the workflow requirements to proceed.';
-  const details = violation.details;
-  const canAutoFix = Boolean(violation.canAutoFix);
+
+  // 3. Determine if user is already on the target screen (to prevent redundant "Go to Logic Diagram" when already on Flowchart)
+  const isSuccess = Boolean(violation.isSuccess || violation.status === 'success');
+  const currentScreen =
+    violation.currentScreen ||
+    violation.sourceScreen ||
+    violation.currentStage ||
+    violation.workflowArea ||
+    '';
+
+  const currentPath =
+    typeof window !== 'undefined' ? window.location?.pathname || '' : '';
+
+  const normCurrent = normalizeScreen(currentScreen);
+  const normPath = normalizeScreen(currentPath);
+  const normTarget = normalizeScreen(requiredStage);
+
+  const isLogicDiagram =
+    normTarget === 'logicdiagram' ||
+    normTarget === 'flowchart' ||
+    normTarget === 'flowcharttest';
+
+  const isBlockDiagram = normTarget === 'blockdiagram';
+
+  const isSimulation = normTarget === 'simulation';
+
+  const isSameScreen = Boolean(
+    requiredStage &&
+      (normTarget === normCurrent ||
+        normTarget === normPath ||
+        (isLogicDiagram &&
+          (normCurrent.includes('logic') ||
+            normCurrent.includes('flowchart') ||
+            normPath.includes('flowchart'))) ||
+        (isBlockDiagram &&
+          (normCurrent.includes('block') || normPath.includes('block'))) ||
+        (isSimulation &&
+          (normCurrent.includes('simul') || normPath.includes('simul'))))
+  );
+
+  const showNavButton = Boolean(requiredStage && !isSameScreen && !isSuccess);
+  const canAutoFix = Boolean(violation.canAutoFix && !isSuccess);
 
   return (
     <Modal
       isOpen={Boolean(open)}
       onClose={onClose}
       isCentered
-      size="lg"
+      size="md"
       motionPreset="slideInBottom"
     >
-      <ModalOverlay bg="blackAlpha.700" />
+      <ModalOverlay bg="blackAlpha.600" />
       <ModalContent
         bg="white"
         borderRadius="xl"
@@ -207,132 +184,29 @@ const ValidationViolationModal = ({
         overflow="hidden"
         mx={4}
       >
-        <ModalCloseButton color="red.700" top={4} right={4} zIndex={10} />
-        {/* Header Banner */}
-        <Box bg="red.50" px={6} py={5} borderBottom="1px solid" borderColor="red.100">
-          <Flex align="center" gap={3}>
-            <Flex
-              w="44px"
-              h="44px"
-              borderRadius="full"
-              bg="red.100"
-              color="red.600"
-              align="center"
-              justify="center"
-              flexShrink={0}
-            >
-              <AlertTriangle size={24} />
-            </Flex>
-            <Box flex="1">
-              <Text fontSize="lg" fontWeight="bold" color="red.800" lineHeight="short">
-                {title}
-              </Text>
-              {violation.ruleName && (
-                <Text fontSize="xs" color="red.600" fontWeight="medium" mt={0.5}>
-                  Rule: {violation.ruleName}
-                </Text>
-              )}
-            </Box>
-          </Flex>
-        </Box>
+        <ModalCloseButton color="gray.500" top={3} right={3} zIndex={10} />
 
-        <ModalBody px={6} py={5}>
-          <VStack align="stretch" spacing={4}>
-            {/* Primary message */}
-            <Text fontSize="md" fontWeight="semibold" color="gray.800">
-              {message}
-            </Text>
-
-            {/* Stages overview card */}
-            {(requiredStage || currentStage) && (
-              <Box bg="gray.50" p={4} borderRadius="xl" border="1px solid" borderColor="gray.200">
-                <HStack spacing={4} justify="space-between" align="center">
-                  <Box flex="1">
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
-                      Current Action
-                    </Text>
-                    <Badge colorScheme="purple" px={2.5} py={1} borderRadius="md" mt={1} fontSize="xs">
-                      {currentStage}
-                    </Badge>
-                  </Box>
-                  <ArrowRight size={18} color="#94a3b8" />
-                  <Box flex="1" textAlign="right">
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase">
-                      Required Stage
-                    </Text>
-                    <Badge colorScheme="red" px={2.5} py={1} borderRadius="md" mt={1} fontSize="xs">
-                      {requiredStage || 'Prerequisite'}
-                    </Badge>
-                  </Box>
-                </HStack>
-              </Box>
-            )}
-
-            {/* Reason */}
-            {reason && (
-              <Box>
-                <Text fontSize="xs" fontWeight="bold" color="gray.500" textTransform="uppercase" mb={1}>
-                  Reason
-                </Text>
-                <Text fontSize="sm" color="gray.700" lineHeight="tall">
-                  {reason}
-                </Text>
-              </Box>
-            )}
-
-            {/* Detailed list breakdown (if missing components or GPIO errors) */}
-            {details?.missingComponents && Array.isArray(details.missingComponents) && details.missingComponents.length > 0 && (
-              <Box bg="red.50" p={3.5} borderRadius="lg" border="1px dashed" borderColor="red.200">
-                <Text fontSize="xs" fontWeight="bold" color="red.800" mb={2}>
-                  Missing Component(s):
-                </Text>
-                <List spacing={1}>
-                  {details.missingComponents.map((comp, idx) => (
-                    <ListItem key={idx} fontSize="xs" color="red.700" display="flex" alignItems="center">
-                      <ListIcon as={XCircle} color="red.500" />
-                      <Text as="span" fontWeight="semibold">{comp}</Text>
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            )}
-
-            {details?.mismatches && Array.isArray(details.mismatches) && details.mismatches.length > 0 && (
-              <Box bg="red.50" p={3.5} borderRadius="lg" border="1px dashed" borderColor="red.200">
-                <Text fontSize="xs" fontWeight="bold" color="red.800" mb={2}>
-                  Configuration Mismatches:
-                </Text>
-                <List spacing={1}>
-                  {details.mismatches.map((item, idx) => (
-                    <ListItem key={idx} fontSize="xs" color="red.700" display="flex" alignItems="center">
-                      <ListIcon as={XCircle} color="red.500" />
-                      <Text as="span">{item}</Text>
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            )}
-
-            <Divider borderColor="gray.100" />
-
-            {/* Recommended action */}
-            <Box bg="blue.50" p={3.5} borderRadius="lg" border="1px solid" borderColor="blue.100">
-              <HStack align="flex-start" spacing={2.5}>
-                <CheckCircle2 size={18} color="#2563eb" style={{ marginTop: '2px', flexShrink: 0 }} />
-                <Box>
-                  <Text fontSize="xs" fontWeight="bold" color="blue.900">
-                    Required Action
-                  </Text>
-                  <Text fontSize="xs" color="blue.800" mt={0.5}>
-                    {recommendation}
-                  </Text>
-                </Box>
-              </HStack>
-            </Box>
-          </VStack>
+        <ModalBody px={6} pt={8} pb={6}>
+          <Text
+            fontSize="md"
+            fontWeight="medium"
+            color="gray.800"
+            textAlign="center"
+            lineHeight="tall"
+          >
+            {displayText}
+          </Text>
         </ModalBody>
 
-        <ModalFooter bg="gray.50" px={6} py={4} borderTop="1px solid" borderColor="gray.100" gap={3}>
+        <ModalFooter
+          bg="gray.50"
+          px={6}
+          py={4}
+          borderTop="1px solid"
+          borderColor="gray.100"
+          gap={3}
+          justifyContent="flex-end"
+        >
           {canAutoFix && (
             <Button
               size="sm"
@@ -344,12 +218,21 @@ const ValidationViolationModal = ({
             </Button>
           )}
 
-          {requiredStage && (
+          {showNavButton && (
             <Button
               size="sm"
               colorScheme="red"
               rightIcon={<ArrowRight size={16} />}
-              onClick={() => onNavigate?.(violation)}
+              onClick={() =>
+                onNavigate?.({
+                  ...violation,
+                  targetScreen: requiredStage,
+                  targetAction:
+                    requiredStage === 'View Product'
+                      ? 'open-view-product'
+                      : violation.targetAction,
+                })
+              }
             >
               Go to {requiredStage}
             </Button>

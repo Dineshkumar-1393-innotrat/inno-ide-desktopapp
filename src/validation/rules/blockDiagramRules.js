@@ -209,6 +209,7 @@ export const blockDiagramRules = [
           title: 'Workflow Rule Violation',
           ruleName: 'Block Diagram Component Required',
           message: 'The Block Diagram contains no components.',
+          displayMessage: 'The Block Diagram contains no components.',
           reason: 'A visual block diagram must represent the hardware blocks and MCU before logic simulation or code generation can occur.',
           recommendation: 'Add the MCU and peripheral components to the Block Diagram canvas.',
           sourceScreen: context.currentScreen || 'BlockDiagram',

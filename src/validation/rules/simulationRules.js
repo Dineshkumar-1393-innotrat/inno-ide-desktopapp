@@ -79,6 +79,37 @@ export const extractSimulationComponents = (context = {}) => {
 
 export const simulationRules = [
   {
+    id: 'simulation:has-components',
+    workflowArea: 'simulate',
+    ruleName: 'Simulation Components Required',
+    severity: ValidationSeverity.ERROR,
+    trigger: [
+      ValidationAction.SIMULATION_VALIDATE,
+      ValidationAction.SIMULATION_SAVE,
+    ],
+    validate: async (context) => {
+      const items = extractSimulationComponents(context);
+      if (!Array.isArray(items) || items.length === 0) {
+        return {
+          valid: false,
+          violationCode: 'SIMULATION_EMPTY',
+          title: 'Workflow Rule Violation',
+          ruleName: 'Simulation Components Required',
+          message: 'The Simulation contains no components.',
+          displayMessage: 'The Simulation contains no components.',
+          reason: 'At least one component must be placed on the Simulation canvas before validating.',
+          recommendation: 'Drag sensors, actuators, or microcontrollers from the left palette onto the Simulation canvas.',
+          sourceScreen: context.currentScreen || 'Simulation',
+          targetScreen: 'Simulation',
+          targetRoute: '/simulation',
+          canAutoFix: false,
+        };
+      }
+      return { valid: true };
+    },
+  },
+
+  {
     id: 'simulation:product-consistency',
     workflowArea: 'simulate',
     ruleName: 'Product ↔ Simulation Consistency',

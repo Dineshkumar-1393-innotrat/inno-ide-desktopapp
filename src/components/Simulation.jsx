@@ -1,5 +1,6 @@
-
-
+/**
+ * InnoIDE Virtual Hardware & Logic Simulation Canvas
+ */
 import React, {
   useState,
   useEffect,
@@ -1286,23 +1287,24 @@ const BlockDiagram = () => {
         }
       }
 
-      toast({
-        title: "Simulation Valid",
-        description: "All defined product components match the Simulation.",
-        status: "success",
-        duration: 3500,
-        isClosable: true,
-        position: "top-right",
+      validationManager.setActiveViolation({
+        id: 'simulation:valid',
+        isSuccess: true,
+        ruleName: 'Simulation Valid',
+        message: 'All defined product components match the Simulation.',
+        displayMessage: 'All defined product components match the Simulation.',
+        targetScreen: 'Simulation',
+        sourceScreen: 'Simulation',
       });
     } catch (err) {
       console.error("[Simulation] Validation error:", err);
-      toast({
-        title: "Validation Error",
-        description: err.message || "Failed to validate simulation against defined product.",
-        status: "error",
-        duration: 3000,
-        isClosable: true,
-        position: "top-right",
+      validationManager.setActiveViolation({
+        id: 'simulation:error',
+        ruleName: 'Validation Error',
+        message: err.message || 'Failed to validate simulation against defined product.',
+        displayMessage: err.message || 'Failed to validate simulation against defined product.',
+        targetScreen: 'Simulation',
+        sourceScreen: 'Simulation',
       });
     } finally {
       setIsValidating(false);
