@@ -433,7 +433,6 @@ export default function ESP32Flasher({
     if (!g) return true;
     const id = String(g.id || "");
     const t = String(g.time || g.timestamp || "");
-    const city = String(g.city || "");
     if (id === "loc-init-1") return true;
     if (
       t === "12:53:01" ||
@@ -448,8 +447,41 @@ export default function ESP32Flasher({
     ) {
       return true;
     }
-    if (city === "Ambattur" || city === "Chennai") return true;
     return false;
+  };
+
+  const getLogTimestampMs = (item) => {
+    if (!item) return 0;
+    if (typeof item.timestamp === "number" && item.timestamp > 0) {
+      return item.timestamp < 1e11 ? item.timestamp * 1000 : item.timestamp;
+    }
+    const rawNum = Number(item.timestamp);
+    if (!isNaN(rawNum) && rawNum > 1e9) {
+      return rawNum < 1e11 ? rawNum * 1000 : rawNum;
+    }
+    const rawTimeNum = Number(item.time);
+    if (!isNaN(rawTimeNum) && rawTimeNum > 1e9) {
+      return rawTimeNum < 1e11 ? rawTimeNum * 1000 : rawTimeNum;
+    }
+    const timeStr = String(item.time || item.timestamp || "").trim();
+    if (timeStr) {
+      const parsedDate = Date.parse(timeStr);
+      if (!isNaN(parsedDate)) return parsedDate;
+
+      const match = timeStr.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+      if (match) {
+        let hrs = parseInt(match[1], 10);
+        const mins = parseInt(match[2], 10);
+        const secs = match[3] ? parseInt(match[3], 10) : 0;
+        const meridian = match[4] ? match[4].toLowerCase() : null;
+        if (meridian === "pm" && hrs < 12) hrs += 12;
+        if (meridian === "am" && hrs === 12) hrs = 0;
+        const now = new Date();
+        now.setHours(hrs, mins, secs, 0);
+        return now.getTime();
+      }
+    }
+    return 0;
   };
 
   const sanitizeWidgets = (wList) => {
@@ -691,18 +723,20 @@ export default function ESP32Flasher({
           }
 
           if (action.switchLocations && Array.isArray(action.switchLocations) && action.switchLocations.length > 0) {
-            setWidgets((prev) =>
-              prev.map((w) => {
+            setWidgets((prev) => {
+              const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
+              const isMatch = (a, b) => (a.id && b.id && a.id === b.id) || (Math.abs(getLogTimestampMs(a) - getLogTimestampMs(b)) < 2000 && a.event === b.event);
+              const updated = prev.map((w) => {
                 if (w.type === "location") {
-                  const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
                   const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
                   const incoming = action.switchLocations.filter(isCleanLoc);
                   const merged = [...incoming];
                   existing.forEach(ex => {
-                    if (!merged.some(m => m.id === ex.id || (m.timestamp === ex.timestamp && m.event === ex.event))) {
+                    if (!merged.some(m => isMatch(m, ex))) {
                       merged.push(ex);
                     }
                   });
+                  merged.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
                   const validLast = (action.location && isCleanLoc(action.location)) ? action.location : (merged[0] || null);
                   return {
                     ...w,
@@ -711,21 +745,27 @@ export default function ESP32Flasher({
                   };
                 }
                 return w;
-              })
-            );
+              });
+              autoPersistApp(updated);
+              return updated;
+            });
           } else if (action.location) {
             const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
             if (isCleanLoc(action.location)) {
-              setWidgets((prev) =>
-                prev.map((w) => {
+              setWidgets((prev) => {
+                const isMatch = (a, b) => (a.id && b.id && a.id === b.id) || (Math.abs(getLogTimestampMs(a) - getLogTimestampMs(b)) < 2000 && a.event === b.event);
+                const updated = prev.map((w) => {
                   if (w.type === "location") {
                     const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
-                    const hist = [action.location, ...existing.filter(h => h.id !== action.location.id).slice(0, 49)];
+                    const hist = [action.location, ...existing.filter(h => !isMatch(h, action.location)).slice(0, 49)];
+                    hist.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
                     return { ...w, lastLocation: action.location, locationHistory: hist };
                   }
                   return w;
-                })
-              );
+                });
+                autoPersistApp(updated);
+                return updated;
+              });
             }
           }
 
@@ -769,18 +809,20 @@ export default function ESP32Flasher({
               setDeviceDetectedLocation(data.hostLocation);
             }
             if (data.switchLocations && Array.isArray(data.switchLocations) && data.switchLocations.length > 0) {
-              setWidgets((prev) =>
-                prev.map((w) => {
+              setWidgets((prev) => {
+                const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
+                const isMatch = (a, b) => (a.id && b.id && a.id === b.id) || (Math.abs(getLogTimestampMs(a) - getLogTimestampMs(b)) < 2000 && a.event === b.event);
+                const updated = prev.map((w) => {
                   if (w.type === "location") {
-                    const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
                     const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
                     const incoming = data.switchLocations.filter(isCleanLoc);
                     const merged = [...incoming];
                     existing.forEach(ex => {
-                      if (!merged.some(m => m.id === ex.id || (m.timestamp === ex.timestamp && m.event === ex.event))) {
+                      if (!merged.some(m => isMatch(m, ex))) {
                         merged.push(ex);
                       }
                     });
+                    merged.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
                     const validLast = (data.lastLocation && isCleanLoc(data.lastLocation)) ? data.lastLocation : (merged[0] || null);
                     return {
                       ...w,
@@ -789,21 +831,27 @@ export default function ESP32Flasher({
                     };
                   }
                   return w;
-                })
-              );
+                });
+                autoPersistApp(updated);
+                return updated;
+              });
             } else if (data.lastLocation) {
               const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
               if (isCleanLoc(data.lastLocation)) {
-                setWidgets((prev) =>
-                  prev.map((w) => {
+                setWidgets((prev) => {
+                  const isMatch = (a, b) => (a.id && b.id && a.id === b.id) || (Math.abs(getLogTimestampMs(a) - getLogTimestampMs(b)) < 2000 && a.event === b.event);
+                  const updated = prev.map((w) => {
                     if (w.type === "location") {
                       const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
-                      const hist = [data.lastLocation, ...existing.filter(h => h.id !== data.lastLocation.id).slice(0, 49)];
+                      const hist = [data.lastLocation, ...existing.filter(h => !isMatch(h, data.lastLocation)).slice(0, 49)];
+                      hist.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
                       return { ...w, lastLocation: data.lastLocation, locationHistory: hist };
                     }
                     return w;
-                  })
-                );
+                  });
+                  autoPersistApp(updated);
+                  return updated;
+                });
               }
             }
             if (data.formResponse) {
@@ -1394,12 +1442,18 @@ export default function ESP32Flasher({
         timestamp: Date.now()
       };
 
+      let updatedList = null;
+      let newHist = [record];
       setWidgets((prev) => {
         const hasLocationWidget = prev.some((w) => w.type === "location");
         if (!hasLocationWidget) return prev;
-        return prev.map((w) => {
+        const next = prev.map((w) => {
           if (w.type === "location") {
-            const hist = Array.isArray(w.locationHistory) ? [record, ...w.locationHistory.slice(0, 49)] : [record];
+            const isMatch = (a, b) => (a.id && b.id && a.id === b.id) || (Math.abs(getLogTimestampMs(a) - getLogTimestampMs(b)) < 2000 && a.event === b.event);
+            const filtered = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(h => !isMatch(h, record));
+            const hist = [record, ...filtered.slice(0, 49)];
+            hist.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
+            newHist = hist;
             return {
               ...w,
               lastLocation: record,
@@ -1408,13 +1462,24 @@ export default function ESP32Flasher({
           }
           return w;
         });
+        updatedList = next;
+        return next;
       });
+
+      if (updatedList) {
+        autoPersistApp(updatedList);
+      }
 
       // Synchronize with companion server
       fetch("http://localhost:5055/api/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ location: record, syncOnly: true })
+        body: JSON.stringify({
+          location: record,
+          lastLocation: record,
+          switchLocations: newHist,
+          syncOnly: true
+        })
       }).catch(() => { });
 
       setTimeout(() => {
@@ -3227,7 +3292,9 @@ export default function ESP32Flasher({
           </div>`;
       }
       if (w.type === 'location') {
-        const hist = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(h => !isStaleTestGeolog(h));
+        const hist = (Array.isArray(w.locationHistory) ? [...w.locationHistory] : [])
+          .filter(h => !isStaleTestGeolog(h))
+          .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
         const lastOnLoc = (w.lastLocation && w.lastLocation.event === 'ON' && !isStaleTestGeolog(w.lastLocation))
           ? w.lastLocation
           : (hist.find(h => h.event === 'ON') || null);
@@ -3571,6 +3638,9 @@ export default function ESP32Flasher({
           dispatched = true;
           if (res && res.success) {
             addLog('🚀 [ESP32] ' + (isOff ? 'LED OFF (0)' : 'LED ON (Blink)'));
+            if (res.states || res.switchLocations || res.location || res.hostLocation) {
+              applySynchronizedState(res);
+            }
           } else if (res && res.error) {
             addLog('⚠️ [ESP32] Error: ' + res.error);
           }
@@ -3670,9 +3740,44 @@ export default function ESP32Flasher({
       return false;
     }
 
+    function getClientLogTimestampMs(item) {
+      if (!item) return 0;
+      if (typeof item.timestamp === 'number' && item.timestamp > 0) {
+        return item.timestamp < 1e11 ? item.timestamp * 1000 : item.timestamp;
+      }
+      var rawNum = Number(item.timestamp);
+      if (!isNaN(rawNum) && rawNum > 1e9) {
+        return rawNum < 1e11 ? rawNum * 1000 : rawNum;
+      }
+      var rawTimeNum = Number(item.time);
+      if (!isNaN(rawTimeNum) && rawTimeNum > 1e9) {
+        return rawTimeNum < 1e11 ? rawTimeNum * 1000 : rawTimeNum;
+      }
+      var timeStr = String(item.time || item.timestamp || '').trim();
+      if (timeStr) {
+        var parsedDate = Date.parse(timeStr);
+        if (!isNaN(parsedDate)) return parsedDate;
+
+        var match = timeStr.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+        if (match) {
+          var hrs = parseInt(match[1], 10);
+          var mins = parseInt(match[2], 10);
+          var secs = match[3] ? parseInt(match[3], 10) : 0;
+          var meridian = match[4] ? match[4].toLowerCase() : null;
+          if (meridian === 'pm' && hrs < 12) hrs += 12;
+          if (meridian === 'am' && hrs === 12) hrs = 0;
+          var now = new Date();
+          now.setHours(hrs, mins, secs, 0);
+          return now.getTime();
+        }
+      }
+      return 0;
+    }
+
     var clientLocationHistory = (${JSON.stringify(
       (widgets.find(w => w.type === 'location')?.locationHistory || []).filter(g => !isStaleTestGeolog(g))
     )}).filter(function(g) { return !isStaleClientGeolog(g); });
+    clientLocationHistory.sort(function(a, b) { return getClientLogTimestampMs(b) - getClientLogTimestampMs(a); });
 
     function formatClientLogTime(item) {
       if (!item) return '';
@@ -3691,24 +3796,26 @@ export default function ESP32Flasher({
 
     function updateMobileLocationCards(loc, allLocs, hostLoc) {
       // Update client-side cumulative history
-      if (Array.isArray(allLocs)) {
-        if (allLocs.length === 0) {
-          clientLocationHistory = [];
-        } else {
-          allLocs.forEach(function(item) {
-            if (!item || isStaleClientGeolog(item)) return;
-            var exists = clientLocationHistory.some(function(h) {
-              return (h.id && h.id === item.id) || (h.timestamp === item.timestamp && h.event === item.event);
-            });
-            if (!exists) {
-              clientLocationHistory.push(item);
-            }
+      if (Array.isArray(allLocs) && allLocs.length > 0) {
+        allLocs.forEach(function(item) {
+          if (!item || isStaleClientGeolog(item)) return;
+          var itemTime = getClientLogTimestampMs(item);
+          var exists = clientLocationHistory.some(function(h) {
+            if (h.id && item.id && h.id === item.id) return true;
+            var hTime = getClientLogTimestampMs(h);
+            return Math.abs(hTime - itemTime) < 2000 && h.event === item.event;
           });
-        }
+          if (!exists) {
+            clientLocationHistory.push(item);
+          }
+        });
       }
       if (loc && (loc.lat != null || loc.city) && !isStaleClientGeolog(loc)) {
+        var locTime = getClientLogTimestampMs(loc);
         var exists = clientLocationHistory.some(function(h) {
-          return (h.id && h.id === loc.id) || (h.timestamp === loc.timestamp && h.event === loc.event);
+          if (h.id && loc.id && h.id === loc.id) return true;
+          var hTime = getClientLogTimestampMs(h);
+          return Math.abs(hTime - locTime) < 2000 && h.event === loc.event;
         });
         if (!exists) {
           clientLocationHistory.unshift(loc);
@@ -3717,9 +3824,7 @@ export default function ESP32Flasher({
       clientLocationHistory = clientLocationHistory.filter(function(g) { return !isStaleClientGeolog(g); });
       // Sort newest first
       clientLocationHistory.sort(function(a, b) {
-        var tA = typeof a.timestamp === 'number' ? a.timestamp : 0;
-        var tB = typeof b.timestamp === 'number' ? b.timestamp : 0;
-        return tB - tA;
+        return getClientLogTimestampMs(b) - getClientLogTimestampMs(a);
       });
 
       // 1. Host Location update
@@ -4113,14 +4218,61 @@ export default function ESP32Flasher({
       }
       addLog('📱 [UI] ' + title + ' -> ' + (checked ? 'ON (Blinking)' : 'OFF (Stopped)'));
 
-      // Capture device geolocation where switch ON/OFF took place
+      var eventLabel = checked ? 'ON' : 'OFF';
+
+      // 1. Host Location / Calibrated baseline for instant 0ms dynamic geologging
+      var hostCityEl = document.querySelector('[id^="host-city-"]');
+      var hostCityText = hostCityEl ? hostCityEl.innerText.replace('📍', '').trim().split(',')[0].trim() : 'Little Mount';
+      var hostAddrEl = document.querySelector('[id^="host-addr-"]');
+      var hostAddrText = hostAddrEl ? hostAddrEl.innerText.trim() : 'Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India';
+      var hostGpsEl = document.querySelector('[id^="host-gps-"]');
+      var hostGpsText = hostGpsEl ? hostGpsEl.innerText.trim() : '13.0147° N, 80.2242° E';
+      var defaultLat = 13.0147;
+      var defaultLng = 80.2242;
+      if (hostGpsText && hostGpsText.indexOf('°') !== -1) {
+        var parts = hostGpsText.split(',');
+        if (parts.length >= 2) {
+          var p0 = parseFloat(parts[0]);
+          var p1 = parseFloat(parts[1]);
+          if (!isNaN(p0) && !isNaN(p1)) {
+            defaultLat = p0;
+            defaultLng = p1;
+          }
+        }
+      }
+
+      var instantLoc = {
+        id: 'loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        lat: defaultLat,
+        lng: defaultLng,
+        event: eventLabel,
+        switchTitle: title || 'Device Switch',
+        city: hostCityText || 'Little Mount',
+        address: hostAddrText,
+        time: new Date().toLocaleTimeString(),
+        timestamp: Date.now(),
+        source: 'Switch Event (' + (hostCityText || 'Host') + ')'
+      };
+
+      // 2. Immediately update mobile UI (0ms instant dynamic feedback!)
+      updateMobileLocationCards(instantLoc);
+
+      // 3. Dispatch hardware action with this instantLoc so companion server records it
+      sendHardwareAction(checked ? 'LED:1' : 'LED:0', {
+        widgetId: id,
+        widgetType: 'switch',
+        value: checked,
+        switchTitle: title,
+        location: instantLoc,
+        autoGeolog: true
+      });
+
+      // 4. Try background GPS to refine coordinates (if browser geolocation supported / allowed)
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           function(pos) {
             var lat = parseFloat(pos.coords.latitude.toFixed(5));
             var lng = parseFloat(pos.coords.longitude.toFixed(5));
-            var eventLabel = checked ? 'ON' : 'OFF';
-            // Try reverse geocoding via Nominatim for accurate city name (works in India & worldwide)
             fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14&accept-language=en', {
               headers: { 'Accept-Language': 'en' }
             })
@@ -4129,44 +4281,47 @@ export default function ESP32Flasher({
               var specific = (geo && geo.name && geo.name !== 'Chennai') ? geo.name :
                 (geo && geo.display_name && !geo.display_name.startsWith('Chennai') ? geo.display_name.split(',')[0].trim() : '') ||
                 (geo && geo.address && (geo.address.railway || geo.address.suburb || geo.address.neighbourhood || geo.address.quarter || geo.address.city || geo.address.town)) ||
-                'Switch Geolog';
+                hostCityText || 'Switch Geolog';
               var address = (geo && geo.display_name) ? geo.display_name.split(',').slice(0, 4).join(',').trim() : (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E');
-              var locData = {
-                id: 'loc-' + Date.now(),
-                lat: lat, lng: lng,
+              var refinedLoc = {
+                id: instantLoc.id,
+                lat: lat,
+                lng: lng,
                 accuracy: Math.round(pos.coords.accuracy || 10),
-                event: eventLabel, switchTitle: title,
-                city: specific, address: address,
-                time: new Date().toLocaleTimeString(),
-                timestamp: Date.now(),
+                event: eventLabel,
+                switchTitle: title,
+                city: specific,
+                address: address,
+                time: instantLoc.time,
+                timestamp: instantLoc.timestamp,
                 source: 'Mobile GPS (' + specific + ')'
               };
-              sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, location: locData });
-              updateMobileLocationCards(locData);
+              updateMobileLocationCards(refinedLoc);
+              sendHardwareAction('LOC_SYNC', { location: refinedLoc, syncOnly: true });
             })
             .catch(function() {
-              var locData = {
-                id: 'loc-' + Date.now(),
-                lat: lat, lng: lng,
+              var refinedLoc = {
+                id: instantLoc.id,
+                lat: lat,
+                lng: lng,
                 accuracy: Math.round(pos.coords.accuracy || 10),
-                event: eventLabel, switchTitle: title,
-                city: 'Switch Geolog',
+                event: eventLabel,
+                switchTitle: title,
+                city: hostCityText || 'Switch Geolog',
                 address: lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E',
-                time: new Date().toLocaleTimeString(),
-                timestamp: Date.now(),
+                time: instantLoc.time,
+                timestamp: instantLoc.timestamp,
                 source: 'Mobile GPS'
               };
-              sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, location: locData });
-              updateMobileLocationCards(locData);
+              updateMobileLocationCards(refinedLoc);
+              sendHardwareAction('LOC_SYNC', { location: refinedLoc, syncOnly: true });
             });
           },
           function() {
-            sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, switchTitle: title, autoGeolog: true });
+            // Geolocation not available or denied - instantLoc already rendered and saved!
           },
           { timeout: 5000, enableHighAccuracy: true }
         );
-      } else {
-        sendHardwareAction(checked ? 'LED:1' : 'LED:0', { widgetId: id, widgetType: 'switch', value: checked, switchTitle: title, autoGeolog: true });
       }
 
       evalRules(id, checked, title);
@@ -4427,6 +4582,31 @@ export default function ESP32Flasher({
     try {
       const html = getStandaloneHtmlContent();
 
+      const locWidget = (widgets || []).find((w) => w.type === "location");
+      const existingLocs = (Array.isArray(locWidget?.locationHistory) ? locWidget.locationHistory : [])
+        .filter((g) => !isStaleTestGeolog(g))
+        .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
+      const lastLoc = (locWidget?.lastLocation && !isStaleTestGeolog(locWidget.lastLocation))
+        ? locWidget.lastLocation
+        : (existingLocs.length > 0 ? existingLocs[0] : null);
+      const hostLoc = (deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation))
+        ? deviceDetectedLocation
+        : null;
+
+      // Seed companion server state
+      try {
+        await fetch("http://localhost:5055/api/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            initSync: true,
+            switchLocations: existingLocs,
+            lastLocation: lastLoc,
+            hostLocation: hostLoc
+          })
+        });
+      } catch (e) { }
+
       // Push updated HTML to both possible companion servers
       // Port 5055 = Electron built-in companion server (primary, has serial access)
       // Port 5056 = external hardware-bridge.cjs (fallback)
@@ -4447,7 +4627,13 @@ export default function ESP32Flasher({
 
       if (window.electronAPI?.app?.startCompanionServer) {
         try {
-          const res = await window.electronAPI.app.startCompanionServer({ html, port: 5055 });
+          const res = await window.electronAPI.app.startCompanionServer({
+            html,
+            port: 5055,
+            switchLocations: existingLocs,
+            lastLocation: lastLoc,
+            hostLocation: hostLoc
+          });
           if (res?.success) {
             if (res.url) setLocalCompanionUrl(res.url);
             if (res.ip) setCompanionServerInfo({ ip: res.ip, port: res.port || 5055 });
@@ -6972,7 +7158,9 @@ Generated automatically by **InnoIDE App Companion Studio**.
 
                             {/* Location Button / Device Location Widget */}
                             {w.type === "location" && (() => {
-                              const hist = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(h => !isStaleTestGeolog(h));
+                              const hist = (Array.isArray(w.locationHistory) ? [...w.locationHistory] : [])
+                                .filter(h => !isStaleTestGeolog(h))
+                                .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
                               const lastOnLoc = (w.lastLocation && w.lastLocation.event === "ON" && !isStaleTestGeolog(w.lastLocation))
                                 ? w.lastLocation
                                 : (hist.find(h => h.event === "ON") || null);
@@ -9321,7 +9509,9 @@ Generated automatically by **InnoIDE App Companion Studio**.
 
                   {/* DEVICE LOCATION & SWITCH GEOLOG SECTION in Inspector */}
                   {activeWidget.type === "location" && (() => {
-                    const hist = (Array.isArray(activeWidget.locationHistory) ? activeWidget.locationHistory : []).filter(h => !isStaleTestGeolog(h));
+                    const hist = (Array.isArray(activeWidget.locationHistory) ? [...activeWidget.locationHistory] : [])
+                      .filter(h => !isStaleTestGeolog(h))
+                      .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
                     const lastOnLoc = (activeWidget.lastLocation && activeWidget.lastLocation.event === "ON" && !isStaleTestGeolog(activeWidget.lastLocation))
                       ? activeWidget.lastLocation
                       : (hist.find(h => h.event === "ON") || null);

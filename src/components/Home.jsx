@@ -368,7 +368,7 @@ const Home = () => {
                   )}
                 </Box>
                 <Text textAlign="center" fontSize="xs" color="gray.400" mt={4}>
-                  InnoIDE_V1Rev1.4_05-06-2026 (C) Innotrat Labs 2026
+                  ide-desktop-app-V0-05-10-2026 (C) Innotrat Labs 2026
                 </Text>
               </VStack>
             </Box>

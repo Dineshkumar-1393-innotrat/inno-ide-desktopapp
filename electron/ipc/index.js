@@ -47,7 +47,6 @@ const sseClients = new Set();
 function isStaleGeolog(l) {
   if (!l) return true;
   const t = String(l.time || l.timestamp || "");
-  const city = String(l.city || "");
   const id = String(l.id || "");
   if (id === "loc-init-1") return true;
   if (
@@ -63,7 +62,6 @@ function isStaleGeolog(l) {
   ) {
     return true;
   }
-  if (city === "Ambattur" || city === "Chennai") return true;
   return false;
 }
 
@@ -721,6 +719,27 @@ export function registerAllIPCHandlers(getMainWindow) {
               companionState.switchLocations = companionState.switchLocations.filter(l => !isStaleGeolog(l));
             }
 
+            // Handle initial state seeding from desktop publish/start
+            if (data.initSync) {
+              if (Array.isArray(data.switchLocations) && data.switchLocations.length > 0) {
+                if (!Array.isArray(companionState.switchLocations)) companionState.switchLocations = [];
+                data.switchLocations.forEach(item => {
+                  if (!item || isStaleGeolog(item)) return;
+                  const exists = companionState.switchLocations.some(l => (l.id && l.id === item.id) || (l.timestamp === item.timestamp && l.event === item.event));
+                  if (!exists) companionState.switchLocations.push(item);
+                });
+              }
+              if (data.lastLocation && !isStaleGeolog(data.lastLocation)) {
+                companionState.lastLocation = data.lastLocation;
+              }
+              if (data.hostLocation) {
+                companionState.hostLocation = data.hostLocation;
+              }
+              if (data.states && typeof data.states === 'object') {
+                Object.assign(companionState.states, data.states);
+              }
+            }
+
             if (data.location) {
               // Ensure coordinates are not stale hardcoded
               const isStale = isStaleGeolog(data.location);
@@ -729,7 +748,7 @@ export function registerAllIPCHandlers(getMainWindow) {
                 if (!Array.isArray(companionState.switchLocations)) {
                   companionState.switchLocations = [];
                 }
-                const exists = companionState.switchLocations.some(l => l.id === data.location.id || (l.timestamp === data.location.timestamp && l.event === data.location.event));
+                const exists = companionState.switchLocations.some(l => (l.id && l.id === data.location.id) || (l.timestamp === data.location.timestamp && l.event === data.location.event));
                 if (!exists) {
                   companionState.switchLocations.unshift(data.location);
                   if (companionState.switchLocations.length > 50) companionState.switchLocations.pop();
@@ -738,25 +757,31 @@ export function registerAllIPCHandlers(getMainWindow) {
             } else if ((isExplicitOn || isExplicitOff) && companionState.hostLocation && companionState.hostLocation.lat) {
               // Auto-log geolog using host device location if GPS is unavailable
               const eventLabel = isExplicitOn ? 'ON' : 'OFF';
-              const autoLoc = {
-                id: 'loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-                event: eventLabel,
-                switchTitle: data.switchTitle || ('Switch ' + eventLabel),
-                lat: companionState.hostLocation.lat,
-                lng: companionState.hostLocation.lng,
-                city: companionState.hostLocation.city || 'Host Location',
-                address: companionState.hostLocation.address || '',
-                source: companionState.hostLocation.source || 'Host Device',
-                time: new Date().toLocaleTimeString(),
-                timestamp: Date.now()
-              };
-              companionState.lastLocation = autoLoc;
-              if (!Array.isArray(companionState.switchLocations)) {
-                companionState.switchLocations = [];
+              const isRecentSame = companionState.lastLocation &&
+                companionState.lastLocation.event === eventLabel &&
+                (Date.now() - (typeof companionState.lastLocation.timestamp === 'number' ? companionState.lastLocation.timestamp : 0) < 1500);
+
+              if (!isRecentSame) {
+                const autoLoc = {
+                  id: 'loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+                  event: eventLabel,
+                  switchTitle: data.switchTitle || ('Switch ' + eventLabel),
+                  lat: companionState.hostLocation.lat,
+                  lng: companionState.hostLocation.lng,
+                  city: companionState.hostLocation.city || 'Little Mount',
+                  address: companionState.hostLocation.address || '',
+                  source: companionState.hostLocation.source || 'Host Device',
+                  time: new Date().toLocaleTimeString(),
+                  timestamp: Date.now()
+                };
+                companionState.lastLocation = autoLoc;
+                if (!Array.isArray(companionState.switchLocations)) {
+                  companionState.switchLocations = [];
+                }
+                companionState.switchLocations.unshift(autoLoc);
+                if (companionState.switchLocations.length > 50) companionState.switchLocations.pop();
+                data.location = autoLoc;
               }
-              companionState.switchLocations.unshift(autoLoc);
-              if (companionState.switchLocations.length > 50) companionState.switchLocations.pop();
-              data.location = autoLoc;
             }
 
             // Clear Google Form responses if requested
@@ -830,7 +855,11 @@ export function registerAllIPCHandlers(getMainWindow) {
               payload: payload.trim(),
               writeResult,
               version: companionState.version,
-              states: companionState.states
+              states: companionState.states,
+              location: data.location || companionState.lastLocation,
+              lastLocation: companionState.lastLocation,
+              switchLocations: companionState.switchLocations,
+              hostLocation: data.hostLocation || companionState.hostLocation
             }));
           } catch (err) {
             console.error('[CompanionServer] Error processing action:', err.message);
@@ -1013,8 +1042,26 @@ export function registerAllIPCHandlers(getMainWindow) {
     console.warn('[CompanionServer] Auto-start notice:', err.message);
   });
 
-  ipcMain.handle('app:start-companion-server', async (_event, { html, port = 5055 }) => {
+  ipcMain.handle('app:start-companion-server', async (_event, params = {}) => {
+    const { html, port = 5055, switchLocations, lastLocation, hostLocation, states } = params;
     if (html) currentCompanionHtml = html;
+    if (Array.isArray(switchLocations) && switchLocations.length > 0) {
+      if (!Array.isArray(companionState.switchLocations)) companionState.switchLocations = [];
+      switchLocations.forEach(item => {
+        if (!item || isStaleGeolog(item)) return;
+        const exists = companionState.switchLocations.some(l => (l.id && l.id === item.id) || (l.timestamp === item.timestamp && l.event === item.event));
+        if (!exists) companionState.switchLocations.push(item);
+      });
+    }
+    if (lastLocation && !isStaleGeolog(lastLocation)) {
+      companionState.lastLocation = lastLocation;
+    }
+    if (hostLocation) {
+      companionState.hostLocation = hostLocation;
+    }
+    if (states && typeof states === 'object') {
+      Object.assign(companionState.states, states);
+    }
     return await ensureCompanionServer(port);
   });
 
