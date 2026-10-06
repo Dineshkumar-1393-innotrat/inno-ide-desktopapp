@@ -4,7 +4,13 @@
  */
 
 import { ValidationSeverity, ValidationAction } from '../types.js';
-import { extractProductComponents, matchesComponent } from './blockDiagramRules.js';
+import {
+  extractProductComponents,
+  extractProductMCU,
+  matchesComponent,
+  isComponentMatch,
+  isMCU,
+} from './blockDiagramRules.js';
 
 export const extractSimulationComponents = (context = {}) => {
   let comps =
@@ -110,6 +116,42 @@ export const simulationRules = [
   },
 
   {
+    id: 'simulation:has-mcu',
+    workflowArea: 'simulate',
+    ruleName: 'Microcontroller Required',
+    severity: ValidationSeverity.ERROR,
+    trigger: [
+      ValidationAction.SIMULATION_VALIDATE,
+      ValidationAction.SIMULATION_SAVE,
+      ValidationAction.SIMULATION_START,
+    ],
+    validate: async (context) => {
+      const simItems = extractSimulationComponents(context);
+      if (!Array.isArray(simItems) || simItems.length === 0) {
+        return { valid: true };
+      }
+      const hasMCU = simItems.some(isMCU);
+      if (!hasMCU) {
+        return {
+          valid: false,
+          violationCode: 'SIMULATION_MCU_MISSING',
+          title: 'Workflow Rule Violation',
+          ruleName: 'Microcontroller Required',
+          message: 'No Microcontroller found in the Simulation.',
+          displayMessage: 'No Microcontroller found in the Simulation.',
+          reason: 'The Simulation requires a central Microcontroller to connect components and execute firmware logic.',
+          recommendation: 'Drag a Microcontroller from the MICROCONTROLLERS palette onto the Simulation canvas.',
+          sourceScreen: context.currentScreen || 'Simulation',
+          targetScreen: 'Simulation',
+          targetRoute: '/simulation',
+          canAutoFix: false,
+        };
+      }
+      return { valid: true };
+    },
+  },
+
+  {
     id: 'simulation:product-consistency',
     workflowArea: 'simulate',
     ruleName: 'Product ↔ Simulation Consistency',
@@ -121,11 +163,9 @@ export const simulationRules = [
     ],
     validate: async (context) => {
       const productComponents = extractProductComponents(context);
-      if (productComponents.length === 0) {
-        return { valid: true };
-      }
-
+      const productMCU = extractProductMCU(context);
       const simItems = extractSimulationComponents(context);
+
       const simLabels = simItems
         .map((item) => {
           return (
@@ -141,29 +181,82 @@ export const simulationRules = [
         })
         .filter(Boolean);
 
+      // If product definition has no components and no MCU declared, skip
+      if (productComponents.length === 0 && !productMCU) {
+        return { valid: true };
+      }
+
+      // 1. Missing from Simulation: product components not found in simulation
       const missingComponents = productComponents.filter(
         (comp) => !matchesComponent(comp, simLabels)
       );
 
-      if (missingComponents.length > 0) {
+      // 2. Unexpected in Simulation: non-MCU simulation components not defined in product
+      const simNonMCU = simLabels.filter((label) => !isMCU(label));
+      const unexpectedComponents = simNonMCU.filter(
+        (simLabel) => !matchesComponent(simLabel, productComponents)
+      );
+
+      // 3. Strict Microcontroller Parity
+      const hasSimMCU = simItems.some(isMCU);
+      const hasProductMCU = Boolean(productMCU || productComponents.some(isMCU));
+
+      let mcuError = null;
+      if (hasSimMCU && !hasProductMCU) {
+        mcuError =
+          'A Microcontroller is present in the Simulation, but no Microcontroller is declared in the Product definition (View Product).';
+      } else if (!hasSimMCU && hasProductMCU) {
+        mcuError = `The Product defines a Microcontroller (${productMCU || 'MCU'}), but the Simulation is missing a Microcontroller.`;
+      } else if (hasSimMCU && hasProductMCU && productMCU) {
+        const simMCULabels = simLabels.filter(isMCU);
+        const matchesProductMCU = simMCULabels.some((l) => isComponentMatch(productMCU, l));
+        if (!matchesProductMCU) {
+          mcuError = `Microcontroller mismatch: Product specifies "${productMCU}", but Simulation has "${simMCULabels.join(', ')}".`;
+        }
+      }
+
+      const hasViolations =
+        missingComponents.length > 0 ||
+        unexpectedComponents.length > 0 ||
+        Boolean(mcuError);
+
+      if (hasViolations) {
+        const reasonParts = [];
+        if (missingComponents.length > 0) {
+          reasonParts.push(`Missing in Simulation: ${missingComponents.join(', ')}`);
+        }
+        if (unexpectedComponents.length > 0) {
+          reasonParts.push(`Not defined in Product: ${unexpectedComponents.join(', ')}`);
+        }
+        if (mcuError) {
+          reasonParts.push(mcuError);
+        }
+
+        const reason = reasonParts.join('. ');
+
         return {
           valid: false,
           violationCode: 'PRODUCT_SIMULATION_MISSING',
           title: 'Workflow Rule Violation',
           ruleName: 'Product ↔ Simulation Consistency',
           message: 'The defined product does not match the product specified in the simulation.',
-          reason: `The Product defines ${productComponents.length} component(s) (${productComponents.join(', ')}), but the Simulation is missing ${missingComponents.length} of them: ${missingComponents.join(', ')}.`,
+          displayMessage: 'The defined product does not match the product specified in the simulation.',
+          reason: reason,
           details: {
             definedComponents: productComponents,
             missingComponents: missingComponents,
+            unexpectedComponents: unexpectedComponents,
             canvasComponents: simLabels,
+            productMCU: productMCU || (hasProductMCU ? 'Defined' : 'Missing'),
+            simulationMCU: hasSimMCU ? 'Present' : 'Missing',
+            mcuError: mcuError,
           },
-          recommendation: `Add the missing component(s): ${missingComponents.join(', ')} to the Simulation canvas before proceeding.`,
+          recommendation: `Ensure all components and Microcontroller defined in View Product match the Simulation canvas.`,
           sourceScreen: context.currentScreen || 'Simulation',
           targetScreen: 'View Product',
           targetRoute: '/simulation',
           targetAction: 'open-view-product',
-          affectedComponents: missingComponents,
+          affectedComponents: [...missingComponents, ...unexpectedComponents],
           canAutoFix: false,
         };
       }

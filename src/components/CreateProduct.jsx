@@ -18,6 +18,7 @@ import {
   NumberDecrementStepper,
   FormControl,
   FormErrorMessage,
+  FormLabel,
 } from "@chakra-ui/react";
 import { useState, useEffect } from "react";
 import { API } from '@/config';
@@ -127,6 +128,17 @@ export default function ProductDefinition({
   console.log(componentTypes, "componentTypes---");
 
   const [loadingComponentType, setLoadingComponentType] = useState(true);
+
+  // Modals for adding Component Type & Component Name
+  const [isTypeModalOpen, setIsTypeModalOpen] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
+  const [isSubmittingType, setIsSubmittingType] = useState(false);
+  const [typeModalRowIndex, setTypeModalRowIndex] = useState(0);
+
+  const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+  const [newComponentName, setNewComponentName] = useState("");
+  const [isSubmittingName, setIsSubmittingName] = useState(false);
+  const [nameModalRowIndex, setNameModalRowIndex] = useState(0);
 
   // const submitParameters = async () => {
   //   if (!selectedComponentId) {
@@ -395,12 +407,51 @@ export default function ProductDefinition({
   //   fetchComponentNames(selectedComponentTypes);
   // }, [selectedComponentTypes]);
 
-  const handleAddComponentName = async (typeId, rowIndex) => {
-    const name = prompt("Enter Component Name", "Buzzer");
-    if (!name || !typeId) {
-      alert("Select Component Type first");
+  const handleOpenAddNameModal = (typeId, rowIndex) => {
+    const currentComp = formComponents[rowIndex];
+    const resolvedTypeId = typeId || currentComp?.typeId;
+
+    if (!resolvedTypeId) {
+      toast({
+        title: "Component Type Required",
+        description: "Please select a Component Type before adding a Component Name.",
+        status: "warning",
+        duration: 3000,
+      });
       return;
     }
+
+    setNameModalRowIndex(rowIndex);
+    setNewComponentName("");
+    setIsNameModalOpen(true);
+  };
+
+  const handleSubmitNewName = async () => {
+    const name = newComponentName.trim();
+    const currentComp = formComponents[nameModalRowIndex];
+    const typeId = currentComp?.typeId;
+
+    if (!name) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter a component name",
+        status: "warning",
+        duration: 2500,
+      });
+      return;
+    }
+
+    if (!typeId) {
+      toast({
+        title: "Component Type Required",
+        description: "Please select a Component Type first",
+        status: "warning",
+        duration: 3000,
+      });
+      return;
+    }
+
+    setIsSubmittingName(true);
 
     try {
       await axios.post(
@@ -424,24 +475,28 @@ export default function ProductDefinition({
       }));
 
       // auto select newly added name for that row
-      // We search for the exact name case-insensitively just in case
-      const matched = list.find(x => x.name.trim().toLowerCase() === name.trim().toLowerCase());
-      updateComponentRow(rowIndex, "name", name, matched?._id || "");
+      const matched = list.find(x => x.name.trim().toLowerCase() === name.toLowerCase());
+      updateComponentRow(nameModalRowIndex, "name", name, matched?._id || "");
 
       toast({
         title: "Success",
-        description: "Component name added and selected",
+        description: `Component "${name}" added and selected`,
         status: "success",
         duration: 2000,
       });
+
+      setIsNameModalOpen(false);
+      setNewComponentName("");
     } catch (err) {
       console.error("Component name create failed", err);
       toast({
         title: "Error",
-        description: "Failed to add component name",
+        description: err?.response?.data?.message || "Failed to add component name",
         status: "error",
         duration: 3000,
       });
+    } finally {
+      setIsSubmittingName(false);
     }
   };
 
@@ -546,8 +601,12 @@ export default function ProductDefinition({
 
   const inputStyles = {
     bg: "white",
-    color: "black",
+    color: "gray.800",
+    borderColor: "gray.300",
+    _hover: { borderColor: "gray.400" },
+    _focus: { borderColor: "blue.500", boxShadow: "0 0 0 1px #3182ce" },
     _placeholder: { color: "gray.400" },
+    w: "100%",
   };
 
   // Keep deviceInfos in sync with numDevices
@@ -1041,7 +1100,7 @@ export default function ProductDefinition({
     try {
       let url = `${productAPIBase}/product/${productId}/definitionNew`;
       let resp;
-      
+
       try {
         console.log(`[CreateProduct] Attempting definition submission to local API: ${url}`);
         // Set a shorter timeout for the local API to avoid long UI hangs
@@ -1128,7 +1187,7 @@ export default function ProductDefinition({
         if (!effectiveProductName || effectiveProductName === "Product") {
           if (lastProj?.projectName) effectiveProductName = lastProj.projectName;
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // 2. If productId is missing but projectId is known, try reading from mappings
@@ -1146,7 +1205,7 @@ export default function ProductDefinition({
             productId = prodDetails.productId || prodDetails.productID || prodDetails._id;
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // 3. If productId is STILL missing, auto-create product on backend now!
@@ -1231,7 +1290,7 @@ export default function ProductDefinition({
     }
 
     // Validation for IMEI, ICCID, Phone
-    const invalidDevice = deviceInfos.find(dev => 
+    const invalidDevice = deviceInfos.find(dev =>
       (dev.imei && !/^\d{15}$/.test(dev.imei)) ||
       (dev.iccid && !/^\d{19,20}$/.test(dev.iccid)) ||
       (dev.phone && !/^\d{10}$/.test(dev.phone))
@@ -1338,6 +1397,7 @@ export default function ProductDefinition({
       });
     } finally {
       setComponentsLoading(false);
+      setLoadingComponentType(false);
     }
   };
 
@@ -1345,11 +1405,45 @@ export default function ProductDefinition({
     fetchComponentTypeList();
   }, []);
 
-  const handleAddComponentPrompt = async () => {
-    const name = prompt("New component name", "Audio Components");
-    if (!name) return;
+  // Auto-sync typeId if formComponents has a default typeName without typeId
+  useEffect(() => {
+    if (componentTypes && componentTypes.length > 0) {
+      setFormComponents((prev) =>
+        prev.map((comp) => {
+          if (!comp.typeId && comp.typeName) {
+            const found = componentTypes.find(
+              (t) => t.componentName?.toLowerCase() === comp.typeName?.toLowerCase()
+            );
+            if (found) {
+              fetchComponentNames(found._id);
+              return { ...comp, typeId: found._id, typeName: found.componentName };
+            }
+          }
+          return comp;
+        })
+      );
+    }
+  }, [componentTypes]);
 
-    setComponentsLoading(true);
+  const handleOpenAddTypeModal = (rowIndex = 0) => {
+    setTypeModalRowIndex(rowIndex);
+    setNewTypeName("");
+    setIsTypeModalOpen(true);
+  };
+
+  const handleSubmitNewType = async () => {
+    const name = newTypeName.trim();
+    if (!name) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter a component type name",
+        status: "warning",
+        duration: 2500,
+      });
+      return;
+    }
+
+    setIsSubmittingType(true);
 
     try {
       const token = localStorage.getItem("token");
@@ -1368,33 +1462,40 @@ export default function ProductDefinition({
 
       if (!res.ok) {
         const errText = await res.text();
-        throw new Error(errText || "Failed to create component");
+        throw new Error(errText || "Failed to create component type");
       }
 
       const data = await res.json();
 
-      // ✅ POST finished → GET again
+      // Refresh list
       await fetchComponentTypeList();
 
-      // optional: auto select new component
-      setSelectedComponentTypes(data._id);
-      setSelectedComponentName(data.componentName);
+      const newId = data?.data?._id || data?._id;
+      const newName = data?.data?.componentName || data?.componentName || name;
+
+      if (newId) {
+        updateComponentRow(typeModalRowIndex, "type", newName, newId);
+      }
 
       toast({
-        title: "Component added successfully",
+        title: "Success",
+        description: `Component type "${newName}" added successfully`,
         status: "success",
         duration: 2000,
       });
+
+      setIsTypeModalOpen(false);
+      setNewTypeName("");
     } catch (err) {
-      console.error("Create component error:", err);
+      console.error("Create component type error:", err);
       toast({
-        title: "Failed to create component",
+        title: "Failed to create component type",
         description: err.message,
         status: "error",
         duration: 3000,
       });
     } finally {
-      setComponentsLoading(false);
+      setIsSubmittingType(false);
     }
   };
 
@@ -1520,228 +1621,267 @@ export default function ProductDefinition({
   const activeComponent = formComponents[activeComponentIndex] || formComponents[0];
 
   return (
-    <Box width="100%" bg="gray.100" py={8}>
-      <Box maxW="1100px" mx="auto" bg="#f5f5f5" borderRadius="md" borderWidth="1px" p={6}>
+    <Box width="100%" bg="#f8fafc" p={{ base: 4, md: 6 }}>
+      <Box maxW="1100px" mx="auto" bg="white" borderRadius="xl" borderWidth="1px" borderColor="gray.200" shadow="sm" p={{ base: 4, md: 6 }}>
         {/* Product Name */}
         <Box mb={6}>
-          <Text fontSize="md" fontWeight="bold" mb={1}>
-            Product Name
-          </Text>
-          <Input size="sm" value={productName} onChange={(e) => setProductName(e.target.value)} sx={inputStyles} placeholder="Enter product name" />
+          <FormControl isRequired>
+            <FormLabel fontSize="sm" fontWeight="bold" color="gray.700" mb={1.5}>
+              Product Name
+            </FormLabel>
+            <Input
+              size="sm"
+              h="38px"
+              borderRadius="md"
+              value={productName}
+              onChange={(e) => setProductName(e.target.value)}
+              sx={inputStyles}
+              placeholder="Enter product name"
+            />
+          </FormControl>
         </Box>
 
         <VStack align="stretch" spacing={6}>
           {/* Basic Information */}
           <Box>
-            <Text fontSize="md" fontWeight="bold" mb={3}>
+            <Text fontSize="md" fontWeight="bold" color="gray.800" mb={3}>
               Basic Information
             </Text>
 
             <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6} mb={6}>
               {/* No. Of Devices */}
               <GridItem>
-                <Text fontSize="sm" mb={1} fontWeight="medium">
-                  No. Of Devices{" "}
-                  <Text as="span" color="red.500">
-                    *
-                  </Text>
-                </Text>
+                <FormControl isRequired>
+                  <FormLabel fontSize="sm" fontWeight="medium" color="gray.700" mb={1.5}>
+                    No. Of Devices
+                  </FormLabel>
 
-                <NumberInput
-                  size="sm"
-                  min={1}
-                  max={20}
-                  value={numDevices}
-                  onChange={(valueString) => {
-                    const n = parseInt(valueString || "0", 10) || 0;
-                    setNumDevices(n);
-                    // adjustDeviceInfosToCount(n); // (effect handles this now)
-                  }}
-                  clampValueOnBlur={true}
-                >
-                  <NumberInputField placeholder="Select or type..." sx={inputStyles} />
-                  <NumberInputStepper>
-                    <NumberIncrementStepper />
-                    <NumberDecrementStepper />
-                  </NumberInputStepper>
-                </NumberInput>
+                  <NumberInput
+                    size="sm"
+                    min={1}
+                    max={20}
+                    value={numDevices}
+                    onChange={(valueString) => {
+                      const n = parseInt(valueString || "0", 10) || 0;
+                      setNumDevices(n);
+                    }}
+                    clampValueOnBlur={true}
+                    w="100%"
+                  >
+                    <NumberInputField
+                      placeholder="Select or type..."
+                      sx={inputStyles}
+                      h="38px"
+                      borderRadius="md"
+                    />
+                    <NumberInputStepper>
+                      <NumberIncrementStepper />
+                      <NumberDecrementStepper />
+                    </NumberInputStepper>
+                  </NumberInput>
+                </FormControl>
               </GridItem>
 
               {/* No. Of Component */}
               <GridItem>
-                <Text fontSize="sm" mb={1} fontWeight="medium">
-                  No. Of Component
-                </Text>
-                <Select
-                  size="sm"
-                  value={numComponents}
-                  onChange={(e) => setNumComponents(parseInt(e.target.value, 10))}
-                  sx={inputStyles}
-                >
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </Select>
+                <FormControl>
+                  <FormLabel fontSize="sm" fontWeight="medium" color="gray.700" mb={1.5}>
+                    No. Of Component
+                  </FormLabel>
+                  <Select
+                    size="sm"
+                    h="38px"
+                    borderRadius="md"
+                    value={numComponents}
+                    onChange={(e) => setNumComponents(parseInt(e.target.value, 10))}
+                    sx={inputStyles}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </Select>
+                </FormControl>
               </GridItem>
             </Grid>
 
             {/* Dynamic Component Rows */}
             {formComponents.map((comp, index) => (
-              <Grid key={index} templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6} mb={4} p={2} borderWidth="1px" borderRadius="md" bg="white">
-                <GridItem colSpan={2}>
-                  <Text fontSize="xs" color="gray.500" fontWeight="bold">Component {index + 1}</Text>
-                </GridItem>
-
-                {/* Component Name (Type in code, but used as Parent Category) or Type? 
-                    Let's stick to Type -> Name flow but label as requested if needed.
-                    Code flow: Select Type (get ID) -> Then Select Name (from ID).
-                    I will label "Component Type" for the Parent, "Component Name" for the Child.
-                */}
-
-                {/* Component Type (Parent Category) */}
-                <GridItem>
-                  <HStack justify="space-between" mb={1}>
-                    <Text fontSize="sm" fontWeight="medium">
-                      Component Type{" "}
-                      <Text as="span" color="red.500">
-                        *
-                      </Text>
-                    </Text>
-                  </HStack>
-                  <Select
-                    size="sm"
-                    value={comp.typeId || ""}
-                    onChange={(e) => {
-                      const selectedId = e.target.value;
-                      const typeObj = componentTypes.find(t => t._id === selectedId);
-                      updateComponentRow(index, "type", typeObj?.componentName || "", selectedId);
-                    }}
-                    sx={inputStyles}
-                    placeholder={loadingComponentType ? "Loading..." : "Select Type"}
-                  >
-                    {componentTypes?.map((item) => (
-                      <option key={item?._id} value={item?._id}>
-                        {item?.componentName}
-                      </option>
-                    ))}
-                  </Select>
-                  <Text
-                    fontSize="xs"
-                    color="blue.500"
-                    cursor="pointer"
-                    textAlign="right"
-                    mt={1}
-                    onClick={handleAddComponentPrompt}
-                  >
-                    +Add
+              <Box
+                key={index}
+                mb={4}
+                p={4}
+                borderWidth="1px"
+                borderColor="gray.200"
+                borderRadius="lg"
+                bg="white"
+                shadow="xs"
+              >
+                <HStack justify="space-between" mb={3} pb={2} borderBottom="1px solid" borderColor="gray.100">
+                  <Text fontSize="xs" color="blue.600" fontWeight="bold" textTransform="uppercase" letterSpacing="wider">
+                    Component {index + 1}
                   </Text>
-                </GridItem>
+                </HStack>
 
-                {/* Component Name (Specific Item) */}
-                <GridItem>
-                  <HStack justify="space-between" mb={1}>
-                    <Text fontSize="sm" fontWeight="medium">
-                      Component Name{" "}
-                      <Text as="span" color="red.500">
-                        *
-                      </Text>
-                    </Text>
-                  </HStack>
+                <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6}>
+                  {/* Component Type */}
+                  <GridItem>
+                    <FormControl isRequired>
+                      <HStack justify="space-between" align="center" mb={1.5}>
+                        <FormLabel fontSize="sm" fontWeight="medium" color="gray.700" m={0}>
+                          Component Type
+                        </FormLabel>
+                        <Button
+                          variant="link"
+                          size="xs"
+                          colorScheme="blue"
+                          fontWeight="medium"
+                          leftIcon={<AddIcon fontSize="9px" />}
+                          onClick={() => handleOpenAddTypeModal(index)}
+                          _hover={{ textDecoration: "none", color: "blue.700" }}
+                        >
+                          Add
+                        </Button>
+                      </HStack>
+                      <Select
+                        size="sm"
+                        h="38px"
+                        borderRadius="md"
+                        value={comp.typeId || ""}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          const typeObj = componentTypes.find(t => t._id === selectedId);
+                          updateComponentRow(index, "type", typeObj?.componentName || "", selectedId);
+                        }}
+                        sx={inputStyles}
+                        placeholder={componentsLoading || loadingComponentType ? "Loading..." : "Select Type"}
+                      >
+                        {componentTypes?.map((item) => (
+                          <option key={item?._id} value={item?._id}>
+                            {item?.componentName}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </GridItem>
 
-                  <Select
-                    size="sm"
-                    value={comp.nameId || ""}
-                    onChange={(e) => {
-                      const selectedVal = e.target.value;
-                      // Check if it's an ID from API list or a Name from local list
-                      const list = componentNamesMap[comp.typeId] || [];
-                      const nameObj = list.find(x => x._id === selectedVal);
+                  {/* Component Name */}
+                  <GridItem>
+                    <FormControl isRequired>
+                      <HStack justify="space-between" align="center" mb={1.5}>
+                        <FormLabel fontSize="sm" fontWeight="medium" color="gray.700" m={0}>
+                          Component Name
+                        </FormLabel>
+                        <Button
+                          variant="link"
+                          size="xs"
+                          colorScheme="blue"
+                          fontWeight="medium"
+                          leftIcon={<AddIcon fontSize="9px" />}
+                          onClick={() => handleOpenAddNameModal(comp.typeId, index)}
+                          _hover={{ textDecoration: "none", color: "blue.700" }}
+                        >
+                          Add
+                        </Button>
+                      </HStack>
 
-                      // If nameObj found, use its name and ID. If not, assume selectedVal is the name (from COMPONENT_TYPES)
-                      const newName = nameObj ? nameObj.name : selectedVal;
-                      const newId = nameObj ? nameObj._id : selectedVal;
+                      <Select
+                        size="sm"
+                        h="38px"
+                        borderRadius="md"
+                        value={comp.nameId || ""}
+                        onChange={(e) => {
+                          const selectedVal = e.target.value;
+                          const list = componentNamesMap[comp.typeId] || [];
+                          const nameObj = list.find(x => x._id === selectedVal);
 
-                      setFormComponents((prev) => {
-                        const copy = [...prev];
-                        if (!copy[index]) return prev;
-                        const row = { ...copy[index] };
+                          const newName = nameObj ? nameObj.name : selectedVal;
+                          const newId = nameObj ? nameObj._id : selectedVal;
 
-                        row.nameName = newName;
-                        row.name = newName;
-                        row.nameId = newId;
-                        row.parameters = []; // Clear params
+                          setFormComponents((prev) => {
+                            const copy = [...prev];
+                            if (!copy[index]) return prev;
+                            const row = { ...copy[index] };
 
-                        copy[index] = row;
-                        return copy;
-                      });
-                    }}
-                    sx={inputStyles}
-                    placeholder="Select Name"
-                    isDisabled={!comp.typeId && !comp.typeName}
-                  >
-                    {/* Render both hardcoded and dynamic options */}
-                    {(() => {
-                      if (!comp.typeName) return null;
-                      // Find matching key in COMPONENT_TYPES (ignoring case and trailing 's')
-                      const typeNameLower = comp.typeName.toLowerCase();
-                      const matchingKey = Object.keys(COMPONENT_TYPES).find(
-                        key => key.toLowerCase() === typeNameLower || key.toLowerCase() + 's' === typeNameLower
-                      );
-                      const options = matchingKey ? COMPONENT_TYPES[matchingKey] : [];
-                      return options.map((name) => (
-                        <option key={`hardcoded-${name}`} value={name}>{name}</option>
-                      ));
-                    })()}
-                    {(componentNamesMap[comp.typeId] || []).map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                  <Text
-                    fontSize="xs"
-                    color="blue.500"
-                    cursor="pointer"
-                    textAlign="right"
-                    onClick={() => handleAddComponentName(comp.typeId, index)}
-                  >
-                    +Add
-                  </Text>
-                </GridItem>
-              </Grid>
+                            row.nameName = newName;
+                            row.name = newName;
+                            row.nameId = newId;
+                            row.parameters = []; // Clear params
+
+                            copy[index] = row;
+                            return copy;
+                          });
+                        }}
+                        sx={inputStyles}
+                        placeholder="Select Name"
+                        isDisabled={!comp.typeId && !comp.typeName}
+                      >
+                        {(() => {
+                          if (!comp.typeName) return null;
+                          const typeNameLower = comp.typeName.toLowerCase();
+                          const matchingKey = Object.keys(COMPONENT_TYPES).find(
+                            key => key.toLowerCase() === typeNameLower || key.toLowerCase() + 's' === typeNameLower
+                          );
+                          const options = matchingKey ? COMPONENT_TYPES[matchingKey] : [];
+                          return options.map((name) => (
+                            <option key={`hardcoded-${name}`} value={name}>{name}</option>
+                          ));
+                        })()}
+                        {(componentNamesMap[comp.typeId] || []).map((c) => (
+                          <option key={c._id} value={c._id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </GridItem>
+                </Grid>
+              </Box>
             ))}
-
-            {/* Old Single Row Logic Removed */}
           </Box>
 
           {/* Parameters Section - Loop over all components */}
           {formComponents.map((comp, compIndex) => (
-            <Box key={compIndex} mb={8} borderTop="1px" borderColor="gray.300" pt={4}>
-              <HStack justify="space-between" mb={4}>
-                <Text fontSize="md" fontWeight="bold">
-                  Specific Parameters - {comp.typeName} {comp.nameName}
+            <Box key={compIndex} mb={6} borderTop="1px" borderColor="gray.200" pt={5}>
+              <HStack justify="space-between" align="center" mb={4}>
+                <Text fontSize="md" fontWeight="bold" color="gray.800">
+                  Specific Parameters - {comp.typeName || "Component"} {comp.nameName || ""}
                 </Text>
                 <Button
-                  size="xs"
+                  size="sm"
+                  h="32px"
                   colorScheme="blue"
-                  leftIcon={<AddIcon />}
+                  leftIcon={<AddIcon fontSize="10px" />}
                   onClick={() => addParameter(compIndex, "inconstant")}
+                  borderRadius="md"
+                  px={4}
                 >
                   Add Parameters
                 </Button>
               </HStack>
 
               {/* Parameters List */}
-              <Box bg="gray.50" p={2} borderRadius="md" mb={4}>
+              <Box mb={4}>
                 {comp.parameters && comp.parameters.length === 0 && (
-                  <Text fontSize="sm" color="gray.500" fontStyle="italic">No parameters added yet.</Text>
+                  <Box
+                    p={5}
+                    borderRadius="lg"
+                    borderWidth="1px"
+                    borderStyle="dashed"
+                    borderColor="gray.300"
+                    bg="gray.50"
+                    textAlign="center"
+                  >
+                    <Text fontSize="sm" color="gray.500" fontStyle="italic">
+                      No parameters added yet.
+                    </Text>
+                  </Box>
                 )}
 
                 {comp.parameters?.map((param, paramIndex) => (
-                  <Box key={paramIndex} bg="white" p={3} borderRadius="md" borderWidth="1px" position="relative" mb={3}>
-                    <HStack position="absolute" top="8px" right="8px" spacing={1}>
+                  <Box key={paramIndex} bg="white" p={4} borderRadius="lg" borderWidth="1px" borderColor="gray.200" position="relative" mb={3} shadow="xs">
+                    <HStack position="absolute" top="10px" right="10px" spacing={1}>
                       <IconButton
                         size="xs"
                         aria-label="Edit parameter"
@@ -1749,31 +1889,37 @@ export default function ProductDefinition({
                         onClick={() => setEditingParam({ compIndex, paramIndex })}
                         variant="ghost"
                       />
-                      <IconButton size="xs" aria-label="Delete parameter" icon={<DeleteIcon />} onClick={() => deleteParameter(compIndex, paramIndex)} variant="ghost" />
+                      <IconButton size="xs" aria-label="Delete parameter" icon={<DeleteIcon />} onClick={() => deleteParameter(compIndex, paramIndex)} variant="ghost" colorScheme="red" />
                     </HStack>
 
-                    <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }} gap={4}>
+                    <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }} gap={4} alignItems="start">
                       {/* Specific Parameter Name */}
                       <GridItem>
-                        <Text fontSize="sm" mb={1} fontWeight="medium">
-                          Specific Parameter
-                        </Text>
-                        {/* Add New Param Option Button */}
-                        <IconButton
-                          size="xs"
-                          aria-label="Add parameter option"
-                          icon={<AddIcon />}
-                          variant="ghost"
-                          onClick={() => {
-                            setSelectedComponentId(comp.nameId); // Set context for modal if needed
-                            setIsParamModalOpen(true);
-                          }}
-                          mb={1}
-                        />
+                        <HStack justify="space-between" align="center" mb={1.5}>
+                          <Text fontSize="sm" fontWeight="medium" color="gray.700">
+                            Specific Parameter
+                          </Text>
+                          <Button
+                            variant="link"
+                            size="xs"
+                            colorScheme="blue"
+                            fontWeight="medium"
+                            leftIcon={<AddIcon fontSize="9px" />}
+                            onClick={() => {
+                              setSelectedComponentId(comp.nameId);
+                              setIsParamModalOpen(true);
+                            }}
+                            _hover={{ textDecoration: "none", color: "blue.700" }}
+                          >
+                            Add
+                          </Button>
+                        </HStack>
 
                         {editingParam && editingParam.compIndex === compIndex && editingParam.paramIndex === paramIndex ? (
                           <Select
                             size="sm"
+                            h="38px"
+                            borderRadius="md"
                             value={param.name}
                             sx={inputStyles}
                             onChange={(e) => {
@@ -1811,35 +1957,50 @@ export default function ProductDefinition({
                             ))}
                           </Select>
                         ) : (
-                          <Text
-                            fontSize="sm"
+                          <Box
+                            h="38px"
+                            display="flex"
+                            alignItems="center"
+                            px={3}
+                            borderWidth="1px"
+                            borderColor="gray.200"
+                            borderRadius="md"
+                            bg="gray.50"
                             cursor="pointer"
-                            fontWeight="bold"
                             onClick={() =>
                               setEditingParam({ compIndex, paramIndex })
                             }
                           >
-                            {param.name || "Select Parameter"}
-                          </Text>
+                            <Text fontSize="sm" fontWeight="semibold" color="gray.800" noOfLines={1}>
+                              {param.name || "Select Parameter"}
+                            </Text>
+                          </Box>
                         )}
                       </GridItem>
 
                       {/* Variables */}
                       <GridItem>
-                        <Text fontSize="sm" mb={1} fontWeight="medium">
-                          Variables
-                        </Text>
-                        <IconButton
-                          size="xs"
-                          aria-label="Add variable"
-                          icon={<AddIcon />}
-                          variant="ghost"
-                          onClick={() => setIsVariableModalOpen(true)}
-                          mb={1}
-                        />
+                        <HStack justify="space-between" align="center" mb={1.5}>
+                          <Text fontSize="sm" fontWeight="medium" color="gray.700">
+                            Variables
+                          </Text>
+                          <Button
+                            variant="link"
+                            size="xs"
+                            colorScheme="blue"
+                            fontWeight="medium"
+                            leftIcon={<AddIcon fontSize="9px" />}
+                            onClick={() => setIsVariableModalOpen(true)}
+                            _hover={{ textDecoration: "none", color: "blue.700" }}
+                          >
+                            Add
+                          </Button>
+                        </HStack>
 
                         <Select
                           size="sm"
+                          h="38px"
+                          borderRadius="md"
                           value={param.variable || ""}
                           onChange={(e) =>
                             handleVariableChange(
@@ -1854,13 +2015,6 @@ export default function ProductDefinition({
                           <option value="Constant">Constant</option>
                           <option value="Inconstant Simple">Inconstant Simple</option>
                           <option value="Inconstant Composite">Inconstant Composite</option>
-                          {/* 
-                            {variableOptions.map((opt, i) => (
-                              <option key={i} value={opt}>
-                                {opt}
-                              </option>
-                            ))} 
-                            */}
                         </Select>
                       </GridItem>
 
@@ -2162,33 +2316,34 @@ export default function ProductDefinition({
 
           {/* URL Link */}
           <Box>
-            <Text fontSize="md" fontWeight="bold" mb={2}>
-              Url Link{" "}
-              <Text as="span" color="red.500">
-                *
-              </Text>
-            </Text>
-            <Input size="sm" value={urlLink} onChange={(e) => setUrlLink(e.target.value)} sx={inputStyles} placeholder="Enter URL" />
+            <FormControl isRequired>
+              <FormLabel fontSize="sm" fontWeight="bold" color="gray.700" mb={1.5}>
+                Url Link
+              </FormLabel>
+              <Input size="sm" h="38px" borderRadius="md" value={urlLink} onChange={(e) => setUrlLink(e.target.value)} sx={inputStyles} placeholder="Enter URL" />
+            </FormControl>
           </Box>
 
           {/* Note */}
           <Box>
-            <Text fontSize="md" fontWeight="bold" mb={2}>
-              Note (Optional)
-            </Text>
-            <Textarea size="sm" minH="80px" value={note} onChange={(e) => setNote(e.target.value)} sx={inputStyles} placeholder="Add notes here..." />
+            <FormControl>
+              <FormLabel fontSize="sm" fontWeight="bold" color="gray.700" mb={1.5}>
+                Note (Optional)
+              </FormLabel>
+              <Textarea size="sm" minH="80px" borderRadius="md" value={note} onChange={(e) => setNote(e.target.value)} sx={inputStyles} placeholder="Add notes here..." />
+            </FormControl>
           </Box>
 
           {/* Identity of Device - render per-device blocks */}
           <Box>
-            <Text fontSize="md" fontWeight="bold" mb={3}>
+            <Text fontSize="md" fontWeight="bold" color="gray.800" mb={3}>
               Identity Of Device
             </Text>
 
             <VStack spacing={4} align="stretch">
               {deviceInfos.map((dev, idx) => (
-                <Box key={idx} bg="white" p={3} borderRadius="md" borderWidth="1px" position="relative">
-                  <HStack position="absolute" top="8px" right="8px" spacing={1}>
+                <Box key={idx} bg="white" p={4} borderRadius="lg" borderWidth="1px" borderColor="gray.200" position="relative" shadow="xs">
+                  <HStack position="absolute" top="10px" right="10px" spacing={1}>
                     <IconButton
                       size="xs"
                       aria-label="Edit device"
@@ -2198,39 +2353,39 @@ export default function ProductDefinition({
                         toast({ title: "Edit device", description: `You can edit fields directly for device ${idx + 1}`, status: "info", duration: 1200 });
                       }}
                     />
-                    <IconButton size="xs" aria-label="Delete device" icon={<DeleteIcon />} onClick={() => deleteDeviceInfo(idx)} variant="ghost" />
+                    <IconButton size="xs" aria-label="Delete device" icon={<DeleteIcon />} onClick={() => deleteDeviceInfo(idx)} variant="ghost" colorScheme="red" />
                   </HStack>
 
-                  <Text fontSize="sm" fontWeight="semibold" mb={2}>
+                  <Text fontSize="sm" fontWeight="semibold" color="blue.600" mb={3}>
                     Device {idx + 1}
                   </Text>
-                  <Grid templateColumns="repeat(3, 1fr)" gap={4}>
+                  <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4}>
                     <GridItem>
                       <FormControl isInvalid={dev.imei && !/^\d{15}$/.test(dev.imei)}>
-                        <Text fontSize="sm" mb={1} fontWeight="medium">
+                        <FormLabel fontSize="sm" mb={1.5} fontWeight="medium" color="gray.700">
                           IMEI
-                        </Text>
-                        <Input size="sm" value={dev.imei} onChange={(e) => handleDeviceInfoChange(idx, "imei", e.target.value)} sx={inputStyles} placeholder="Enter IMEI (15 digits)" maxLength={15} />
+                        </FormLabel>
+                        <Input size="sm" h="38px" borderRadius="md" value={dev.imei} onChange={(e) => handleDeviceInfoChange(idx, "imei", e.target.value)} sx={inputStyles} placeholder="Enter IMEI (15 digits)" maxLength={15} />
                         <FormErrorMessage fontSize="2xs">Must be 15 digits</FormErrorMessage>
                       </FormControl>
                     </GridItem>
 
                     <GridItem>
                       <FormControl isInvalid={dev.iccid && !/^\d{19,20}$/.test(dev.iccid)}>
-                        <Text fontSize="sm" mb={1} fontWeight="medium">
+                        <FormLabel fontSize="sm" mb={1.5} fontWeight="medium" color="gray.700">
                           ICCID
-                        </Text>
-                        <Input size="sm" value={dev.iccid} onChange={(e) => handleDeviceInfoChange(idx, "iccid", e.target.value)} sx={inputStyles} placeholder="Enter ICCID (19-20 digits)" maxLength={20} />
+                        </FormLabel>
+                        <Input size="sm" h="38px" borderRadius="md" value={dev.iccid} onChange={(e) => handleDeviceInfoChange(idx, "iccid", e.target.value)} sx={inputStyles} placeholder="Enter ICCID (19-20 digits)" maxLength={20} />
                         <FormErrorMessage fontSize="2xs">Must be 19-20 digits</FormErrorMessage>
                       </FormControl>
                     </GridItem>
 
                     <GridItem>
                       <FormControl isInvalid={dev.phone && !/^\d{10}$/.test(dev.phone)}>
-                        <Text fontSize="sm" mb={1} fontWeight="medium">
+                        <FormLabel fontSize="sm" mb={1.5} fontWeight="medium" color="gray.700">
                           Phone No.
-                        </Text>
-                        <Input size="sm" value={dev.phone} onChange={(e) => handleDeviceInfoChange(idx, "phone", e.target.value)} sx={inputStyles} placeholder="Enter Phone (10 digits)" maxLength={10} />
+                        </FormLabel>
+                        <Input size="sm" h="38px" borderRadius="md" value={dev.phone} onChange={(e) => handleDeviceInfoChange(idx, "phone", e.target.value)} sx={inputStyles} placeholder="Enter Phone (10 digits)" maxLength={10} />
                         <FormErrorMessage fontSize="2xs">Must be 10 digits</FormErrorMessage>
                       </FormControl>
                     </GridItem>
@@ -2241,12 +2396,11 @@ export default function ProductDefinition({
           </Box>
 
           {/* Cancel and Create Product Buttons */}
-          <HStack justify="center" spacing={6} mt={8} pt={4} borderTop="1px" borderColor="gray.300">
-            <Button variant="outline" size="md" borderColor="blue.500" color="blue.500" onClick={handleCancel} px={10}>
+          <HStack justify="center" spacing={4} mt={6} pt={4} borderTop="1px" borderColor="gray.200">
+            <Button variant="outline" size="md" colorScheme="gray" onClick={handleCancel} px={8} h="40px" borderRadius="md">
               Cancel
             </Button>
-            <Button colorScheme="blue" size="md" px={10} onClick={handleSubmitDevices}
-              isLoading={loading}>
+            <Button colorScheme="blue" size="md" px={8} h="40px" borderRadius="md" onClick={handleSubmitDevices} isLoading={loading}>
               Create Product
             </Button>
           </HStack>
@@ -2298,6 +2452,86 @@ export default function ProductDefinition({
           </Box>
         )
       }
+      {/* MODAL: Add Component Type */}
+      <Modal isOpen={isTypeModalOpen} onClose={() => setIsTypeModalOpen(false)} isCentered>
+        <ModalOverlay backdropFilter="blur(4px)" />
+        <ModalContent>
+          <ModalHeader fontSize="md" fontWeight="bold">Add Component Type</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <FormControl isRequired>
+              <FormLabel fontSize="sm" color="gray.700">Component Type Name</FormLabel>
+              <Input
+                color="black"
+                placeholder="e.g. Audio Components, Motor, etc."
+                value={newTypeName}
+                onChange={(e) => setNewTypeName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newTypeName.trim()) handleSubmitNewType();
+                }}
+                autoFocus
+              />
+            </FormControl>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={() => setIsTypeModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme="blue"
+              onClick={handleSubmitNewType}
+              isLoading={isSubmittingType}
+              isDisabled={!newTypeName.trim()}
+            >
+              Add Type
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* MODAL: Add Component Name */}
+      <Modal isOpen={isNameModalOpen} onClose={() => setIsNameModalOpen(false)} isCentered>
+        <ModalOverlay backdropFilter="blur(4px)" />
+        <ModalContent>
+          <ModalHeader fontSize="md" fontWeight="bold">
+            Add Component Name
+            {formComponents[nameModalRowIndex]?.typeName && (
+              <Text as="span" fontSize="xs" fontWeight="normal" color="gray.500" display="block">
+                for {formComponents[nameModalRowIndex]?.typeName}
+              </Text>
+            )}
+          </ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <FormControl isRequired>
+              <FormLabel fontSize="sm" color="gray.700">Component Name</FormLabel>
+              <Input
+                color="black"
+                placeholder="e.g. Buzzer, DHT11, Flame Sensor"
+                value={newComponentName}
+                onChange={(e) => setNewComponentName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newComponentName.trim()) handleSubmitNewName();
+                }}
+                autoFocus
+              />
+            </FormControl>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={() => setIsNameModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme="blue"
+              onClick={handleSubmitNewName}
+              isLoading={isSubmittingName}
+              isDisabled={!newComponentName.trim()}
+            >
+              Add Name
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       <Modal isOpen={isParamModalOpen} onClose={() => setIsParamModalOpen(false)} isCentered>
         <ModalOverlay />

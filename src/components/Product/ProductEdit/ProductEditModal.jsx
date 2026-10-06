@@ -28,7 +28,10 @@ function ProductEditModal({
 }) {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [userId, setUserId] = useState(null);
+  const [viewRefreshKey, setViewRefreshKey] = useState(0);
+  const [editRefreshKey, setEditRefreshKey] = useState(0);
   const [removeRefreshKey, setRemoveRefreshKey] = useState(0);
+  const [tabIndex, setTabIndex] = useState(0);
 
   const effectiveProductId = productID || localStorage.getItem("activeProductId") || localStorage.getItem("activeProjectId") || "";
   const effectiveProductName = productName || localStorage.getItem("activeProjectName") || "Product";
@@ -46,11 +49,46 @@ function ProductEditModal({
     try {
       await axios.delete(`${baseURL}/product/${targetId}/definitionNew`);
 
+      // Clear localStorage cache for this product
+      try {
+        const candidateKeys = new Set([
+          targetId && `innoide:product_details_${targetId}`,
+          effectiveProductName && `innoide:product_details_${effectiveProductName}`,
+          localStorage.getItem("activeProductId") && `innoide:product_details_${localStorage.getItem("activeProductId")}`,
+          localStorage.getItem("activeProjectId") && `innoide:product_details_${localStorage.getItem("activeProjectId")}`,
+          localStorage.getItem("activeProductName") && `innoide:product_details_${localStorage.getItem("activeProductName")}`,
+          localStorage.getItem("activeProjectName") && `innoide:product_details_${localStorage.getItem("activeProjectName")}`,
+          "innoide:last_product_details",
+        ].filter(Boolean));
+
+        candidateKeys.forEach((key) => {
+          const stored = localStorage.getItem(key);
+          if (!stored) return;
+          try {
+            const data = JSON.parse(stored);
+            data.componentsPayload = {};
+            data.components = [];
+            if (data.basicInformation) data.basicInformation.noOfComponents = 0;
+            data.noOfComponents = 0;
+            localStorage.setItem(key, JSON.stringify(data));
+          } catch {
+            // ignore
+          }
+        });
+      } catch {
+        // ignore
+      }
+
       alert("All components removed successfully");
       
       if (setIsProductDefined) {
         setIsProductDefined(false);
       }
+
+      setViewRefreshKey((k) => k + 1);
+      setEditRefreshKey((k) => k + 1);
+      setRemoveRefreshKey((k) => k + 1);
+
       window.dispatchEvent(new Event("storage"));
       window.dispatchEvent(new Event("innoide:refresh-filesystem"));
       window.dispatchEvent(new CustomEvent("product-definition-changed"));
@@ -68,6 +106,26 @@ function ProductEditModal({
       }
     };
   }, [fetchFileSystem]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setViewRefreshKey((k) => k + 1);
+      setEditRefreshKey((k) => k + 1);
+      setRemoveRefreshKey((k) => k + 1);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleProductDefChanged = () => {
+      setViewRefreshKey((k) => k + 1);
+      setEditRefreshKey((k) => k + 1);
+      setRemoveRefreshKey((k) => k + 1);
+    };
+    window.addEventListener("product-definition-changed", handleProductDefChanged);
+    return () => {
+      window.removeEventListener("product-definition-changed", handleProductDefChanged);
+    };
+  }, []);
 
   useEffect(() => {
     const handleOpenModal = () => {
@@ -162,12 +220,16 @@ function ProductEditModal({
               <Box px={10} py={8} position="relative" zIndex={1}>
                 <Tabs
                   variant="unstyled"
-                  defaultIndex={0}
+                  index={tabIndex}
                   isLazy
                   lazyBehavior="keepMounted"
                   onChange={(index) => {
-                    // Re-fetch components list every time Remove Component tab is activated
-                    if (index === 2) {
+                    setTabIndex(index);
+                    if (index === 0) {
+                      setViewRefreshKey((k) => k + 1);
+                    } else if (index === 1) {
+                      setEditRefreshKey((k) => k + 1);
+                    } else if (index === 3) {
                       setRemoveRefreshKey((k) => k + 1);
                     }
                   }}
@@ -204,6 +266,33 @@ function ProductEditModal({
                       transition="all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
                     >
                       VIEW PRODUCT
+                    </Tab>
+                    <Tab
+                      color="whiteAlpha.600"
+                      fontWeight="700"
+                      fontSize="sm"
+                      letterSpacing="wide"
+                      px={8}
+                      py={4}
+                      borderRadius="2xl"
+                      border="1px solid"
+                      borderColor="whiteAlpha.100"
+                      bg="whiteAlpha.50"
+                      backdropFilter="blur(10px)"
+                      _selected={{
+                        color: "white",
+                        bg: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                        borderColor: "transparent",
+                        boxShadow: "0 8px 20px -4px rgba(102,126,234,0.5)",
+                        transform: "translateY(-2px)",
+                      }}
+                      _hover={{
+                        borderColor: "whiteAlpha.300",
+                        bg: "whiteAlpha.100",
+                      }}
+                      transition="all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+                    >
+                      EDIT PRODUCT
                     </Tab>
                     <Tab
                       color="whiteAlpha.600"
@@ -322,6 +411,46 @@ function ProductEditModal({
                         <ViewProductDefinition
                           productID={effectiveProductId}
                           productName={effectiveProductName}
+                          refreshKey={viewRefreshKey}
+                        />
+                      </Box>
+                    </TabPanel>
+                    <TabPanel
+                      p={0}
+                    >
+                      <Box
+                        bg="rgba(255,255,255,0.98)"
+                        borderRadius="2xl"
+                        p={10}
+                        minH="550px"
+                        maxH="600px"
+                        overflowY="auto"
+                        boxShadow="0 20px 40px -10px rgba(0,0,0,0.3)"
+                        border="1px solid"
+                        borderColor="whiteAlpha.300"
+                        css={{
+                          '&::-webkit-scrollbar': {
+                            width: '10px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            background: 'rgba(0,0,0,0.05)',
+                            borderRadius: '10px',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            background: 'linear-gradient(180deg, #667eea, #764ba2)',
+                            borderRadius: '10px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            background: 'linear-gradient(180deg, #764ba2, #667eea)',
+                          },
+                        }}
+                      >
+                        <EditProductDefinition
+                          productID={effectiveProductId}
+                          productName={effectiveProductName}
+                          setIsProductDefined={setIsProductDefined}
+                          onClose={onClose}
+                          refreshKey={editRefreshKey}
                         />
                       </Box>
                     </TabPanel>
@@ -359,6 +488,11 @@ function ProductEditModal({
                           setIsProductDefined={setIsProductDefined}
                           productID={effectiveProductId}
                           productName={effectiveProductName}
+                          onComponentAdded={() => {
+                            setViewRefreshKey((k) => k + 1);
+                            setEditRefreshKey((k) => k + 1);
+                            setRemoveRefreshKey((k) => k + 1);
+                          }}
                         />
                       </Box>
                     </TabPanel>
@@ -377,6 +511,10 @@ function ProductEditModal({
                           productID={effectiveProductId}
                           productName={effectiveProductName}
                           refreshKey={removeRefreshKey}
+                          onComponentRemoved={() => {
+                            setViewRefreshKey((k) => k + 1);
+                            setEditRefreshKey((k) => k + 1);
+                          }}
                         />
                       </Box>
                     </TabPanel>

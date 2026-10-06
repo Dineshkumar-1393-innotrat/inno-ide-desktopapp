@@ -101,6 +101,12 @@ const ValidationViolationModal = ({
   ) {
     displayText = 'The Simulation contains no components.';
   } else if (
+    violation.id === 'simulation:has-mcu' ||
+    violation.violationCode === 'SIMULATION_MCU_MISSING' ||
+    violation.ruleName === 'Microcontroller Required'
+  ) {
+    displayText = 'No Microcontroller found in the Simulation.';
+  } else if (
     violation.id === 'simulation:valid' ||
     violation.ruleName === 'Simulation Valid'
   ) {

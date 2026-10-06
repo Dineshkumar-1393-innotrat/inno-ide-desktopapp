@@ -827,7 +827,7 @@ export function registerAllIPCHandlers(getMainWindow) {
             });
 
             const mainWindow = getMainWindow();
-            if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow && !mainWindow.isDestroyed() && !data.syncOnly && !data.initSync) {
               mainWindow.webContents.send('companion:action', {
                 port: targetPort,
                 isOn: isExplicitOn,

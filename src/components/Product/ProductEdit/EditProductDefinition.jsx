@@ -9,7 +9,13 @@ import Ellipse521 from "../../../images/Ellipse 521.svg";
 import Footer from "../../Footer";
 import { baseURL, productAPIBase } from "../../../utilities";
 
-const EditProductDefinition = () => {
+const EditProductDefinition = ({
+  productID,
+  productName,
+  setIsProductDefined,
+  onClose,
+  refreshKey,
+}) => {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -34,9 +40,23 @@ const EditProductDefinition = () => {
     };
   };
 
+  const effectiveProductId =
+    productID ||
+    getStoredValues().productID ||
+    localStorage.getItem("activeProductId") ||
+    localStorage.getItem("activeProjectId") ||
+    "";
+
+  const effectiveProductName =
+    productName ||
+    getStoredValues().deviceName ||
+    localStorage.getItem("activeProductName") ||
+    localStorage.getItem("activeProjectName") ||
+    "Product";
+
   const [initialValues, setInitialValues] = useState({
-    productID: getStoredValues().productID,
-    deviceName: getStoredValues().deviceName,
+    productID: effectiveProductId,
+    deviceName: effectiveProductName,
     components: [],
   });
 
@@ -195,7 +215,46 @@ const EditProductDefinition = () => {
     console.log("Result data:", resultData);
 
     try {
-      // Submit each component
+      // 1. Determine components that were removed or renamed compared to server / initialValues
+      const newComponentNames = new Set(Object.keys(formattedComponents));
+      let currentServerComponents = {};
+      try {
+        const checkUrl = `${productAPIBase || baseURL || 'http://localhost:5004'}/product/${values.productID}/definitionNew`;
+        const checkResp = await axios.get(checkUrl, { timeout: 3000 });
+        const checkData = checkResp.data?.data?.definition || checkResp.data?.definition || checkResp.data?.data || checkResp.data;
+        if (checkData?.components && typeof checkData.components === 'object') {
+          currentServerComponents = checkData.components;
+        }
+      } catch (checkErr) {
+        console.warn("[EditProductDefinition] Failed to fetch server components for diffing:", checkErr);
+      }
+
+      const allPreviousComponentNames = new Set([
+        ...Object.keys(currentServerComponents),
+        ...(initialValues?.components || []).map((c) => c.componentName || c.name).filter(Boolean)
+      ]);
+
+      const componentsToDelete = [...allPreviousComponentNames].filter(
+        (oldName) => !newComponentNames.has(oldName)
+      );
+
+      // 2. Delete removed/renamed components from backend
+      for (const oldName of componentsToDelete) {
+        try {
+          console.log(`[EditProductDefinition] Deleting removed/renamed component "${oldName}" from backend...`);
+          let delUrl = `${productAPIBase}/product/${values.productID}/definitionNew/${encodeURIComponent(oldName)}`;
+          try {
+            await axios.delete(delUrl, { timeout: 4000 });
+          } catch {
+            delUrl = `${baseURL}/product/${values.productID}/definitionNew/${encodeURIComponent(oldName)}`;
+            await axios.delete(delUrl);
+          }
+        } catch (delErr) {
+          console.warn(`[EditProductDefinition] Failed to delete component "${oldName}":`, delErr);
+        }
+      }
+
+      // 3. Submit each current component
       for (const [componentName, componentData] of Object.entries(formattedComponents)) {
         if (!componentName || !componentName.trim()) continue;
 
@@ -207,45 +266,108 @@ const EditProductDefinition = () => {
           urls: Array.isArray(componentData.urls) ? componentData.urls.filter(Boolean) : (componentData.urls ? [componentData.urls] : []),
         };
 
-        let url = `${productAPIBase}/product/${values.productID}/definitionNew/${componentName}`;
+        let url = `${productAPIBase}/product/${values.productID}/definitionNew/${encodeURIComponent(componentName)}`;
         try {
           console.log(`[EditProductDefinition] Updating component "${componentName}" via local API: ${url}`);
           await axios.put(url, payload, { timeout: 4000 });
-        } catch (localError) {
+        } catch {
           console.warn(`[EditProductDefinition] Local update failed/timed out for "${componentName}", falling back to Eureka...`);
-          // Use definitionNew for fallback as requested
-          url = `${baseURL}/product/${values.productID}/definitionNew/${componentName}`;
+          url = `${baseURL}/product/${values.productID}/definitionNew/${encodeURIComponent(componentName)}`;
           await axios.put(url, payload);
         }
       }
 
-      // Synchronize updated notes and urls back into localStorage cache
+      // 4. Synchronize updated components and notes back into localStorage cache (REPLACE, DO NOT MERGE!)
       try {
         const prodId = values.productID;
-        const cachedStr = localStorage.getItem(`innoide:product_details_${prodId}`) || localStorage.getItem('innoide:last_product_details');
-        const cached = cachedStr ? JSON.parse(cachedStr) : {};
-        
-        const firstComp = Object.values(formattedComponents)[0];
-        if (firstComp) {
-          if (firstComp.note) cached.note = firstComp.note;
-          const u = Array.isArray(firstComp.urls) ? firstComp.urls.filter(Boolean) : (firstComp.urls ? [firstComp.urls] : []);
-          if (u.length > 0) cached.urls = u;
-        }
-        cached.componentsPayload = { ...(cached.componentsPayload || {}), ...formattedComponents };
-        
-        if (prodId) localStorage.setItem(`innoide:product_details_${prodId}`, JSON.stringify(cached));
-        localStorage.setItem('innoide:last_product_details', JSON.stringify(cached));
+        const prodName = values.deviceName || productName;
+        const candidateKeys = new Set([
+          prodId && `innoide:product_details_${prodId}`,
+          prodName && `innoide:product_details_${prodName}`,
+          localStorage.getItem("activeProductId") && `innoide:product_details_${localStorage.getItem("activeProductId")}`,
+          localStorage.getItem("activeProjectId") && `innoide:product_details_${localStorage.getItem("activeProjectId")}`,
+          localStorage.getItem("activeProductName") && `innoide:product_details_${localStorage.getItem("activeProductName")}`,
+          localStorage.getItem("activeProjectName") && `innoide:product_details_${localStorage.getItem("activeProjectName")}`,
+          "innoide:last_product_details",
+        ].filter(Boolean));
+
+        candidateKeys.forEach((key) => {
+          const stored = localStorage.getItem(key);
+          let data = {};
+          try {
+            if (stored) data = JSON.parse(stored);
+          } catch {
+            // ignore
+          }
+
+          const firstComp = Object.values(formattedComponents)[0];
+          if (firstComp) {
+            if (firstComp.note) data.note = firstComp.note;
+            const u = Array.isArray(firstComp.urls) ? firstComp.urls.filter(Boolean) : (firstComp.urls ? [firstComp.urls] : []);
+            if (u.length > 0) data.urls = u;
+          }
+          data.componentsPayload = { ...formattedComponents };
+          data.components = values.components.filter((c) => c.componentName && c.componentName.trim());
+          if (data.basicInformation) {
+            data.basicInformation.noOfComponents = data.components.length;
+          }
+          data.noOfComponents = data.components.length;
+          if (prodName) data.productName = prodName;
+          if (prodId) data.productId = prodId;
+
+          localStorage.setItem(key, JSON.stringify(data));
+        });
       } catch (cacheErr) {
         console.warn("[EditProductDefinition] Cache sync error:", cacheErr);
       }
 
-      // Navigate to block diagram with state
-      navigate("/blockdiagram", {
-        state: {
-          productID: values.productID,
-          deviceName: values.deviceName,
-        },
-      });
+      // 5. Synchronize project file on disk if in Electron
+      try {
+        if (window.electronAPI?.filesystem?.readFile && window.electronAPI?.filesystem?.writeFile) {
+          const pName = values.deviceName || productName || localStorage.getItem("activeProjectName") || "";
+          if (pName) {
+            const possibleFiles = [`${pName}.json`, `BlockDiagram/${pName}.json`];
+            for (const f of possibleFiles) {
+              try {
+                const content = await window.electronAPI.filesystem.readFile(f, "utf8");
+                if (content) {
+                  const parsed = JSON.parse(content);
+                  if (parsed.productDetails) {
+                    parsed.productDetails.components = values.components.filter((c) => c.componentName && c.componentName.trim());
+                    if (parsed.productDetails.basicInformation) {
+                      parsed.productDetails.basicInformation.noOfComponents = parsed.productDetails.components.length;
+                    }
+                    parsed.productDetails.noOfComponents = parsed.productDetails.components.length;
+                    await window.electronAPI.filesystem.writeFile(f, JSON.stringify(parsed, null, 2), "utf8");
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // 6. Update local initialValues so subsequent edits reflect current state
+      setInitialValues((prev) => ({
+        ...prev,
+        components: values.components,
+      }));
+
+      // 7. Dispatch events to notify IDE components of product change
+      if (setIsProductDefined) {
+        setIsProductDefined(values.components.length > 0);
+      }
+      window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("innoide:refresh-filesystem"));
+      window.dispatchEvent(new CustomEvent("product-definition-changed", {
+        detail: { productID: values.productID, action: "updated" }
+      }));
+
+      alert("Product definition updated successfully!");
     } catch (error) {
       console.error("Error sending data to the server:", error);
       alert("Error submitting form. Please try again.");
@@ -366,19 +488,62 @@ const EditProductDefinition = () => {
   };
 
   useEffect(() => {
-    if (initialValues?.productID !== null) {
-      fetchProductDefinition(initialValues.productID);
+    const pid =
+      productID ||
+      initialValues?.productID ||
+      localStorage.getItem("activeProductId") ||
+      localStorage.getItem("activeProjectId") ||
+      "";
+    if (pid) {
+      fetchProductDefinition(pid);
     }
-  }, [initialValues?.productID]);
+  }, [effectiveProductId, refreshKey]);
 
   useEffect(() => {
-    const values = getStoredValues();
-    setInitialValues({
-      productID: values.productID,
-      deviceName: values.deviceName,
-      components: [],
-    });
-  }, [location.state]);
+    const handleProductDefChanged = () => {
+      console.log("[EditProductDefinition] product-definition-changed received, refreshing...");
+      const pid =
+        productID ||
+        initialValues?.productID ||
+        localStorage.getItem("activeProductId") ||
+        localStorage.getItem("activeProjectId") ||
+        "";
+      if (pid) {
+        fetchProductDefinition(pid);
+      }
+    };
+    window.addEventListener("product-definition-changed", handleProductDefChanged);
+    window.addEventListener("storage", handleProductDefChanged);
+    return () => {
+      window.removeEventListener("product-definition-changed", handleProductDefChanged);
+      window.removeEventListener("storage", handleProductDefChanged);
+    };
+  }, [productID, initialValues?.productID]);
+
+  useEffect(() => {
+    const pid =
+      productID ||
+      getStoredValues().productID ||
+      localStorage.getItem("activeProductId") ||
+      localStorage.getItem("activeProjectId") ||
+      "";
+    const pname =
+      productName ||
+      getStoredValues().deviceName ||
+      localStorage.getItem("activeProductName") ||
+      localStorage.getItem("activeProjectName") ||
+      "Product";
+
+    setInitialValues((prev) => ({
+      ...prev,
+      productID: pid,
+      deviceName: pname,
+    }));
+
+    if (pid) {
+      fetchProductDefinition(pid);
+    }
+  }, [productID, productName, location.state]);
 
   useEffect(() => {
     return () => {
@@ -418,7 +583,7 @@ const EditProductDefinition = () => {
                           className="border p-3 mb-3 bg-light rounded"
                         >
                           <div>
-                            <div className="form-floating mb-3">
+                            {/* <div className="form-floating mb-3">
                               <Field
                                 type="text"
                                 className="form-control"
@@ -435,7 +600,7 @@ const EditProductDefinition = () => {
                                 component="div"
                                 className="text-danger"
                               />
-                            </div>
+                            </div> */}
 
                             <div className="form-floating mb-3">
                               <Field

@@ -7,7 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Box, Center, Heading, Text, Button } from "@chakra-ui/react";
 import { baseURL, productAPIBase } from "../../../utilities";
 
-const AddProductComponent = ({ productID, productName }) => {
+const AddProductComponent = ({ productID, productName, setIsProductDefined, onComponentAdded }) => {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -229,12 +229,41 @@ const AddProductComponent = ({ productID, productName }) => {
           if (u.length > 0) cached.urls = u;
         }
         cached.componentsPayload = { ...(cached.componentsPayload || {}), ...formattedComponents };
+
+        if (Array.isArray(cached.components)) {
+          Object.keys(formattedComponents).forEach((cName) => {
+            const idx = cached.components.findIndex((c) => (c.name || c.componentName) === cName);
+            const compObj = {
+              componentID: formattedComponents[cName].componentID || "",
+              componentName: cName,
+              componentType: formattedComponents[cName].type || "",
+              note: formattedComponents[cName].note || "",
+              urls: formattedComponents[cName].urls || [],
+            };
+            if (idx >= 0) cached.components[idx] = compObj;
+            else cached.components.push(compObj);
+          });
+          if (cached.basicInformation) cached.basicInformation.noOfComponents = cached.components.length;
+          cached.noOfComponents = cached.components.length;
+        }
         
         if (prodId) localStorage.setItem(`innoide:product_details_${prodId}`, JSON.stringify(cached));
         if (productName) localStorage.setItem(`innoide:product_details_${productName}`, JSON.stringify(cached));
         localStorage.setItem('innoide:last_product_details', JSON.stringify(cached));
       } catch (cacheErr) {
         console.warn("[AddProductComponent] Cache sync error:", cacheErr);
+      }
+
+      if (typeof setIsProductDefined === "function") {
+        setIsProductDefined(true);
+      }
+
+      window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("innoide:refresh-filesystem"));
+      window.dispatchEvent(new CustomEvent("product-definition-changed"));
+
+      if (typeof onComponentAdded === "function") {
+        onComponentAdded();
       }
 
       alert("Component updated successfully!");

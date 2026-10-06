@@ -16,7 +16,7 @@ import {
 } from "@chakra-ui/react";
 import { productAPIBase, baseURL } from "../../../utilities";
 
-const RemoveProductComponent = ({ productID, productName, setIsProductDefined, refreshKey }) => {
+const RemoveProductComponent = ({ productID, productName, setIsProductDefined, refreshKey, onComponentRemoved }) => {
   const [components, setComponents] = useState([]); // list of { name, type }
   const [loading, setLoading] = useState(false);
   const [removing, setRemoving] = useState(null); // name of component being removed
@@ -95,7 +95,7 @@ const RemoveProductComponent = ({ productID, productName, setIsProductDefined, r
 
       setSuccessMsg(`"${componentName}" removed successfully.`);
 
-      // Remove from local list immediately
+      // 1. Remove from local component state immediately
       setComponents((prev) => {
         const updated = prev.filter((c) => c.name !== componentName);
         if (updated.length === 0 && setIsProductDefined) {
@@ -103,6 +103,103 @@ const RemoveProductComponent = ({ productID, productName, setIsProductDefined, r
         }
         return updated;
       });
+
+      // 2. Synchronize localStorage cache across all matching keys
+      try {
+        const candidateKeys = new Set([
+          productID && `innoide:product_details_${productID}`,
+          productName && `innoide:product_details_${productName}`,
+          localStorage.getItem("activeProductId") && `innoide:product_details_${localStorage.getItem("activeProductId")}`,
+          localStorage.getItem("activeProjectId") && `innoide:product_details_${localStorage.getItem("activeProjectId")}`,
+          localStorage.getItem("activeProductName") && `innoide:product_details_${localStorage.getItem("activeProductName")}`,
+          localStorage.getItem("activeProjectName") && `innoide:product_details_${localStorage.getItem("activeProjectName")}`,
+          "innoide:last_product_details",
+        ].filter(Boolean));
+
+        candidateKeys.forEach((key) => {
+          const stored = localStorage.getItem(key);
+          if (!stored) return;
+          try {
+            const data = JSON.parse(stored);
+            let modified = false;
+
+            if (data.componentsPayload && typeof data.componentsPayload === "object") {
+              if (data.componentsPayload[componentName]) {
+                delete data.componentsPayload[componentName];
+                modified = true;
+              }
+            }
+
+            if (Array.isArray(data.components)) {
+              const prevLen = data.components.length;
+              data.components = data.components.filter(
+                (c) => (c.name || c.componentName) !== componentName
+              );
+              if (data.components.length !== prevLen) {
+                modified = true;
+              }
+              if (data.basicInformation) {
+                data.basicInformation.noOfComponents = data.components.length;
+              }
+              data.noOfComponents = data.components.length;
+            }
+
+            if (modified) {
+              localStorage.setItem(key, JSON.stringify(data));
+            }
+          } catch (parseErr) {
+            console.warn("[RemoveProductComponent] Error parsing cached key", key, parseErr);
+          }
+        });
+      } catch (cacheErr) {
+        console.warn("[RemoveProductComponent] Error updating localStorage cache:", cacheErr);
+      }
+
+      // 3. Synchronize project file on disk if in Electron
+      try {
+        if (window.electronAPI?.filesystem?.readFile && window.electronAPI?.filesystem?.writeFile) {
+          const pName = productName || localStorage.getItem("activeProjectName") || "";
+          if (pName) {
+            const possibleFiles = [`${pName}.json`, `BlockDiagram/${pName}.json`];
+            for (const f of possibleFiles) {
+              try {
+                const content = await window.electronAPI.filesystem.readFile(f, "utf8");
+                if (content) {
+                  const parsed = JSON.parse(content);
+                  if (parsed.productDetails?.components && Array.isArray(parsed.productDetails.components)) {
+                    parsed.productDetails.components = parsed.productDetails.components.filter(
+                      (c) => (c.name || c.componentName) !== componentName
+                    );
+                    if (parsed.productDetails.basicInformation) {
+                      parsed.productDetails.basicInformation.noOfComponents = parsed.productDetails.components.length;
+                    }
+                    parsed.productDetails.noOfComponents = parsed.productDetails.components.length;
+                    await window.electronAPI.filesystem.writeFile(f, JSON.stringify(parsed, null, 2), "utf8");
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // 4. Dispatch synchronization events
+      window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("innoide:refresh-filesystem"));
+      window.dispatchEvent(
+        new CustomEvent("product-definition-changed", {
+          detail: { componentName, action: "removed", productID },
+        })
+      );
+
+      // 5. Notify parent callback if provided
+      if (typeof onComponentRemoved === "function") {
+        onComponentRemoved(componentName);
+      }
     } catch (err) {
       console.error("[RemoveProductComponent] Error removing component:", err);
       setError(`Failed to remove "${componentName}". Please try again.`);

@@ -4,6 +4,8 @@ import React, {
   useState,
   useEffect,
   useMemo,
+  createContext,
+  useContext,
 } from "react";
 import ReactFlow, {
   Background,
@@ -115,44 +117,68 @@ import { buildDiagramExportPayload, getProductCreationDetails } from "../utils/p
 import { validationManager } from "../validation/ValidationManager";
 import { ValidationAction, ValidationSeverity } from "../validation/types";
 
-// Helper hook for updating node data via Redux
-// This ensures changes persist even when the controlled flow is re-rendered from the store
+// Context to connect custom nodes/edges directly to DiagramEditor's canvas state
+export const FlowchartUpdateContext = createContext(null);
+
+// Helper hook for updating node data via FlowchartUpdateContext or Redux fallback
+// This ensures changes immediately update local canvas state (e.g. inline editing) and persist to store
 const useNodeDataUpdate = () => {
+  const ctx = useContext(FlowchartUpdateContext);
   const dispatch = useDispatch();
   const { activeTabId } = useSelector((state) => state.flowchart);
   const rf = useReactFlow();
 
   return useCallback((nodeId, updateFn) => {
-    // Get current nodes from ReactFlow instance to ensure we have latest state
+    if (ctx?.updateNodeData) {
+      ctx.updateNodeData(nodeId, updateFn);
+      return;
+    }
+
+    // Fallback if context is not available
     const currentNodes = rf.getNodes();
     const nextNodes = currentNodes.map(n =>
       n.id === nodeId ? updateFn(n) : n
     );
+
+    try {
+      rf.setNodes(nextNodes);
+    } catch (e) {}
 
     // Dispatch to Redux
     dispatch(updateTabState({
       tabId: activeTabId,
       nodes: nextNodes
     }));
-  }, [dispatch, activeTabId, rf]);
+  }, [ctx, dispatch, activeTabId, rf]);
 };
 
-// Helper hook for updating edge data via Redux
+// Helper hook for updating edge data via FlowchartUpdateContext or Redux fallback
 const useEdgeDataUpdate = () => {
+  const ctx = useContext(FlowchartUpdateContext);
   const dispatch = useDispatch();
   const { activeTabId } = useSelector((state) => state.flowchart);
   const rf = useReactFlow();
 
   return useCallback((edgeId, updateFn) => {
+    if (ctx?.updateEdgeData) {
+      ctx.updateEdgeData(edgeId, updateFn);
+      return;
+    }
+
     const currentEdges = rf.getEdges();
     const nextEdges = currentEdges.map(e =>
       e.id === edgeId ? updateFn(e) : e
     );
+
+    try {
+      rf.setEdges(nextEdges);
+    } catch (e) {}
+
     dispatch(updateTabState({
       tabId: activeTabId,
       edges: nextEdges
     }));
-  }, [dispatch, activeTabId, rf]);
+  }, [ctx, dispatch, activeTabId, rf]);
 };
 
 // Simple id helpers
@@ -1979,17 +2005,25 @@ const HANDLE_POSITIONS = {
 };
 
 const baseHandleStyle = (data) => ({
-  width: 8,
-  height: 8,
+  width: 10,
+  height: 10,
   borderRadius: "50%",
   background: data?.stroke || "#27374D",
   border: `2px solid ${data?.fill || "#ffffff"}`,
+  zIndex: 50,
+  pointerEvents: "all",
+  cursor: "crosshair",
 });
 
 // Process (rectangle)
 function ProcessNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2010,12 +2044,13 @@ function ProcessNode({ id, data, selected }) {
         justifyContent: "center",
         boxSizing: "border-box",
       }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <Handle
         id="top-in"
@@ -2072,21 +2107,31 @@ function ProcessNode({ id, data, selected }) {
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={() => commit(val)}
-          onKeyDown={(e) => e.key === "Enter" && commit(val)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commit(val);
+            } else if (e.key === "Escape") {
+              setVal(data?.label ?? "Text");
+              updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+            }
+          }}
+          onFocus={(e) => e.target.select()}
           onMouseDown={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
           style={{
             width: "calc(100% - 12px)",
-            border: "1px solid #ccc",
+            border: "1px solid #3b82f6",
             borderRadius: 4,
-            padding: "4px 6px",
-            fontSize: 12,
+            padding: "2px 6px",
+            fontSize: data?.fontSize || 12,
             position: "relative",
-            zIndex: 5,
+            zIndex: 10,
             background: "#fff",
             color: "#000",
             pointerEvents: "all",
             textAlign: "center",
+            outline: "none",
+            boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
           }}
         />
       ) : (
@@ -2097,13 +2142,32 @@ function ProcessNode({ id, data, selected }) {
             textAlign: "center",
             margin: "0 12px",
             display: "block",
+            cursor: "text",
+            pointerEvents: "auto",
+            userSelect: "none",
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            updateNodeData(id, (n) => ({
+              ...n,
+              data: { ...n.data, editing: true },
+            }));
+          }}
+          onClick={(e) => {
+            if (selected) {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }
           }}
         >
           {data?.label ?? "Text"}
         </span>
       )}
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={40}
         handleStyle={{
@@ -2123,6 +2187,11 @@ function ProcessNode({ id, data, selected }) {
 function DecisionNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2136,12 +2205,13 @@ function DecisionNode({ id, data, selected }) {
   return (
     <div
       style={{ ...baseNodeStyles(data), position: "relative" }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       {/* Diamond shape filling the bounds so handles align to corners */}
       <svg
@@ -2170,7 +2240,15 @@ function DecisionNode({ id, data, selected }) {
           justifyContent: "center",
           padding: 6,
           textAlign: "center",
-          pointerEvents: "none",
+          pointerEvents: "all",
+          cursor: "text",
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          updateNodeData(id, (n) => ({
+            ...n,
+            data: { ...n.data, editing: true },
+          }));
         }}
       >
         {data?.editing ? (
@@ -2180,21 +2258,31 @@ function DecisionNode({ id, data, selected }) {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onBlur={() => commit(val)}
-            onKeyDown={(e) => e.key === "Enter" && commit(val)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commit(val);
+              } else if (e.key === "Escape") {
+                setVal(data?.label ?? "Text");
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+              }
+            }}
+            onFocus={(e) => e.target.select()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              border: "1px solid #ccc",
+              border: "1px solid #3b82f6",
               borderRadius: 4,
-              padding: "4px 6px",
-              fontSize: 12,
+              padding: "2px 6px",
+              fontSize: data?.fontSize || 12,
               position: "relative",
-              zIndex: 5,
+              zIndex: 10,
               background: "#fff",
               color: "#000",
               pointerEvents: "all",
               textAlign: "center",
+              outline: "none",
+              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
             }}
           />
         ) : (
@@ -2205,6 +2293,25 @@ function DecisionNode({ id, data, selected }) {
               textAlign: "center",
               display: "block",
               width: "100%",
+              cursor: "text",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }}
+            onClick={(e) => {
+              if (selected) {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({
+                  ...n,
+                  data: { ...n.data, editing: true },
+                }));
+              }
             }}
           >
             {data?.label ?? "Text"}
@@ -2260,7 +2367,7 @@ function DecisionNode({ id, data, selected }) {
         style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={80}
         handleStyle={{
@@ -2279,6 +2386,11 @@ function DecisionNode({ id, data, selected }) {
 function TerminatorNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2299,12 +2411,13 @@ function TerminatorNode({ id, data, selected }) {
         justifyContent: "center",
         boxSizing: "border-box",
       }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <Handle
         id="top-in"
@@ -2361,21 +2474,31 @@ function TerminatorNode({ id, data, selected }) {
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={() => commit(val)}
-          onKeyDown={(e) => e.key === "Enter" && commit(val)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commit(val);
+            } else if (e.key === "Escape") {
+              setVal(data?.label ?? "Text");
+              updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+            }
+          }}
+          onFocus={(e) => e.target.select()}
           onMouseDown={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
           style={{
             width: "calc(100% - 12px)",
-            border: "1px solid #ccc",
+            border: "1px solid #3b82f6",
             borderRadius: 4,
-            padding: "4px 6px",
-            fontSize: 12,
+            padding: "2px 6px",
+            fontSize: data?.fontSize || 12,
             position: "relative",
-            zIndex: 5,
+            zIndex: 10,
             background: "#fff",
             color: "#000",
             pointerEvents: "all",
             textAlign: "center",
+            outline: "none",
+            boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
           }}
         />
       ) : (
@@ -2384,13 +2507,34 @@ function TerminatorNode({ id, data, selected }) {
             color: data?.text || "#000",
             fontSize: data?.fontSize || 12,
             textAlign: "center",
+            margin: "0 12px",
+            display: "block",
+            cursor: "text",
+            pointerEvents: "auto",
+            userSelect: "none",
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            updateNodeData(id, (n) => ({
+              ...n,
+              data: { ...n.data, editing: true },
+            }));
+          }}
+          onClick={(e) => {
+            if (selected) {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }
           }}
         >
           {data?.label ?? "Text"}
         </span>
       )}
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={40}
         handleStyle={{
@@ -2410,6 +2554,11 @@ function TerminatorNode({ id, data, selected }) {
 function EllipseNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2430,12 +2579,13 @@ function EllipseNode({ id, data, selected }) {
         justifyContent: "center",
         boxSizing: "border-box",
       }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <Handle
         id="top-in"
@@ -2492,20 +2642,31 @@ function EllipseNode({ id, data, selected }) {
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onBlur={() => commit(val)}
-          onKeyDown={(e) => e.key === "Enter" && commit(val)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commit(val);
+            } else if (e.key === "Escape") {
+              setVal(data?.label ?? "Text");
+              updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+            }
+          }}
+          onFocus={(e) => e.target.select()}
           onMouseDown={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
           style={{
             width: "calc(100% - 12px)",
-            border: "1px solid #ccc",
+            border: "1px solid #3b82f6",
             borderRadius: 4,
-            padding: "4px 6px",
-            fontSize: 12,
+            padding: "2px 6px",
+            fontSize: data?.fontSize || 12,
             position: "relative",
-            zIndex: 5,
+            zIndex: 10,
             background: "#fff",
             color: "#000",
             pointerEvents: "all",
+            textAlign: "center",
+            outline: "none",
+            boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
           }}
         />
       ) : (
@@ -2514,13 +2675,32 @@ function EllipseNode({ id, data, selected }) {
             color: data?.text || "#000",
             fontSize: data?.fontSize || 12,
             textAlign: "center",
+            cursor: "text",
+            pointerEvents: "auto",
+            userSelect: "none",
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            updateNodeData(id, (n) => ({
+              ...n,
+              data: { ...n.data, editing: true },
+            }));
+          }}
+          onClick={(e) => {
+            if (selected) {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }
           }}
         >
           {data?.label ?? "Text"}
         </span>
       )}
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={60}
         minHeight={60}
         handleStyle={{
@@ -2539,6 +2719,11 @@ function EllipseNode({ id, data, selected }) {
 function DataNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2549,12 +2734,13 @@ function DataNode({ id, data, selected }) {
   return (
     <div
       style={{ ...baseNodeStyles(data), position: "relative" }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <div
         style={{
@@ -2580,7 +2766,15 @@ function DataNode({ id, data, selected }) {
           alignItems: "center",
           justifyContent: "center",
           padding: 6,
-          pointerEvents: "none",
+          pointerEvents: "all",
+          cursor: "text",
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          updateNodeData(id, (n) => ({
+            ...n,
+            data: { ...n.data, editing: true },
+          }));
         }}
       >
         {data?.editing ? (
@@ -2590,21 +2784,31 @@ function DataNode({ id, data, selected }) {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onBlur={() => commit(val)}
-            onKeyDown={(e) => e.key === "Enter" && commit(val)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commit(val);
+              } else if (e.key === "Escape") {
+                setVal(data?.label ?? "Text");
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+              }
+            }}
+            onFocus={(e) => e.target.select()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              border: "1px solid #ccc",
+              border: "1px solid #3b82f6",
               borderRadius: 4,
-              padding: "4px 6px",
-              fontSize: 12,
+              padding: "2px 6px",
+              fontSize: data?.fontSize || 12,
               position: "relative",
-              zIndex: 5,
+              zIndex: 10,
               background: "#fff",
               color: "#000",
               pointerEvents: "all",
               textAlign: "center",
+              outline: "none",
+              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
             }}
           />
         ) : (
@@ -2612,22 +2816,42 @@ function DataNode({ id, data, selected }) {
             style={{
               color: data?.text || "#000",
               fontSize: data?.fontSize || 12,
+              textAlign: "center",
+              cursor: "text",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }}
+            onClick={(e) => {
+              if (selected) {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({
+                  ...n,
+                  data: { ...n.data, editing: true },
+                }));
+              }
             }}
           >
             {data?.label ?? "Text"}
           </span>
         )}
       </div>
-      <Handle id="top-in" type="target" position={Position.Top} />
-      <Handle id="right-in" type="target" position={Position.Right} />
-      <Handle id="bottom-in" type="target" position={Position.Bottom} />
-      <Handle id="left-in" type="target" position={Position.Left} />
-      <Handle id="top-out" type="source" position={Position.Top} />
-      <Handle id="right-out" type="source" position={Position.Right} />
-      <Handle id="bottom-out" type="source" position={Position.Bottom} />
-      <Handle id="left-out" type="source" position={Position.Left} />
+      <Handle id="top-in" type="target" position={Position.Top} style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }} />
+      <Handle id="right-in" type="target" position={Position.Right} style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }} />
+      <Handle id="left-in" type="target" position={Position.Left} style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }} />
+      <Handle id="top-out" type="source" position={Position.Top} style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }} />
+      <Handle id="right-out" type="source" position={Position.Right} style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }} />
+      <Handle id="left-out" type="source" position={Position.Left} style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }} />
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={40}
         handleStyle={{
@@ -2646,6 +2870,11 @@ function DataNode({ id, data, selected }) {
 function DatabaseNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2658,12 +2887,13 @@ function DatabaseNode({ id, data, selected }) {
   return (
     <div
       style={{ ...baseNodeStyles(data), position: "relative" }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <svg
         viewBox="0 0 160 80"
@@ -2706,7 +2936,15 @@ function DatabaseNode({ id, data, selected }) {
           alignItems: "center",
           justifyContent: "center",
           padding: 6,
-          pointerEvents: "none",
+          pointerEvents: "all",
+          cursor: "text",
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          updateNodeData(id, (n) => ({
+            ...n,
+            data: { ...n.data, editing: true },
+          }));
         }}
       >
         {data?.editing ? (
@@ -2716,20 +2954,31 @@ function DatabaseNode({ id, data, selected }) {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onBlur={() => commit(val)}
-            onKeyDown={(e) => e.key === "Enter" && commit(val)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commit(val);
+              } else if (e.key === "Escape") {
+                setVal(data?.label ?? "Text");
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+              }
+            }}
+            onFocus={(e) => e.target.select()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              border: "1px solid #ccc",
+              border: "1px solid #3b82f6",
               borderRadius: 4,
-              padding: "4px 6px",
-              fontSize: 12,
+              padding: "2px 6px",
+              fontSize: data?.fontSize || 12,
               position: "relative",
-              zIndex: 5,
+              zIndex: 10,
               background: "#fff",
               color: "#000",
               pointerEvents: "all",
+              textAlign: "center",
+              outline: "none",
+              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
             }}
           />
         ) : (
@@ -2740,6 +2989,25 @@ function DatabaseNode({ id, data, selected }) {
               textAlign: "center",
               display: "block",
               width: "100%",
+              cursor: "text",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }}
+            onClick={(e) => {
+              if (selected) {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({
+                  ...n,
+                  data: { ...n.data, editing: true },
+                }));
+              }
             }}
           >
             {data?.label ?? "Database"}
@@ -2750,52 +3018,52 @@ function DatabaseNode({ id, data, selected }) {
         id="top-in"
         type="target"
         position={Position.Top}
-        style={HANDLE_POSITIONS.top}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-in"
         type="target"
         position={Position.Right}
-        style={HANDLE_POSITIONS.right}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-in"
         type="target"
         position={Position.Bottom}
-        style={HANDLE_POSITIONS.bottom}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-in"
         type="target"
         position={Position.Left}
-        style={HANDLE_POSITIONS.left}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <Handle
         id="top-out"
         type="source"
         position={Position.Top}
-        style={HANDLE_POSITIONS.top}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-out"
         type="source"
         position={Position.Right}
-        style={HANDLE_POSITIONS.right}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-out"
         type="source"
         position={Position.Bottom}
-        style={HANDLE_POSITIONS.bottom}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-out"
         type="source"
         position={Position.Left}
-        style={HANDLE_POSITIONS.left}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={60}
         handleStyle={{
@@ -2814,6 +3082,11 @@ function DatabaseNode({ id, data, selected }) {
 function ManualInputNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2826,12 +3099,13 @@ function ManualInputNode({ id, data, selected }) {
   return (
     <div
       style={{ ...baseNodeStyles(data), position: "relative" }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <svg
         viewBox="0 0 160 80"
@@ -2853,7 +3127,15 @@ function ManualInputNode({ id, data, selected }) {
           alignItems: "center",
           justifyContent: "center",
           padding: 6,
-          pointerEvents: "none",
+          pointerEvents: "all",
+          cursor: "text",
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          updateNodeData(id, (n) => ({
+            ...n,
+            data: { ...n.data, editing: true },
+          }));
         }}
       >
         {data?.editing ? (
@@ -2863,20 +3145,31 @@ function ManualInputNode({ id, data, selected }) {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onBlur={() => commit(val)}
-            onKeyDown={(e) => e.key === "Enter" && commit(val)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commit(val);
+              } else if (e.key === "Escape") {
+                setVal(data?.label ?? "Text");
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+              }
+            }}
+            onFocus={(e) => e.target.select()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              border: "1px solid #ccc",
+              border: "1px solid #3b82f6",
               borderRadius: 4,
-              padding: "4px 6px",
-              fontSize: 12,
+              padding: "2px 6px",
+              fontSize: data?.fontSize || 12,
               position: "relative",
-              zIndex: 5,
+              zIndex: 10,
               background: "#fff",
               color: "#000",
               pointerEvents: "all",
+              textAlign: "center",
+              outline: "none",
+              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
             }}
           />
         ) : (
@@ -2887,22 +3180,41 @@ function ManualInputNode({ id, data, selected }) {
               textAlign: "center",
               display: "block",
               width: "100%",
+              cursor: "text",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }}
+            onClick={(e) => {
+              if (selected) {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({
+                  ...n,
+                  data: { ...n.data, editing: true },
+                }));
+              }
             }}
           >
             {data?.label ?? "Manual Input"}
           </span>
         )}
       </div>
-      <Handle id="top-in" type="target" position={Position.Top} />
-      <Handle id="right-in" type="target" position={Position.Right} />
-      <Handle id="bottom-in" type="target" position={Position.Bottom} />
-      <Handle id="left-in" type="target" position={Position.Left} />
-      <Handle id="top-out" type="source" position={Position.Top} />
-      <Handle id="right-out" type="source" position={Position.Right} />
-      <Handle id="bottom-out" type="source" position={Position.Bottom} />
-      <Handle id="left-out" type="source" position={Position.Left} />
+      <Handle id="top-in" type="target" position={Position.Top} style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }} />
+      <Handle id="right-in" type="target" position={Position.Right} style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }} />
+      <Handle id="bottom-in" type="target" position={Position.Bottom} style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }} />
+      <Handle id="left-in" type="target" position={Position.Left} style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }} />
+      <Handle id="top-out" type="source" position={Position.Top} style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }} />
+      <Handle id="right-out" type="source" position={Position.Right} style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }} />
+      <Handle id="bottom-out" type="source" position={Position.Bottom} style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }} />
+      <Handle id="left-out" type="source" position={Position.Left} style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }} />
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={40}
         handleStyle={{
@@ -2921,6 +3233,11 @@ function ManualInputNode({ id, data, selected }) {
 function DocumentNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -2933,12 +3250,13 @@ function DocumentNode({ id, data, selected }) {
   return (
     <div
       style={{ ...baseNodeStyles(data), position: "relative" }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <svg
         viewBox="0 0 160 80"
@@ -2969,7 +3287,15 @@ function DocumentNode({ id, data, selected }) {
           alignItems: "center",
           justifyContent: "center",
           padding: 6,
-          pointerEvents: "none",
+          pointerEvents: "all",
+          cursor: "text",
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          updateNodeData(id, (n) => ({
+            ...n,
+            data: { ...n.data, editing: true },
+          }));
         }}
       >
         {data?.editing ? (
@@ -2979,20 +3305,31 @@ function DocumentNode({ id, data, selected }) {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onBlur={() => commit(val)}
-            onKeyDown={(e) => e.key === "Enter" && commit(val)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commit(val);
+              } else if (e.key === "Escape") {
+                setVal(data?.label ?? "Text");
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+              }
+            }}
+            onFocus={(e) => e.target.select()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              border: "1px solid #ccc",
+              border: "1px solid #3b82f6",
               borderRadius: 4,
-              padding: "4px 6px",
-              fontSize: 12,
+              padding: "2px 6px",
+              fontSize: data?.fontSize || 12,
               position: "relative",
-              zIndex: 5,
+              zIndex: 10,
               background: "#fff",
               color: "#000",
               pointerEvents: "all",
+              textAlign: "center",
+              outline: "none",
+              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
             }}
           />
         ) : (
@@ -3003,6 +3340,25 @@ function DocumentNode({ id, data, selected }) {
               textAlign: "center",
               display: "block",
               width: "100%",
+              cursor: "text",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }}
+            onClick={(e) => {
+              if (selected) {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({
+                  ...n,
+                  data: { ...n.data, editing: true },
+                }));
+              }
             }}
           >
             {data?.label ?? "Document"}
@@ -3013,52 +3369,52 @@ function DocumentNode({ id, data, selected }) {
         id="top-in"
         type="target"
         position={Position.Top}
-        style={HANDLE_POSITIONS.top}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-in"
         type="target"
         position={Position.Right}
-        style={HANDLE_POSITIONS.right}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-in"
         type="target"
         position={Position.Bottom}
-        style={HANDLE_POSITIONS.bottom}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-in"
         type="target"
         position={Position.Left}
-        style={HANDLE_POSITIONS.left}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <Handle
         id="top-out"
         type="source"
         position={Position.Top}
-        style={HANDLE_POSITIONS.top}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-out"
         type="source"
         position={Position.Right}
-        style={HANDLE_POSITIONS.right}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-out"
         type="source"
         position={Position.Bottom}
-        style={HANDLE_POSITIONS.bottom}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-out"
         type="source"
         position={Position.Left}
-        style={HANDLE_POSITIONS.left}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={50}
         handleStyle={{
@@ -3077,6 +3433,11 @@ function DocumentNode({ id, data, selected }) {
 function TriangleNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -3089,12 +3450,13 @@ function TriangleNode({ id, data, selected }) {
   return (
     <div
       style={{ ...baseNodeStyles(data), position: "relative" }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <svg
         viewBox="0 0 160 80"
@@ -3116,7 +3478,15 @@ function TriangleNode({ id, data, selected }) {
           alignItems: "center",
           justifyContent: "center",
           padding: 6,
-          pointerEvents: "none",
+          pointerEvents: "all",
+          cursor: "text",
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          updateNodeData(id, (n) => ({
+            ...n,
+            data: { ...n.data, editing: true },
+          }));
         }}
       >
         {data?.editing ? (
@@ -3126,20 +3496,31 @@ function TriangleNode({ id, data, selected }) {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onBlur={() => commit(val)}
-            onKeyDown={(e) => e.key === "Enter" && commit(val)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commit(val);
+              } else if (e.key === "Escape") {
+                setVal(data?.label ?? "Text");
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+              }
+            }}
+            onFocus={(e) => e.target.select()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              border: "1px solid #ccc",
+              border: "1px solid #3b82f6",
               borderRadius: 4,
-              padding: "4px 6px",
-              fontSize: 12,
+              padding: "2px 6px",
+              fontSize: data?.fontSize || 12,
               position: "relative",
-              zIndex: 5,
+              zIndex: 10,
               background: "#fff",
               color: "#000",
               pointerEvents: "all",
+              textAlign: "center",
+              outline: "none",
+              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
             }}
           />
         ) : (
@@ -3150,6 +3531,25 @@ function TriangleNode({ id, data, selected }) {
               textAlign: "center",
               display: "block",
               width: "100%",
+              cursor: "text",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }}
+            onClick={(e) => {
+              if (selected) {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({
+                  ...n,
+                  data: { ...n.data, editing: true },
+                }));
+              }
             }}
           >
             {data?.label ?? "Triangle"}
@@ -3160,52 +3560,52 @@ function TriangleNode({ id, data, selected }) {
         id="top-in"
         type="target"
         position={Position.Top}
-        style={HANDLE_POSITIONS.top}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-in"
         type="target"
         position={Position.Right}
-        style={HANDLE_POSITIONS.right}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-in"
         type="target"
         position={Position.Bottom}
-        style={HANDLE_POSITIONS.bottom}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-in"
         type="target"
         position={Position.Left}
-        style={HANDLE_POSITIONS.left}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <Handle
         id="top-out"
         type="source"
         position={Position.Top}
-        style={HANDLE_POSITIONS.top}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-out"
         type="source"
         position={Position.Right}
-        style={HANDLE_POSITIONS.right}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-out"
         type="source"
         position={Position.Bottom}
-        style={HANDLE_POSITIONS.bottom}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-out"
         type="source"
         position={Position.Left}
-        style={HANDLE_POSITIONS.left}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={60}
         minHeight={50}
         handleStyle={{
@@ -3224,6 +3624,11 @@ function TriangleNode({ id, data, selected }) {
 function HexagonNode({ id, data, selected }) {
   const updateNodeData = useNodeDataUpdate();
   const [val, setVal] = useState(data?.label ?? "Text");
+
+  useEffect(() => {
+    setVal(data?.label ?? "Text");
+  }, [data?.label, data?.editing]);
+
   const commit = (next) => {
     updateNodeData(id, (n) => ({
       ...n,
@@ -3236,12 +3641,13 @@ function HexagonNode({ id, data, selected }) {
   return (
     <div
       style={{ ...baseNodeStyles(data), position: "relative" }}
-      onDoubleClick={() =>
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         updateNodeData(id, (n) => ({
           ...n,
           data: { ...n.data, editing: true },
-        }))
-      }
+        }));
+      }}
     >
       <svg
         viewBox="0 0 160 80"
@@ -3263,7 +3669,15 @@ function HexagonNode({ id, data, selected }) {
           alignItems: "center",
           justifyContent: "center",
           padding: 6,
-          pointerEvents: "none",
+          pointerEvents: "all",
+          cursor: "text",
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          updateNodeData(id, (n) => ({
+            ...n,
+            data: { ...n.data, editing: true },
+          }));
         }}
       >
         {data?.editing ? (
@@ -3273,20 +3687,31 @@ function HexagonNode({ id, data, selected }) {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onBlur={() => commit(val)}
-            onKeyDown={(e) => e.key === "Enter" && commit(val)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commit(val);
+              } else if (e.key === "Escape") {
+                setVal(data?.label ?? "Text");
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+              }
+            }}
+            onFocus={(e) => e.target.select()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
-              border: "1px solid #ccc",
+              border: "1px solid #3b82f6",
               borderRadius: 4,
-              padding: "4px 6px",
-              fontSize: 12,
+              padding: "2px 6px",
+              fontSize: data?.fontSize || 12,
               position: "relative",
-              zIndex: 5,
+              zIndex: 10,
               background: "#fff",
               color: "#000",
               pointerEvents: "all",
+              textAlign: "center",
+              outline: "none",
+              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
             }}
           />
         ) : (
@@ -3297,6 +3722,25 @@ function HexagonNode({ id, data, selected }) {
               textAlign: "center",
               display: "block",
               width: "100%",
+              cursor: "text",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              updateNodeData(id, (n) => ({
+                ...n,
+                data: { ...n.data, editing: true },
+              }));
+            }}
+            onClick={(e) => {
+              if (selected) {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({
+                  ...n,
+                  data: { ...n.data, editing: true },
+                }));
+              }
             }}
           >
             {data?.label ?? "Hexagon"}
@@ -3307,52 +3751,52 @@ function HexagonNode({ id, data, selected }) {
         id="top-in"
         type="target"
         position={Position.Top}
-        style={{ top: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-in"
         type="target"
         position={Position.Right}
-        style={{ top: "50%", right: 0 }}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-in"
         type="target"
         position={Position.Bottom}
-        style={{ bottom: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-in"
         type="target"
         position={Position.Left}
-        style={{ top: "50%", left: 0 }}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <Handle
         id="top-out"
         type="source"
         position={Position.Top}
-        style={{ top: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-out"
         type="source"
         position={Position.Right}
-        style={{ top: "50%", right: 0 }}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-out"
         type="source"
         position={Position.Bottom}
-        style={{ bottom: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-out"
         type="source"
         position={Position.Left}
-        style={{ top: "50%", left: 0 }}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={80}
         minHeight={50}
         handleStyle={{
@@ -3384,49 +3828,49 @@ function SvgStampNode({ id, data, selected }) {
         id="top-in"
         type="target"
         position={Position.Top}
-        style={{ top: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-in"
         type="target"
         position={Position.Right}
-        style={{ top: "50%", right: 0 }}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-in"
         type="target"
         position={Position.Bottom}
-        style={{ bottom: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-in"
         type="target"
         position={Position.Left}
-        style={{ top: "50%", left: 0 }}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <Handle
         id="top-out"
         type="source"
         position={Position.Top}
-        style={{ top: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.top, ...baseHandleStyle(data) }}
       />
       <Handle
         id="right-out"
         type="source"
         position={Position.Right}
-        style={{ top: "50%", right: 0 }}
+        style={{ ...HANDLE_POSITIONS.right, ...baseHandleStyle(data) }}
       />
       <Handle
         id="bottom-out"
         type="source"
         position={Position.Bottom}
-        style={{ bottom: 0, left: "50%" }}
+        style={{ ...HANDLE_POSITIONS.bottom, ...baseHandleStyle(data) }}
       />
       <Handle
         id="left-out"
         type="source"
         position={Position.Left}
-        style={{ top: "50%", left: 0 }}
+        style={{ ...HANDLE_POSITIONS.left, ...baseHandleStyle(data) }}
       />
       <img
         src={data?.src}
@@ -3655,10 +4099,10 @@ function GenericShapeNode({ id, data, selected }) {
   const [editingSlot, setEditingSlot] = useState(null);
   const [slotDraft, setSlotDraft] = useState("");
 
-  // Sync local state when data.label changes externally
+  // Sync local state when data.label changes externally or editing starts
   useEffect(() => {
     setVal(data?.label ?? "");
-  }, [data?.label]);
+  }, [data?.label, data?.editing]);
 
   const shape =
     findShapeConfigById(data?.shapeId) ||
@@ -3784,9 +4228,10 @@ function GenericShapeNode({ id, data, selected }) {
         backgroundColor: "transparent",
         pointerEvents: "all", // Ensure consistent click capture
       }}
-      onDoubleClick={() => {
+      onDoubleClick={(e) => {
+        e.stopPropagation();
         if (hasSlots) return;
-        updateNodeData(id, n => ({ ...n, data: { ...n.data, editing: true } }));
+        updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: true } }));
       }}
     >
       <svg
@@ -3815,14 +4260,14 @@ function GenericShapeNode({ id, data, selected }) {
             alignItems: "center",
             justifyContent: "center",
             padding: 6,
-            pointerEvents: data?.editing ? "auto" : "none",
+            pointerEvents: "all",
             zIndex: 4,
             cursor: "text",
           }}
           onDoubleClick={(e) => {
             e.stopPropagation();
             if (!data?.editing) {
-              updateNodeData(id, n => ({ ...n, data: { ...n.data, editing: true } }));
+              updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: true } }));
             }
           }}
         >
@@ -3833,20 +4278,31 @@ function GenericShapeNode({ id, data, selected }) {
               value={val}
               onChange={(e) => setVal(e.target.value)}
               onBlur={() => commit(val)}
-              onKeyDown={(e) => e.key === "Enter" && commit(val)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  commit(val);
+                } else if (e.key === "Escape") {
+                  setVal(data?.label ?? "");
+                  updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: false } }));
+                }
+              }}
+              onFocus={(e) => e.target.select()}
               onMouseDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
               style={{
                 width: "100%",
-                border: "1px solid #ccc",
+                border: "1px solid #3b82f6",
                 borderRadius: 4,
-                padding: "4px 6px",
+                padding: "2px 6px",
                 fontSize: data?.fontSize || 12,
                 position: "relative",
-                zIndex: 6,
+                zIndex: 10,
                 background: "#fff",
                 color: "#000",
                 pointerEvents: "all",
+                textAlign: "center",
+                outline: "none",
+                boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.3)",
               }}
             />
           ) : (
@@ -3859,11 +4315,16 @@ function GenericShapeNode({ id, data, selected }) {
                 width: "100%",
                 pointerEvents: "auto",
                 cursor: "text",
+                userSelect: "none",
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: true } }));
               }}
               onClick={(e) => {
                 if (selected) {
                   e.stopPropagation();
-                  updateNodeData(id, n => ({ ...n, data: { ...n.data, editing: true } }));
+                  updateNodeData(id, (n) => ({ ...n, data: { ...n.data, editing: true } }));
                 }
               }}
             >
@@ -3965,24 +4426,46 @@ function GenericShapeNode({ id, data, selected }) {
           })}
         </div>
       )}
-      {handles.map((handle) => (
-        <React.Fragment key={`${id}-${handle.id}`}>
-          <Handle
-            type="target"
-            position={handle.position}
-            id={`${handle.id}-in`}
-            style={{ ...baseHandleStyle(data), ...(handle.style || {}) }}
-          />
-          <Handle
-            type="source"
-            position={handle.position}
-            id={`${handle.id}-out`}
-            style={{ ...baseHandleStyle(data), ...(handle.style || {}) }}
-          />
-        </React.Fragment>
-      ))}
+      {handles.map((handle) => {
+        let defaultTransform = "translate(-50%, -50%)";
+        if (handle.position === Position.Right) {
+          defaultTransform = "translate(50%, -50%)";
+        } else if (handle.position === Position.Bottom) {
+          defaultTransform = "translate(-50%, 50%)";
+        }
+        const customTransform =
+          handle.style &&
+          handle.style.transform &&
+          handle.style.transform !== "translate(-50%, -50%)"
+            ? handle.style.transform
+            : defaultTransform;
+
+        const hStyle = {
+          ...baseHandleStyle(data),
+          ...(handle.style || {}),
+          transform: customTransform,
+          zIndex: 50,
+        };
+
+        return (
+          <React.Fragment key={`${id}-${handle.id}`}>
+            <Handle
+              type="target"
+              position={handle.position}
+              id={`${handle.id}-in`}
+              style={hStyle}
+            />
+            <Handle
+              type="source"
+              position={handle.position}
+              id={`${handle.id}-out`}
+              style={hStyle}
+            />
+          </React.Fragment>
+        );
+      })}
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !data?.editing}
         minWidth={10}
         minHeight={10}
         handleStyle={{
@@ -4578,6 +5061,34 @@ function DiagramEditor() {
       });
     },
     [debounceSyncToRedux],
+  );
+
+  const updateNodeDataInCanvas = useCallback(
+    (nodeId, updateFn) => {
+      setNodes((nds) =>
+        nds.map((n) => (n.id === nodeId ? updateFn(n) : n)),
+      );
+    },
+    [setNodes],
+  );
+
+  const updateEdgeDataInCanvas = useCallback(
+    (edgeId, updateFn) => {
+      setEdges((eds) =>
+        eds.map((e) => (e.id === edgeId ? updateFn(e) : e)),
+      );
+    },
+    [setEdges],
+  );
+
+  const flowchartContextValue = useMemo(
+    () => ({
+      updateNodeData: updateNodeDataInCanvas,
+      updateEdgeData: updateEdgeDataInCanvas,
+      setNodes,
+      setEdges,
+    }),
+    [updateNodeDataInCanvas, updateEdgeDataInCanvas, setNodes, setEdges],
   );
 
   const onNodesChange = useCallback(
@@ -5794,6 +6305,28 @@ function DiagramEditor() {
     );
   }, [setNodes]);
 
+  const onNodeDoubleClick = useCallback(
+    (event, node) => {
+      event?.stopPropagation?.();
+      const shapeCfg =
+        findShapeConfigById(node?.data?.shapeId) ||
+        findShapeConfigById(node?.data?.label);
+      if (shapeCfg?.slotGrid) {
+        return;
+      }
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === node.id
+            ? { ...n, data: { ...n.data, editing: true } }
+            : n.data?.editing
+            ? { ...n, data: { ...n.data, editing: false } }
+            : n,
+        ),
+      );
+    },
+    [setNodes],
+  );
+
   // Clipboard state
   const [clipboard, setClipboard] = useState({ nodes: [], edges: [] });
 
@@ -6824,7 +7357,8 @@ function DiagramEditor() {
 
 
   return (
-    <div className="diagram-builder">
+    <FlowchartUpdateContext.Provider value={flowchartContextValue}>
+      <div className="diagram-builder">
       <EditorNavbar
         activeTab="Flowchart"
         onTabChange={handleTabChange}
@@ -7043,6 +7577,7 @@ function DiagramEditor() {
                 onNodeDragStop={onNodeDragStop}
                 onSelectionDragStop={onNodeDragStop}
                 onSelectionChange={onSelectionChange}
+                onNodeDoubleClick={onNodeDoubleClick}
                 onPaneClick={(e) => { exitEditing(e); setShowProperties(false); }}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
@@ -7052,9 +7587,12 @@ function DiagramEditor() {
                   markerEnd: { type: MarkerType.ArrowClosed },
                 }}
                 connectOnClick={false}
-                connectionMode={ConnectionMode.Strict}
+                connectionMode={ConnectionMode.Loose}
+                connectionRadius={30}
                 isValidConnection={(c) =>
-                  Boolean(c.sourceHandle && c.targetHandle)
+                  c.source !== c.target ||
+                  (Boolean(c.sourceHandle && c.targetHandle) &&
+                    c.sourceHandle !== c.targetHandle)
                 }
                 snapToGrid
                 snapGrid={[16, 16]}
@@ -7114,7 +7652,8 @@ function DiagramEditor() {
         </div>
       </div>
     </div>
-  );
+  </FlowchartUpdateContext.Provider>
+);
 }
 
 function FlowchartWorkspace() {

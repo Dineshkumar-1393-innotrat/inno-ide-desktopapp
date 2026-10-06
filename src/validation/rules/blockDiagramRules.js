@@ -71,12 +71,109 @@ export const extractProductComponents = (context = {}) => {
     });
   }
 
-  const mcu = context.product?.mcu || context.productDefinition?.mcu;
+  const mcu =
+    context.product?.mcu ||
+    context.product?.targetMCU ||
+    context.productDefinition?.mcu ||
+    context.productDefinition?.targetMCU ||
+    context.productDetails?.mcu ||
+    context.productDetails?.targetMCU;
   if (mcu && typeof mcu === 'string' && mcu.trim() && !list.includes(mcu.trim())) {
     list.unshift(mcu.trim());
   }
 
   return list;
+};
+
+export const MCU_KEYWORDS = [
+  'microcontroller',
+  'micro-controller',
+  'mcu',
+  'esp32',
+  'esp8266',
+  'stm32',
+  'nrf52',
+  'nrf32',
+  'arduino',
+  'rp2040',
+  'pic',
+  'atmega',
+  'attiny',
+  'cortex',
+  'processor',
+];
+
+export const isMCU = (nameOrObj) => {
+  if (!nameOrObj) return false;
+  let text = '';
+  if (typeof nameOrObj === 'string') {
+    text = nameOrObj;
+  } else if (typeof nameOrObj === 'object') {
+    text = `${nameOrObj.symbol?.name || ''} ${nameOrObj.name || ''} ${nameOrObj.title || ''} ${nameOrObj.label || ''} ${nameOrObj.componentName || ''} ${nameOrObj.type || ''} ${nameOrObj.componentType || ''}`;
+  }
+  const clean = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return MCU_KEYWORDS.some((kw) => clean.includes(kw.replace(/[^a-z0-9]/g, '')));
+};
+
+export const extractProductMCU = (context = {}) => {
+  // Check direct mcu / targetMCU fields
+  const directMcu =
+    context.product?.mcu ||
+    context.product?.targetMCU ||
+    context.productDefinition?.mcu ||
+    context.productDefinition?.targetMCU ||
+    context.productDetails?.mcu ||
+    context.productDetails?.targetMCU ||
+    context.board;
+  if (directMcu && typeof directMcu === 'string' && directMcu.trim()) {
+    return directMcu.trim();
+  }
+
+  // Check product components for MCU
+  const comps = extractProductComponents(context);
+  const mcuComp = comps.find((c) => isMCU(c));
+  if (mcuComp) return mcuComp;
+
+  // Check localStorage product details
+  if (typeof localStorage !== 'undefined') {
+    const prodId = context.productId || context.product?.id || localStorage.getItem('activeProductId');
+    const projId = context.projectId || context.project?.id || localStorage.getItem('activeProjectId');
+    const prodName = context.productName || context.product?.name || localStorage.getItem('activeProductName');
+    const projName = context.projectName || context.project?.name || localStorage.getItem('activeProjectName');
+
+    const keys = [
+      prodId && `innoide:product_details_${prodId}`,
+      projId && `innoide:product_details_${projId}`,
+      prodName && `innoide:product_details_${prodName}`,
+      projName && `innoide:product_details_${projName}`,
+      'innoide:last_product_details',
+    ].filter(Boolean);
+
+    for (const key of keys) {
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const found = parsed?.mcu || parsed?.targetMCU || parsed?.basicInformation?.mcu;
+          if (found && typeof found === 'string' && found.trim()) return found.trim();
+          if (Array.isArray(parsed?.components)) {
+            const m = parsed.components.find((c) => {
+              const name = c?.componentName || c?.name || c;
+              const type = c?.componentType || c?.type;
+              return isMCU(name) || isMCU(type);
+            });
+            if (m) return m.componentName || m.name || (typeof m === 'string' ? m : 'Microcontroller');
+          }
+          if (Array.isArray(parsed?.devices)) {
+            const dev = parsed.devices.find((d) => d?.mcu || isMCU(d?.deviceName) || isMCU(d?.name));
+            if (dev?.mcu) return dev.mcu;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  return null;
 };
 
 /**
@@ -130,61 +227,134 @@ const normalizeText = (str) => {
     .replace(/[^a-z0-9]/g, '');
 };
 
-export const matchesComponent = (compName, nodeLabels) => {
-  const normComp = normalizeText(compName);
-  if (!normComp) return false;
+export const tokenizeComponentName = (str) => {
+  if (!str || typeof str !== 'string') return [];
+  const deCamel = str
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  return deCamel
+    .toLowerCase()
+    .split(/[\s\-_/]+/)
+    .map((w) => w.replace(/[^a-z0-9]/g, ''))
+    .filter((w) => w.length >= 2);
+};
 
-  return nodeLabels.some((nodeLabel) => {
-    const normNode = normalizeText(nodeLabel);
-    if (!normNode) return false;
+export const GENERIC_CATEGORY_WORDS = new Set([
+  'sensor', 'sensors', 'censor', 'censors',
+  'actuator', 'actuators',
+  'switch', 'switches',
+  'button', 'buttons',
+  'indicator', 'indicators',
+  'display', 'displays',
+  'controller', 'controllers',
+  'module', 'modules',
+  'device', 'devices',
+  'component', 'components',
+  'board', 'boards',
+  'unit', 'units',
+  'and', 'the', 'for', 'with', 'type', 'name'
+]);
 
-    // 1. Exact match
-    if (normNode === normComp) return true;
+export const getIdentifyingTokens = (str) => {
+  return tokenizeComponentName(str).filter((w) => !GENERIC_CATEGORY_WORDS.has(w));
+};
 
-    // 2. Substring match
-    if (normNode.includes(normComp) || normComp.includes(normNode)) return true;
+export const COMPONENT_ALIASES = {
+  esp32: ['esp', 'esp32s3', 'esp8266', 'mcu', 'microcontroller', 'nodemcu'],
+  stm32: ['mcu', 'microcontroller', 'nucleo', 'arm'],
+  arduino: ['mcu', 'microcontroller', 'uno', 'nano', 'mega'],
+  mcu: ['microcontroller', 'processor', 'esp32', 'stm32', 'arduino', 'rp2040'],
+  microcontroller: ['mcu', 'processor', 'esp32', 'stm32', 'arduino', 'rp2040'],
+  temperature: ['temp', 'dht11', 'dht22', 'lm35', 'bmp280', 'ds18b20'],
+  humidity: ['moisture', 'dht11', 'dht22'],
+  flame: ['fire', 'flamesensor'],
+  touch: ['touchandforce', 'capacitive', 'touchscreen'],
+  force: ['touchandforce', 'pressure', 'fsr', 'loadcell', 'strain'],
+  light: ['ldr', 'lux', 'photodiode', 'optical', 'bh1750', 'tsl2561', 'lightsensor'],
+  gas: ['mq2', 'mq', 'co2', 'sgp30', 'smoke', 'airquality', 'methane'],
+  motion: ['pir', 'radar', 'presence'],
+  distance: ['ultrasonic', 'range', 'sonar', 'vl53l0x', 'hcsr04', 'lidar', 'tof'],
+  heartbeat: ['pulse', 'heartrate', 'ky039', 'ecg', 'ppg'],
+  sound: ['audio', 'mic', 'microphone', 'acoustic'],
+  relay: ['contactor', 'solenoid'],
+  buzzer: ['alarm', 'beeper', 'speaker', 'hooter', 'siren'],
+  oled: ['display', 'screen', 'oleddisplay'],
+  motor: ['servo', 'stepper', 'servomotor', 'vibrationmotor'],
+  led: ['rgb', 'rgbled', 'diode', 'neopixel', 'light', 'redlight', 'bluelight', 'greenlight'],
+};
 
-    // 3. Significant word token overlap (words of length >= 3)
-    const compWords = compName.toLowerCase().split(/[\s\-_/]+/).filter((w) => w.length >= 3);
-    const nodeWords = nodeLabel.toLowerCase().split(/[\s\-_/]+/).filter((w) => w.length >= 3);
-    const hasWordOverlap = compWords.some((cw) =>
-      nodeWords.some((nw) => nw.includes(cw) || cw.includes(nw))
-    );
-    if (hasWordOverlap) return true;
+export const isComponentMatch = (compA, compB) => {
+  if (!compA || !compB) return false;
+  const strA = typeof compA === 'string' ? compA : (compA.name || compA.label || compA.componentName || compA.symbol?.name || '');
+  const strB = typeof compB === 'string' ? compB : (compB.name || compB.label || compB.componentName || compB.symbol?.name || '');
 
-    // 4. Semantic aliases
-    const aliases = {
-      esp32: ['mcu', 'microcontroller', 'controller', 'processor', 'esp'],
-      mcu: ['esp32', 'esp', 'stm32', 'arduino', 'controller', 'processor', 'rp2040'],
-      microcontroller: ['esp32', 'esp', 'stm32', 'arduino', 'mcu', 'processor'],
-      temperature: ['temp', 'dht11', 'dht22', 'lm35', 'bmp280', 'sensor'],
-      humidity: ['dht11', 'dht22', 'moisture', 'sensor'],
-      sensor: ['detector', 'probe'],
-      switch: ['button', 'pushbutton', 'toggle', 'key', 'btn'],
-      button: ['switch', 'pushbutton', 'toggle', 'key'],
-      led: ['light', 'diode', 'indicator'],
-      display: ['oled', 'lcd', 'screen'],
-      oled: ['display', 'screen'],
-      lcd: ['display', 'screen'],
-      motor: ['actuator', 'servo', 'stepper'],
-      buzzer: ['alarm', 'beeper', 'speaker', 'sounder', 'audio'],
-      relay: ['switch', 'contactor'],
-      potentiometer: ['pot', 'dial', 'knob', 'resistor'],
-    };
+  const normA = normalizeText(strA);
+  const normB = normalizeText(strB);
+  if (!normA || !normB) return false;
 
-    for (const [key, syns] of Object.entries(aliases)) {
-      const compMatchesKey = normComp.includes(key);
-      const nodeMatchesKey = normNode.includes(key);
-      const compMatchesSyn = syns.some((s) => normComp.includes(s));
-      const nodeMatchesSyn = syns.some((s) => normNode.includes(s));
+  // 1. Exact normalized match (e.g. "FlameSensor" === "Flame Sensor")
+  if (normA === normB) return true;
 
-      if ((compMatchesKey && nodeMatchesSyn) || (compMatchesSyn && nodeMatchesKey)) {
+  // 2. MCU check
+  const aIsMCU = isMCU(strA);
+  const bIsMCU = isMCU(strB);
+  if (aIsMCU && bIsMCU) {
+    return true;
+  }
+  if (aIsMCU !== bIsMCU) {
+    return false;
+  }
+
+  // 3. Substring check if neither string is pure generic category
+  if (!GENERIC_CATEGORY_WORDS.has(normA) && !GENERIC_CATEGORY_WORDS.has(normB)) {
+    const shorter = normA.length <= normB.length ? normA : normB;
+    const longer = normA.length > normB.length ? normA : normB;
+    if (longer.includes(shorter) && shorter.length >= 4) {
+      const shorterTokens = getIdentifyingTokens(shorter);
+      if (shorterTokens.length > 0) {
         return true;
       }
     }
+  }
 
+  // 4. Identifying token check
+  const tokensA = getIdentifyingTokens(strA);
+  const tokensB = getIdentifyingTokens(strB);
+
+  // If neither has distinguishing tokens (e.g. "Microcontroller" vs "Microcontroller")
+  if (tokensA.length === 0 && tokensB.length === 0) {
+    return normA === normB;
+  }
+
+  // If one has distinguishing tokens but other has none (e.g. "Sensor" vs "FlameSensor")
+  if (tokensA.length === 0 || tokensB.length === 0) {
     return false;
-  });
+  }
+
+  // Check token overlap
+  const hasTokenOverlap = tokensA.some((tA) =>
+    tokensB.some((tB) => tA === tB || (tA.length >= 4 && tB.length >= 4 && (tA.includes(tB) || tB.includes(tA))))
+  );
+  if (hasTokenOverlap) return true;
+
+  // Check semantic aliases
+  for (const [key, syns] of Object.entries(COMPONENT_ALIASES)) {
+    const aHasKey = tokensA.includes(key);
+    const bHasKey = tokensB.includes(key);
+    const aHasSyn = tokensA.some((t) => syns.includes(t));
+    const bHasSyn = tokensB.some((t) => syns.includes(t));
+
+    if ((aHasKey && bHasSyn) || (bHasKey && aHasSyn) || (aHasSyn && bHasSyn)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const matchesComponent = (compName, nodeLabels) => {
+  if (!compName || !Array.isArray(nodeLabels) || nodeLabels.length === 0) return false;
+  return nodeLabels.some((nodeLabel) => isComponentMatch(compName, nodeLabel));
 };
 
 export const blockDiagramRules = [

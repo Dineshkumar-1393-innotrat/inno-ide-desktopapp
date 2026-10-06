@@ -581,13 +581,29 @@
 
 .react-flow__handle {
   opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
+  pointer-events: all;
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 50;
 }
 
-.react-flow__node:hover .react-flow__handle {
+.react-flow__node:hover .react-flow__handle,
+.react-flow__node.selected .react-flow__handle,
+.react-flow.connecting .react-flow__handle,
+.react-flow--connecting .react-flow__handle,
+.react-flow__pane.connecting .react-flow__handle {
   opacity: 1;
   pointer-events: all;
+}
+
+.react-flow__handle:hover {
+  opacity: 1 !important;
+  transform: scale(1.3) !important;
+}
+
+.react-flow__handle.connecting,
+.react-flow__handle.valid {
+  opacity: 1 !important;
+  transform: scale(1.3) !important;
 }
 
 .edge-icon-btn {
