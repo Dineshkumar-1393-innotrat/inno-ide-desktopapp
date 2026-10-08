@@ -16,8 +16,17 @@ export const getStandaloneHtmlContent = ({
   resolvedHostIp = "192.168.0.7",
   deviceDetectedLocation = null
 } = {}) => {
-  const widgetsJson = JSON.stringify(widgets);
   const logicBlocksJson = JSON.stringify(logicBlocks);
+  const locWidget = widgets.find(w => w.type === 'location');
+  const allGeologs = (Array.isArray(locWidget?.locationHistory) ? [...locWidget.locationHistory] : [])
+    .filter(h => !isStaleTestGeolog(h))
+    .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
+  const initialOnLoc = (locWidget?.lastLocation?.event === 'ON' && !isStaleTestGeolog(locWidget.lastLocation))
+    ? locWidget.lastLocation
+    : (allGeologs.find(h => h.event === 'ON') || null);
+  const initialOffLoc = (locWidget?.lastLocation?.event === 'OFF' && !isStaleTestGeolog(locWidget.lastLocation))
+    ? locWidget.lastLocation
+    : (allGeologs.find(h => h.event === 'OFF') || null);
       return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -56,6 +65,13 @@ export const getStandaloneHtmlContent = ({
     .live-pill { font-size: 10px; font-weight: 800; background: #082f49; color: #38bdf8; padding: 3px 8px; border-radius: 6px; }
     .live-pill.alert { background: #7f1d1d; color: #fca5a5; }
     .test-btn { background: #1e293b; color: #38bdf8; border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
+    .switch-hint { font-size: 10px; color: #38bdf8; margin-top: 5px; display: flex; align-items: center; gap: 4px; transition: color 0.3s; }
+    .switch-hint.pending { color: #facc15; }
+    .switch-hint.success { color: #4ade80; }
+    .switch-hint.error { color: #f87171; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .modal-spinner { width: 40px; height: 40px; border: 3px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
+    .geolog-history-item:hover { border-color: #38bdf8 !important; background: #0f1c32 !important; }
   </style>
 </head>
 <body>
@@ -86,6 +102,8 @@ export const getStandaloneHtmlContent = ({
         </div>
       ` : widgets.filter(w => w.visible !== false).map(w => {
       if (w.type === 'switch') {
+        const switchOnLoc = w.lastOnLocation || initialOnLoc;
+        const switchOffLoc = w.lastOffLocation || initialOffLoc;
         return `
           <div class="card ${w.state ? 'glow-blue' : ''}" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
             <div class="row">
@@ -97,6 +115,56 @@ export const getStandaloneHtmlContent = ({
                 <input type="checkbox" id="input-${w.id}" ${w.state ? 'checked' : ''} onchange="handleSwitch('${w.id}', this.checked, '${w.title}')">
                 <span class="slider-toggle"></span>
               </label>
+            </div>
+            <div id="switch-hint-${w.id}" class="switch-hint">
+              <span>📍</span> <span id="switch-hint-text-${w.id}">Location required for ON/OFF logging</span>
+            </div>
+
+            <!-- LIVE ON & OFF TIMING AND LOCATION DISPLAY -->
+            <div id="switch-telemetry-${w.id}" style="margin-top: 10px; border-top: 1px solid #1e293b; padding-top: 10px; display: flex; flex-direction: column; gap: 6px;">
+              <!-- ON Timing & Location -->
+              <div id="switch-on-row-${w.id}" style="background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.25); border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 9px; font-weight: 800; color: #4ade80; display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 6px; height: 6px; border-radius: 50%; background: #22c55e;"></span> SWITCH ON TIMING & LOCATION
+                  </span>
+                  <span id="switch-on-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #86efac; font-family: monospace;">
+                    ${switchOnLoc ? formatGeologTime(switchOnLoc) : '--:--:--'}
+                  </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
+                  <span style="font-size: 11px; font-weight: 600; color: #f1f5f9;">📍 <span id="switch-on-city-${w.id}">${switchOnLoc?.city || 'No ON event recorded yet'}</span></span>
+                  <span id="switch-on-acc-${w.id}" style="font-size: 9px; color: #86efac; font-weight: 700;">${switchOnLoc ? ('Acc: ' + (switchOnLoc.accuracy != null ? switchOnLoc.accuracy : '12') + 'm') : ''}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span id="switch-on-coords-${w.id}" style="font-size: 9px; color: #64748b; font-family: monospace;">
+                    ${switchOnLoc?.lat ? (parseFloat(switchOnLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOnLoc.lng).toFixed(4) + '° E') : ''}
+                  </span>
+                  <a id="switch-on-map-link-${w.id}" href="${switchOnLoc?.lat ? ('https://www.google.com/maps?q=' + switchOnLoc.lat + ',' + switchOnLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #4ade80; text-decoration: none; display: ${switchOnLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
+                </div>
+              </div>
+
+              <!-- OFF Timing & Location -->
+              <div id="switch-off-row-${w.id}" style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 9px; font-weight: 800; color: #f87171; display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> SWITCH OFF TIMING & LOCATION
+                  </span>
+                  <span id="switch-off-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #fca5a5; font-family: monospace;">
+                    ${switchOffLoc ? formatGeologTime(switchOffLoc) : '--:--:--'}
+                  </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
+                  <span style="font-size: 11px; font-weight: 600; color: #f1f5f9;">📍 <span id="switch-off-city-${w.id}">${switchOffLoc?.city || 'No OFF event recorded yet'}</span></span>
+                  <span id="switch-off-acc-${w.id}" style="font-size: 9px; color: #fca5a5; font-weight: 700;">${switchOffLoc ? ('Acc: ' + (switchOffLoc.accuracy != null ? switchOffLoc.accuracy : '10') + 'm') : ''}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span id="switch-off-coords-${w.id}" style="font-size: 9px; color: #64748b; font-family: monospace;">
+                    ${switchOffLoc?.lat ? (parseFloat(switchOffLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOffLoc.lng).toFixed(4) + '° E') : ''}
+                  </span>
+                  <a id="switch-off-map-link-${w.id}" href="${switchOffLoc?.lat ? ('https://www.google.com/maps?q=' + switchOffLoc.lat + ',' + switchOffLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #f87171; text-decoration: none; display: ${switchOffLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
+                </div>
+              </div>
             </div>
           </div>`;
       }
@@ -225,18 +293,26 @@ export const getStandaloneHtmlContent = ({
               </div>
             </div>
 
-            <!-- Section 2: SWITCH ON LOCATION -->
+            <!-- Section 2: SWITCH ON TIMING & LOCATION -->
             <div id="on-box-${w.id}" style="background: #092318; border: 1.5px solid ${lastOnLoc ? '#166534' : '#1e3a2b'}; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
               <div style="display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span id="on-dot-${w.id}" style="width: 8px; height: 8px; border-radius: 50%; background: ${lastOnLoc ? '#22c55e' : '#475569'}; display: inline-block;"></span>
-                  <span id="on-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOnLoc ? '#4ade80' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH ON LOCATION</span>
+                  <span id="on-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOnLoc ? '#4ade80' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH ON TIMING & LOCATION</span>
                 </div>
-                <span id="on-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(34,197,94,0.2); color: #86efac; padding: 2px 6px; border-radius: 4px; display: ${lastOnLoc ? 'inline-block' : 'none'};">LATEST</span>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <span id="on-time-badge-${w.id}" style="font-size: 9px; font-weight: 800; background: rgba(34,197,94,0.25); color: #4ade80; padding: 2px 6px; border-radius: 4px; font-family: monospace; display: ${lastOnLoc ? 'inline-block' : 'none'};">⏱️ ${lastOnLoc ? formatGeologTime(lastOnLoc) : ''}</span>
+                  <span id="on-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(34,197,94,0.2); color: #86efac; padding: 2px 6px; border-radius: 4px; display: ${lastOnLoc ? 'inline-block' : 'none'};">LATEST</span>
+                </div>
               </div>
               <div id="on-content-${w.id}" style="display: ${lastOnLoc ? 'block' : 'none'};">
-                <div id="on-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
-                  🟢 ${lastOnLoc?.city || 'Logged Location'}
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                  <span id="on-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc;">
+                    🟢 ${lastOnLoc?.city || 'Logged Location'}
+                  </span>
+                  <span id="on-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #86efac; font-family: monospace;">
+                    ${lastOnLoc ? formatGeologTime(lastOnLoc) : ''}
+                  </span>
                 </div>
                 <div id="on-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 1px;">
                   ${lastOnLoc?.address || ''}
@@ -245,8 +321,8 @@ export const getStandaloneHtmlContent = ({
                   <span id="on-gps-${w.id}" style="font-size: 10px; color: #4ade80; font-family: monospace; font-weight: 600;">
                     ${lastOnLoc?.lat ? (lastOnLoc.lat + '° N, ' + lastOnLoc.lng + '° E') : ''}
                   </span>
-                  <span id="on-time-${w.id}" style="font-size: 9px; color: #86efac;">
-                    ${formatGeologTime(lastOnLoc)}
+                  <span id="on-acc-row-${w.id}" style="font-size: 9px; color: #86efac; font-weight: 700; display: ${lastOnLoc ? 'inline' : 'none'};">
+                    Accuracy: <span id="on-acc-${w.id}">${lastOnLoc?.accuracy != null ? lastOnLoc.accuracy : '12'}</span> m
                   </span>
                 </div>
                 <a id="on-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOnLoc?.lat || ''},${lastOnLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid #166534; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
@@ -258,18 +334,26 @@ export const getStandaloneHtmlContent = ({
               </div>
             </div>
 
-            <!-- Section 3: SWITCH OFF LOCATION -->
+            <!-- Section 3: SWITCH OFF TIMING & LOCATION -->
             <div id="off-box-${w.id}" style="background: #261214; border: 1.5px solid ${lastOffLoc ? '#991b1b' : '#3a1e22'}; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
               <div style="display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span id="off-dot-${w.id}" style="width: 8px; height: 8px; border-radius: 50%; background: ${lastOffLoc ? '#ef4444' : '#475569'}; display: inline-block;"></span>
-                  <span id="off-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOffLoc ? '#f87171' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH OFF LOCATION</span>
+                  <span id="off-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOffLoc ? '#f87171' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH OFF TIMING & LOCATION</span>
                 </div>
-                <span id="off-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(239,68,68,0.2); color: #fca5a5; padding: 2px 6px; border-radius: 4px; display: ${lastOffLoc ? 'inline-block' : 'none'};">LATEST</span>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <span id="off-time-badge-${w.id}" style="font-size: 9px; font-weight: 800; background: rgba(239,68,68,0.25); color: #f87171; padding: 2px 6px; border-radius: 4px; font-family: monospace; display: ${lastOffLoc ? 'inline-block' : 'none'};">⏱️ ${lastOffLoc ? formatGeologTime(lastOffLoc) : ''}</span>
+                  <span id="off-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(239,68,68,0.2); color: #fca5a5; padding: 2px 6px; border-radius: 4px; display: ${lastOffLoc ? 'inline-block' : 'none'};">LATEST</span>
+                </div>
               </div>
               <div id="off-content-${w.id}" style="display: ${lastOffLoc ? 'block' : 'none'};">
-                <div id="off-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
-                  🔴 ${lastOffLoc?.city || 'Logged Location'}
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                  <span id="off-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc;">
+                    🔴 ${lastOffLoc?.city || 'Logged Location'}
+                  </span>
+                  <span id="off-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #fca5a5; font-family: monospace;">
+                    ${lastOffLoc ? formatGeologTime(lastOffLoc) : ''}
+                  </span>
                 </div>
                 <div id="off-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 1px;">
                   ${lastOffLoc?.address || ''}
@@ -278,8 +362,8 @@ export const getStandaloneHtmlContent = ({
                   <span id="off-gps-${w.id}" style="font-size: 10px; color: #f87171; font-family: monospace; font-weight: 600;">
                     ${lastOffLoc?.lat ? (lastOffLoc.lat + '° N, ' + lastOffLoc.lng + '° E') : ''}
                   </span>
-                  <span id="off-time-${w.id}" style="font-size: 9px; color: #fca5a5;">
-                    ${formatGeologTime(lastOffLoc)}
+                  <span id="off-acc-row-${w.id}" style="font-size: 9px; color: #fca5a5; font-weight: 700; display: ${lastOffLoc ? 'inline' : 'none'};">
+                    Accuracy: <span id="off-acc-${w.id}">${lastOffLoc?.accuracy != null ? lastOffLoc.accuracy : '10'}</span> m
                   </span>
                 </div>
                 <a id="off-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOffLoc?.lat || ''},${lastOffLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid #991b1b; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
@@ -314,17 +398,21 @@ export const getStandaloneHtmlContent = ({
                   const latStr = (item.lat && item.lng) 
                     ? (parseFloat(item.lat).toFixed(3) + '°N, ' + parseFloat(item.lng).toFixed(3) + '°E') 
                     : (item.lat ? (parseFloat(item.lat).toFixed(3) + '°') : '');
+                  const accStr = item.accuracy != null ? (' • Acc: ' + item.accuracy + 'm') : '';
                   const timeFormatted = formatGeologTime(item);
                   return `
-                    <div style="display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b;">
+                    <div class="geolog-history-item" onclick="window.open('https://www.google.com/maps?q=${item.lat},${item.lng}', '_blank')" title="View on Google Maps" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b; transition: all 0.2s;">
                       <div style="display: flex; align-items: center; gap: 8px;">
                         <span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: ${badgeBg}; color: ${badgeColor};">${item.event || 'LOG'}</span>
                         <div style="display: flex; flex-direction: column;">
                           <span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">${item.city || 'Location'}</span>
-                          ${latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + '</span>' : ''}
+                          ${latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + accStr + '</span>' : ''}
                         </div>
                       </div>
-                      <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">${timeFormatted}</span>
+                      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+                        <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">${timeFormatted}</span>
+                        <span style="font-size: 9px; color: #38bdf8;">🗺️ Maps</span>
+                      </div>
                     </div>`;
                 }).join('')}
               </div>
@@ -448,6 +536,22 @@ export const getStandaloneHtmlContent = ({
       }
       return '';
     }).join('')}
+    </div>
+  </div>
+
+  <!-- LOCATION GATING & PERMISSION MODAL -->
+  <div id="locationModalOverlay" style="display: none; position: fixed; inset: 0; background: rgba(5, 9, 20, 0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center; padding: 16px;">
+    <div id="locationModalCard" style="background: #0f172a; border: 1.5px solid #1e293b; border-radius: 24px; width: 100%; max-width: 380px; padding: 24px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); display: flex; flex-direction: column; gap: 14px; text-align: center;">
+      <div id="modalIconContainer" style="width: 52px; height: 52px; border-radius: 50%; background: rgba(56, 189, 248, 0.15); display: flex; align-items: center; justify-content: center; font-size: 26px; margin: 0 auto;">📍</div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <h3 id="modalTitle" style="font-size: 17px; font-weight: 800; color: #f8fafc;">Location Required</h3>
+        <p id="modalDescription" style="font-size: 13px; color: #94a3b8; line-height: 1.5;">Enable location to control this ESP32 switch.</p>
+        <div id="modalSubNote" style="font-size: 11px; color: #94a3b8; line-height: 1.4; margin-top: 4px; padding: 8px 12px; background: #131b2e; border-radius: 8px; border: 1px solid #1e293b; display: none;"></div>
+      </div>
+      <div id="modalButtonsRow" style="display: flex; gap: 10px; margin-top: 6px;">
+        <button id="modalBtnCancel" onclick="closeLocationModal()" style="flex: 1; background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 12px; padding: 12px; font-weight: 700; font-size: 13px; cursor: pointer;">Cancel</button>
+        <button id="modalBtnPrimary" onclick="handleModalPrimaryAction()" style="flex: 1.2; background: #0284c7; color: #ffffff; border: none; border-radius: 12px; padding: 12px; font-weight: 800; font-size: 13px; cursor: pointer; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);">Enable Location</button>
+      </div>
     </div>
   </div>
 
@@ -630,7 +734,7 @@ export const getStandaloneHtmlContent = ({
         var parsedDate = Date.parse(timeStr);
         if (!isNaN(parsedDate)) return parsedDate;
 
-        var match = timeStr.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+        var match = timeStr.match(/^(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*(am|pm)?$/i);
         if (match) {
           var hrs = parseInt(match[1], 10);
           var mins = parseInt(match[2], 10);
@@ -654,12 +758,12 @@ export const getStandaloneHtmlContent = ({
     function formatClientLogTime(item) {
       if (!item) return '';
       if (typeof item === 'string') return item;
-      if (item.time && typeof item.time === 'string' && !/^\d{10,}$/.test(item.time)) {
+      if (item.time && typeof item.time === 'string' && !/^\\d{10,}$/.test(item.time)) {
         return item.time;
       }
       var raw = item.timestamp || item.time;
       if (!raw) return new Date().toLocaleTimeString();
-      if (typeof raw === 'number' || /^\d{10,}$/.test(String(raw))) {
+      if (typeof raw === 'number' || /^\\d{10,}$/.test(String(raw))) {
         var d = new Date(Number(raw));
         if (!isNaN(d.getTime())) return d.toLocaleTimeString();
       }
@@ -724,6 +828,10 @@ export const getStandaloneHtmlContent = ({
         document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#166534'; el.style.background = '#092318'; });
         document.querySelectorAll('[id^="on-dot-"]').forEach(function(el) { el.style.background = '#22c55e'; });
         document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#4ade80'; });
+        document.querySelectorAll('[id^="on-time-badge-"]').forEach(function(el) {
+          el.innerText = '⏱️ ' + formatClientLogTime(onLoc);
+          el.style.display = 'inline-block';
+        });
         document.querySelectorAll('[id^="on-badge-"]').forEach(function(el) { el.style.display = 'inline-block'; });
         document.querySelectorAll('[id^="on-content-"]').forEach(function(el) { el.style.display = 'block'; });
         document.querySelectorAll('[id^="on-empty-"]').forEach(function(el) { el.style.display = 'none'; });
@@ -735,17 +843,37 @@ export const getStandaloneHtmlContent = ({
         document.querySelectorAll('[id^="on-time-"]').forEach(function(el) {
           el.innerText = formatClientLogTime(onLoc);
         });
+        document.querySelectorAll('[id^="on-acc-row-"]').forEach(function(el) { el.style.display = 'inline'; });
+        document.querySelectorAll('[id^="on-acc-"]').forEach(function(el) {
+          el.innerText = onLoc.accuracy != null ? onLoc.accuracy : '12';
+        });
         document.querySelectorAll('[id^="on-maps-btn-"]').forEach(function(el) {
           el.href = 'https://www.google.com/maps?q=' + onLoc.lat + ',' + onLoc.lng;
           el.style.display = 'flex';
+        });
+
+        // Update Switch component ON telemetry
+        document.querySelectorAll('[id^="switch-on-time-"]').forEach(function(el) { el.innerText = formatClientLogTime(onLoc); });
+        document.querySelectorAll('[id^="switch-on-city-"]').forEach(function(el) { el.innerText = onLoc.city || 'Switch ON'; });
+        document.querySelectorAll('[id^="switch-on-acc-"]').forEach(function(el) { el.innerText = 'Acc: ' + (onLoc.accuracy != null ? onLoc.accuracy : '12') + 'm'; });
+        document.querySelectorAll('[id^="switch-on-coords-"]').forEach(function(el) {
+          el.innerText = onLoc.lat ? (parseFloat(onLoc.lat).toFixed(4) + '° N, ' + parseFloat(onLoc.lng).toFixed(4) + '° E') : '';
+        });
+        document.querySelectorAll('[id^="switch-on-map-link-"]').forEach(function(el) {
+          if (onLoc.lat) {
+            el.href = 'https://www.google.com/maps?q=' + onLoc.lat + ',' + onLoc.lng;
+            el.style.display = 'inline';
+          }
         });
       } else {
         document.querySelectorAll('[id^="badge-on-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#1e3a2b'; el.style.background = '#092318'; });
         document.querySelectorAll('[id^="on-dot-"]').forEach(function(el) { el.style.background = '#475569'; });
         document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#94a3b8'; });
+        document.querySelectorAll('[id^="on-time-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="on-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="on-content-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="on-acc-row-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="on-empty-"]').forEach(function(el) { el.style.display = 'block'; });
       }
 
@@ -754,6 +882,10 @@ export const getStandaloneHtmlContent = ({
         document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#991b1b'; el.style.background = '#261214'; });
         document.querySelectorAll('[id^="off-dot-"]').forEach(function(el) { el.style.background = '#ef4444'; });
         document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#f87171'; });
+        document.querySelectorAll('[id^="off-time-badge-"]').forEach(function(el) {
+          el.innerText = '⏱️ ' + formatClientLogTime(offLoc);
+          el.style.display = 'inline-block';
+        });
         document.querySelectorAll('[id^="off-badge-"]').forEach(function(el) { el.style.display = 'inline-block'; });
         document.querySelectorAll('[id^="off-content-"]').forEach(function(el) { el.style.display = 'block'; });
         document.querySelectorAll('[id^="off-empty-"]').forEach(function(el) { el.style.display = 'none'; });
@@ -765,17 +897,37 @@ export const getStandaloneHtmlContent = ({
         document.querySelectorAll('[id^="off-time-"]').forEach(function(el) {
           el.innerText = formatClientLogTime(offLoc);
         });
+        document.querySelectorAll('[id^="off-acc-row-"]').forEach(function(el) { el.style.display = 'inline'; });
+        document.querySelectorAll('[id^="off-acc-"]').forEach(function(el) {
+          el.innerText = offLoc.accuracy != null ? offLoc.accuracy : '10';
+        });
         document.querySelectorAll('[id^="off-maps-btn-"]').forEach(function(el) {
           el.href = 'https://www.google.com/maps?q=' + offLoc.lat + ',' + offLoc.lng;
           el.style.display = 'flex';
+        });
+
+        // Update Switch component OFF telemetry
+        document.querySelectorAll('[id^="switch-off-time-"]').forEach(function(el) { el.innerText = formatClientLogTime(offLoc); });
+        document.querySelectorAll('[id^="switch-off-city-"]').forEach(function(el) { el.innerText = offLoc.city || 'Switch OFF'; });
+        document.querySelectorAll('[id^="switch-off-acc-"]').forEach(function(el) { el.innerText = 'Acc: ' + (offLoc.accuracy != null ? offLoc.accuracy : '10') + 'm'; });
+        document.querySelectorAll('[id^="switch-off-coords-"]').forEach(function(el) {
+          el.innerText = offLoc.lat ? (parseFloat(offLoc.lat).toFixed(4) + '° N, ' + parseFloat(offLoc.lng).toFixed(4) + '° E') : '';
+        });
+        document.querySelectorAll('[id^="switch-off-map-link-"]').forEach(function(el) {
+          if (offLoc.lat) {
+            el.href = 'https://www.google.com/maps?q=' + offLoc.lat + ',' + offLoc.lng;
+            el.style.display = 'inline';
+          }
         });
       } else {
         document.querySelectorAll('[id^="badge-off-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#3a1e22'; el.style.background = '#261214'; });
         document.querySelectorAll('[id^="off-dot-"]').forEach(function(el) { el.style.background = '#475569'; });
         document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#94a3b8'; });
+        document.querySelectorAll('[id^="off-time-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="off-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="off-content-"]').forEach(function(el) { el.style.display = 'none'; });
+        document.querySelectorAll('[id^="off-acc-row-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="off-empty-"]').forEach(function(el) { el.style.display = 'block'; });
       }
 
@@ -795,16 +947,21 @@ export const getStandaloneHtmlContent = ({
             var latStr = (item.lat && item.lng) 
               ? (parseFloat(item.lat).toFixed(3) + '°N, ' + parseFloat(item.lng).toFixed(3) + '°E') 
               : (item.lat ? (parseFloat(item.lat).toFixed(3) + '°') : '');
+            var accStr = item.accuracy != null ? (' • Acc: ' + item.accuracy + 'm') : '';
             var timeFormatted = formatClientLogTime(item);
-            return '<div style="display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b;">' +
+            var mapsUrl = (item.lat && item.lng) ? ('https://www.google.com/maps?q=' + item.lat + ',' + item.lng) : '#';
+            return '<div class="geolog-history-item" onclick="window.open(&quot;' + mapsUrl + '&quot;,&quot;_blank&quot;)" title="View on Google Maps" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b; transition: all 0.2s;">' +
               '<div style="display: flex; align-items: center; gap: 8px;">' +
                 '<span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: ' + badgeBg + '; color: ' + badgeColor + ';">' + (item.event || 'LOG') + '</span>' +
                 '<div style="display: flex; flex-direction: column;">' +
                   '<span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">' + (item.city || 'Location') + '</span>' +
-                  (latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + '</span>' : '') +
+                  (latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + accStr + '</span>' : '') +
                 '</div>' +
               '</div>' +
-              '<span style="font-size: 10px; color: #94a3b8; font-family: monospace;">' + timeFormatted + '</span>' +
+              '<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">' +
+                '<span style="font-size: 10px; color: #94a3b8; font-family: monospace;">' + timeFormatted + '</span>' +
+                '<span style="font-size: 9px; color: #38bdf8;">🗺️ Maps</span>' +
+              '</div>' +
             '</div>';
           }).join('');
         });
@@ -1082,120 +1239,538 @@ export const getStandaloneHtmlContent = ({
       addLog('📝 [FORM] Answer submitted: "' + questionText + '" -> "' + answerVal + '"');
     }
 
-    function handleSwitch(id, checked, title) {
-      const card = document.getElementById('card-' + id);
-      if (card) {
-        if (checked) card.classList.add('glow-blue');
-        else card.classList.remove('glow-blue');
-      }
-      addLog('📱 [UI] ' + title + ' -> ' + (checked ? 'ON (Blinking)' : 'OFF (Stopped)'));
+    // ==========================================
+    // LOCATION-GATED ESP32 SWITCH CONTROL SYSTEM
+    // ==========================================
+    var MAX_ALLOWED_ACCURACY = 5000; // meters threshold (accepts GPS, Wi-Fi, and cellular positioning)
+    var isSwitchOperationInProgress = false;
+    var currentModalAction = null;
+    var pendingSwitchContext = null;
 
-      var eventLabel = checked ? 'ON' : 'OFF';
+    function showLocationModal(cfg) {
+      var overlay = document.getElementById('locationModalOverlay');
+      if (!overlay) return;
+      var titleEl = document.getElementById('modalTitle');
+      var descEl = document.getElementById('modalDescription');
+      var iconEl = document.getElementById('modalIconContainer');
+      var subNoteEl = document.getElementById('modalSubNote');
+      var cancelBtn = document.getElementById('modalBtnCancel');
+      var primaryBtn = document.getElementById('modalBtnPrimary');
 
-      // 1. Host Location / Calibrated baseline for instant 0ms dynamic geologging
-      var hostCityEl = document.querySelector('[id^="host-city-"]');
-      var hostCityText = hostCityEl ? hostCityEl.innerText.replace('📍', '').trim().split(',')[0].trim() : 'Little Mount';
-      var hostAddrEl = document.querySelector('[id^="host-addr-"]');
-      var hostAddrText = hostAddrEl ? hostAddrEl.innerText.trim() : 'Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India';
-      var hostGpsEl = document.querySelector('[id^="host-gps-"]');
-      var hostGpsText = hostGpsEl ? hostGpsEl.innerText.trim() : '13.0147° N, 80.2242° E';
-      var defaultLat = 13.0147;
-      var defaultLng = 80.2242;
-      if (hostGpsText && hostGpsText.indexOf('°') !== -1) {
-        var parts = hostGpsText.split(',');
-        if (parts.length >= 2) {
-          var p0 = parseFloat(parts[0]);
-          var p1 = parseFloat(parts[1]);
-          if (!isNaN(p0) && !isNaN(p1)) {
-            defaultLat = p0;
-            defaultLng = p1;
-          }
+      if (titleEl) titleEl.innerText = cfg.title || 'Location Notice';
+      if (descEl) descEl.innerHTML = cfg.description || '';
+      if (iconEl) {
+        if (cfg.isSpinner) {
+          iconEl.innerHTML = '<div class="modal-spinner"></div>';
+        } else {
+          iconEl.innerHTML = cfg.icon || '📍';
         }
       }
+      if (subNoteEl) {
+        if (cfg.subNote) {
+          subNoteEl.innerHTML = cfg.subNote;
+          subNoteEl.style.display = 'block';
+        } else {
+          subNoteEl.style.display = 'none';
+        }
+      }
+      if (cancelBtn) {
+        cancelBtn.style.display = cfg.hideCancel ? 'none' : 'block';
+        cancelBtn.innerText = cfg.cancelText || 'Cancel';
+      }
+      if (primaryBtn) {
+        primaryBtn.style.display = cfg.hidePrimary ? 'none' : 'block';
+        primaryBtn.innerText = cfg.primaryText || 'OK';
+        if (cfg.primaryColor) primaryBtn.style.background = cfg.primaryColor;
+        else primaryBtn.style.background = '#0284c7';
+      }
+      currentModalAction = cfg.onPrimary || null;
+      overlay.style.display = 'flex';
+    }
 
-      var instantLoc = {
-        id: 'loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-        lat: defaultLat,
-        lng: defaultLng,
-        event: eventLabel,
-        switchTitle: title || 'Device Switch',
-        city: hostCityText || 'Little Mount',
-        address: hostAddrText,
-        time: new Date().toLocaleTimeString(),
-        timestamp: Date.now(),
-        source: 'Switch Event (' + (hostCityText || 'Host') + ')'
+    function closeLocationModal() {
+      var overlay = document.getElementById('locationModalOverlay');
+      if (overlay) overlay.style.display = 'none';
+      if (pendingSwitchContext && typeof pendingSwitchContext.onCancel === 'function') {
+        pendingSwitchContext.onCancel();
+      }
+      currentModalAction = null;
+    }
+
+    function handleModalPrimaryAction() {
+      var fn = currentModalAction;
+      var overlay = document.getElementById('locationModalOverlay');
+      if (overlay) overlay.style.display = 'none';
+      currentModalAction = null;
+      if (typeof fn === 'function') {
+        fn();
+      }
+    }
+
+    function updateSwitchHint(id, text, type) {
+      var hintEl = document.getElementById('switch-hint-' + id);
+      var textEl = document.getElementById('switch-hint-text-' + id);
+      if (hintEl) {
+        hintEl.className = 'switch-hint ' + (type || '');
+      }
+      if (textEl) {
+        textEl.innerText = text;
+      }
+    }
+
+    function sendHardwareActionAsync(payload, extra) {
+      return new Promise(function(resolve) {
+        try {
+          var cleanPayload = String(payload || '').trim();
+          var isOff = cleanPayload === 'LED:0' || cleanPayload.includes(':0') || cleanPayload.toLowerCase().includes('off');
+          var switchStatus = isOff ? 0 : 1;
+          var bodyObj = Object.assign({
+            payload: cleanPayload || (isOff ? 'LED:0' : 'LED:1'),
+            SwitchStatus: switchStatus,
+            value: switchStatus === 1,
+            port: COMPANION_PORT || 'COM9'
+          }, extra || {});
+          var bodyStr = JSON.stringify(bodyObj);
+
+          var hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
+            ? window.location.origin
+            : '';
+          var companionIp = '${companionServerInfo?.ip || resolvedHostIp}';
+          var primaryEndpoint = hostOrigin ? (hostOrigin + '/api/action') : ('http://' + companionIp + ':5055/api/action');
+          var fallbackEndpoint = 'http://' + companionIp + ':5055/api/action';
+
+          fetch(primaryEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: bodyStr,
+            mode: 'cors'
+          })
+          .then(function(r) {
+            return r.json().catch(function() { return { success: r.ok }; });
+          })
+          .then(function(res) {
+            if (res && res.success && res.writeResult?.success !== false) {
+              addLog('🚀 [ESP32] ' + (isOff ? 'LED OFF (0)' : 'LED ON (Blink)'));
+              resolve({ success: true, data: res });
+            } else {
+              var errMsg = (res && res.error) || 'ESP32 did not confirm the requested state';
+              addLog('⚠️ [ESP32] Hardware rejected: ' + errMsg);
+              resolve({ success: false, error: errMsg });
+            }
+          })
+          .catch(function(err) {
+            if (fallbackEndpoint !== primaryEndpoint) {
+              fetch(fallbackEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: bodyStr
+              })
+              .then(function(r) { return r.json(); })
+              .then(function(res) {
+                if (res && res.success && res.writeResult?.success !== false) {
+                  resolve({ success: true, data: res });
+                } else {
+                  resolve({ success: false, error: (res && res.error) || err.message });
+                }
+              })
+              .catch(function(e) {
+                resolve({ success: false, error: e.message || err.message });
+              });
+            } else {
+              resolve({ success: false, error: err.message });
+            }
+          });
+        } catch(e) {
+          resolve({ success: false, error: e.message });
+        }
+      });
+    }
+
+    async function checkLocationAvailability() {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        return { available: false, state: 'unsupported' };
+      }
+      if (navigator.permissions && navigator.permissions.query) {
+        try {
+          var p = await navigator.permissions.query({ name: 'geolocation' });
+          if (p.state === 'denied') {
+            return { available: false, state: 'denied' };
+          }
+          return { available: true, state: p.state };
+        } catch(e) {}
+      }
+      return { available: true, state: 'prompt' };
+    }
+
+    // ONE-SHOT GPS ACQUISITION (NO watchPosition! NEVER continuously tracks!)
+    function getOneAccurateGpsLocation(maxAllowedAccuracy, totalTimeoutMs) {
+      return new Promise(function(resolve) {
+        if (!navigator.geolocation) {
+          return resolve({ valid: false, errorType: 'SERVICES_DISABLED', message: 'Geolocation is not supported.' });
+        }
+
+        var timeoutMs = totalTimeoutMs || 10000;
+        var startTime = Date.now();
+
+        function attemptFix() {
+          var remainingTime = Math.max(3000, timeoutMs - (Date.now() - startTime));
+          navigator.geolocation.getCurrentPosition(
+            function(pos) {
+              if (pos && pos.coords && typeof pos.coords.latitude === 'number' && typeof pos.coords.longitude === 'number') {
+                var rawAcc = pos.coords.accuracy;
+                var acc = (typeof rawAcc === 'number' && !isNaN(rawAcc)) ? Math.round(rawAcc) : 15;
+                resolve({
+                  valid: true,
+                  coords: {
+                    latitude: parseFloat(pos.coords.latitude.toFixed(5)),
+                    longitude: parseFloat(pos.coords.longitude.toFixed(5)),
+                    accuracy: acc
+                  },
+                  accuracy: acc,
+                  timestamp: pos.timestamp || Date.now()
+                });
+                return;
+              }
+              resolve({
+                valid: false,
+                errorType: 'UNKNOWN',
+                message: 'No coordinates returned by location service.'
+              });
+            },
+            async function(err) {
+              if (err.code === 1) { // PERMISSION_DENIED
+                return resolve({ valid: false, errorType: 'PERMISSION_DENIED', message: 'Location permission denied by user.' });
+              }
+
+              // Fallback to IP / Network positioning if hardware GPS times out indoors
+              try {
+                var controller = new AbortController();
+                var tid = setTimeout(function() { controller.abort(); }, 3000);
+                var ipRes = await fetch('https://ipapi.co/json/', { signal: controller.signal });
+                clearTimeout(tid);
+                if (ipRes.ok) {
+                  var ipData = await ipRes.json();
+                  if (ipData && ipData.latitude && ipData.longitude) {
+                    return resolve({
+                      valid: true,
+                      coords: {
+                        latitude: parseFloat(Number(ipData.latitude).toFixed(5)),
+                        longitude: parseFloat(Number(ipData.longitude).toFixed(5)),
+                        accuracy: 100
+                      },
+                      accuracy: 100,
+                      timestamp: Date.now()
+                    });
+                  }
+                }
+              } catch(e) {}
+
+              if (err.code === 2) { // POSITION_UNAVAILABLE
+                resolve({ valid: false, errorType: 'SERVICES_DISABLED', message: 'Location services are disabled on device.' });
+              } else if (err.code === 3) { // TIMEOUT
+                resolve({ valid: false, errorType: 'TIMEOUT', message: 'GPS location acquisition timed out.' });
+              } else {
+                resolve({ valid: false, errorType: 'UNKNOWN', message: err.message || 'Unknown GPS error' });
+              }
+            },
+            { enableHighAccuracy: true, timeout: remainingTime, maximumAge: 30000 }
+          );
+        }
+
+        attemptFix();
+      });
+    }
+
+    async function reverseGeocodeLocation(lat, lng) {
+      try {
+        var controller = new AbortController();
+        var to = setTimeout(function() { controller.abort(); }, 2500);
+        var res = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14&accept-language=en', {
+          headers: { 'Accept-Language': 'en' },
+          signal: controller.signal
+        });
+        clearTimeout(to);
+        if (res.ok) {
+          var geo = await res.json();
+          var specific = (geo && geo.name && geo.name !== 'Chennai') ? geo.name :
+            (geo && geo.display_name && !geo.display_name.startsWith('Chennai') ? geo.display_name.split(',')[0].trim() : '') ||
+            (geo && geo.address && (geo.address.railway || geo.address.suburb || geo.address.neighbourhood || geo.address.quarter || geo.address.city || geo.address.town)) ||
+            'Little Mount';
+          var address = (geo && geo.display_name) ? geo.display_name.split(',').slice(0, 4).join(',').trim() : (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E');
+          return {
+            locality: specific,
+            city: (geo.address && (geo.address.city || geo.address.town)) || 'Chennai',
+            state: (geo.address && geo.address.state) || 'Tamil Nadu',
+            country: (geo.address && geo.address.country) || 'India',
+            formattedAddress: address
+          };
+        }
+      } catch(e) {}
+      return {
+        locality: 'Little Mount',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+        country: 'India',
+        formattedAddress: lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E'
+      };
+    }
+
+    async function handleSwitch(id, checked, title) {
+      var switchEl = document.getElementById('input-' + id);
+      var card = document.getElementById('card-' + id);
+
+      // Operation lock - prevent duplicate triggers while location or switch is in progress
+      if (isSwitchOperationInProgress) {
+        if (switchEl) switchEl.checked = !checked;
+        return;
+      }
+
+      isSwitchOperationInProgress = true;
+      if (switchEl) switchEl.disabled = true;
+
+      var targetAction = checked ? 'ON' : 'OFF';
+
+      function revertSwitchUI() {
+        if (switchEl) {
+          switchEl.checked = !checked;
+          switchEl.disabled = false;
+        }
+        if (card) {
+          if (!checked) card.classList.add('glow-blue');
+          else card.classList.remove('glow-blue');
+        }
+        isSwitchOperationInProgress = false;
+        pendingSwitchContext = null;
+      }
+
+      pendingSwitchContext = {
+        id: id,
+        checked: checked,
+        title: title,
+        onCancel: function() {
+          revertSwitchUI();
+          updateSwitchHint(id, 'Location required for ON/OFF logging', '');
+        }
       };
 
-      // 2. Immediately update mobile UI (0ms instant dynamic feedback!)
-      updateMobileLocationCards(instantLoc);
+      // 1. Initial Permission Pre-Check
+      updateSwitchHint(id, 'Checking location permission...', 'pending');
+      var permCheck = await checkLocationAvailability();
+      if (permCheck.state === 'denied') {
+        revertSwitchUI();
+        updateSwitchHint(id, 'Location access denied — Switch not changed', 'error');
+        showLocationModal({
+          title: 'Location Permission Required',
+          description: 'Location access is required to record where this switch action occurred.<br><br>Please allow location access to continue.',
+          icon: '📍',
+          cancelText: 'Cancel',
+          primaryText: 'Enable Location',
+          onPrimary: function() {
+            navigator.geolocation.getCurrentPosition(
+              function() {
+                showLocationModal({
+                  title: 'Location Enabled',
+                  description: 'Location access has been granted.<br>You can now toggle the switch.',
+                  icon: '✅',
+                  hideCancel: true,
+                  primaryText: 'Continue',
+                  onPrimary: function() {
+                    handleSwitch(id, checked, title);
+                  }
+                });
+              },
+              function() {
+                showLocationModal({
+                  title: 'Permission Denied in Browser',
+                  description: 'To enable location:<br>1. Tap the <b>lock / info icon (🔒)</b> in your browser address bar.<br>2. Select <b>Site Settings</b> or <b>Permissions</b>.<br>3. Set Location to <b>Allow</b>, then refresh.',
+                  icon: '⚙️',
+                  cancelText: 'Close',
+                  primaryText: 'Retry',
+                  onPrimary: function() {
+                    handleSwitch(id, checked, title);
+                  }
+                });
+              },
+              { enableHighAccuracy: true, timeout: 6000 }
+            );
+          }
+        });
+        return;
+      }
 
-      // 3. Dispatch hardware action with this instantLoc so companion server records it
-      sendHardwareAction(checked ? 'LED:1' : 'LED:0', {
+      // 2. UI State: GETTING_LOCATION
+      updateSwitchHint(id, 'Getting your current location...', 'pending');
+      showLocationModal({
+        title: 'Getting Accurate Location...',
+        description: 'Please wait while we determine your current location for the switch ' + targetAction + ' action.',
+        isSpinner: true,
+        cancelText: 'Cancel',
+        hidePrimary: true
+      });
+
+      // 3. Request ONE fresh accurate GPS location (max 50m accuracy, 10s timeout)
+      // NEVER continuously tracks or starts watchPosition
+      var locResult = await getOneAccurateGpsLocation(MAX_ALLOWED_ACCURACY, 10000);
+
+      // Handle Failure States
+      if (!locResult.valid) {
+        revertSwitchUI();
+
+        if (locResult.errorType === 'PERMISSION_DENIED') {
+          // Case A — Permission Not Granted
+          updateSwitchHint(id, 'Permission required — Switch not changed', 'error');
+          showLocationModal({
+            title: 'Location Permission Required',
+            description: 'Location access is required to record where this switch action occurred.<br><br>Please allow location access to continue.',
+            icon: '📍',
+            cancelText: 'Cancel',
+            primaryText: 'Enable Location',
+            onPrimary: function() {
+              navigator.geolocation.getCurrentPosition(
+                function() { handleSwitch(id, checked, title); },
+                function() {
+                  showLocationModal({
+                    title: 'Permission Denied in Browser',
+                    description: 'Please tap the site settings / lock icon in your address bar and allow Location access.',
+                    icon: '⚙️',
+                    cancelText: 'Close',
+                    primaryText: 'Retry',
+                    onPrimary: function() { handleSwitch(id, checked, title); }
+                  });
+                },
+                { enableHighAccuracy: true, timeout: 6000 }
+              );
+            }
+          });
+          return;
+        }
+
+        if (locResult.errorType === 'SERVICES_DISABLED') {
+          // Case B — Location Services Disabled
+          updateSwitchHint(id, 'Location services disabled — Switch not changed', 'error');
+          showLocationModal({
+            title: 'Location Services Disabled',
+            description: 'Please enable Location Services to continue controlling the switch.',
+            subNote: '📱 <b>To enable:</b> Open your mobile device <b>Settings &rarr; Location</b> and turn it ON, then return and tap Retry.',
+            icon: '⚠️',
+            cancelText: 'Cancel',
+            primaryText: 'Open Location Settings',
+            onPrimary: function() {
+              showLocationModal({
+                title: 'Check Location Services',
+                description: 'Once you have enabled device GPS location, tap Retry to proceed with switch control.',
+                icon: '🔄',
+                cancelText: 'Cancel',
+                primaryText: 'Retry Now',
+                onPrimary: function() { handleSwitch(id, checked, title); }
+              });
+            }
+          });
+          return;
+        }
+
+        // Case C — Timeout or Location Acquisition Failed
+        var isTimeout = locResult.errorType === 'TIMEOUT';
+        updateSwitchHint(id, (isTimeout ? 'Location timed out' : 'Location unavailable') + ' — Switch not changed', 'error');
+        showLocationModal({
+          title: isTimeout ? 'Location Request Timed Out' : 'Unable to Detect Location',
+          description: isTimeout
+            ? 'GPS request took too long to acquire a position.<br><br>Please make sure Location is enabled on your device and tap Retry.'
+            : ((locResult.message || 'Unable to determine device location.') + '<br><br>Please check your location settings and try again.'),
+          icon: isTimeout ? '⏱️' : '📍',
+          cancelText: 'Cancel',
+          primaryText: 'Retry Location',
+          onPrimary: function() { handleSwitch(id, checked, title); }
+        });
+        return;
+      }
+
+      // 4. UI State: EXECUTING_SWITCH
+      updateSwitchHint(id, 'Location confirmed (' + locResult.accuracy + 'm). Turning switch ' + targetAction + '...', 'pending');
+      showLocationModal({
+        title: 'Executing Switch ' + targetAction + '...',
+        description: 'Location confirmed (Accuracy: ' + locResult.accuracy + 'm).<br>Transmitting ' + targetAction + ' command to ESP32...',
+        isSpinner: true,
+        hideCancel: true,
+        hidePrimary: true
+      });
+
+      // 5. Reverse geocode address
+      var geo = await reverseGeocodeLocation(locResult.coords.latitude, locResult.coords.longitude);
+
+      // 6. Build Independent Event Object
+      var timeStr = new Date().toLocaleTimeString();
+      var geoEvent = {
+        id: 'loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        eventId: 'loc-' + Date.now(),
+        deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
+        action: targetAction,
+        event: targetAction,
+        latitude: locResult.coords.latitude,
+        longitude: locResult.coords.longitude,
+        lat: locResult.coords.latitude,
+        lng: locResult.coords.longitude,
+        accuracy: locResult.accuracy,
+        address: geo.formattedAddress,
+        locality: geo.locality,
+        city: geo.locality || geo.city || 'Little Mount',
+        state: geo.state || 'Tamil Nadu',
+        country: geo.country || 'India',
+        timestamp: timeStr,
+        time: timeStr,
+        locationSource: 'GPS',
+        source: 'GPS',
+        locationCapturedAt: new Date().toISOString(),
+        switchCommandStatus: 'SUCCESS',
+        esp32Confirmed: false
+      };
+
+      // 7. Send command to ESP32
+      var cmd = checked ? 'LED:1' : 'LED:0';
+      var res = await sendHardwareActionAsync(cmd, {
         widgetId: id,
         widgetType: 'switch',
         value: checked,
         switchTitle: title,
-        location: instantLoc,
-        autoGeolog: true
+        location: geoEvent
       });
 
-      // 4. Try background GPS to refine coordinates (if browser geolocation supported / allowed)
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          function(pos) {
-            var lat = parseFloat(pos.coords.latitude.toFixed(5));
-            var lng = parseFloat(pos.coords.longitude.toFixed(5));
-            fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14&accept-language=en', {
-              headers: { 'Accept-Language': 'en' }
-            })
-            .then(function(r) { return r.json(); })
-            .then(function(geo) {
-              var specific = (geo && geo.name && geo.name !== 'Chennai') ? geo.name :
-                (geo && geo.display_name && !geo.display_name.startsWith('Chennai') ? geo.display_name.split(',')[0].trim() : '') ||
-                (geo && geo.address && (geo.address.railway || geo.address.suburb || geo.address.neighbourhood || geo.address.quarter || geo.address.city || geo.address.town)) ||
-                hostCityText || 'Switch Geolog';
-              var address = (geo && geo.display_name) ? geo.display_name.split(',').slice(0, 4).join(',').trim() : (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E');
-              var refinedLoc = {
-                id: instantLoc.id,
-                lat: lat,
-                lng: lng,
-                accuracy: Math.round(pos.coords.accuracy || 10),
-                event: eventLabel,
-                switchTitle: title,
-                city: specific,
-                address: address,
-                time: instantLoc.time,
-                timestamp: instantLoc.timestamp,
-                source: 'Mobile GPS (' + specific + ')'
-              };
-              updateMobileLocationCards(refinedLoc);
-              sendHardwareAction('LOC_SYNC', { location: refinedLoc, syncOnly: true });
-            })
-            .catch(function() {
-              var refinedLoc = {
-                id: instantLoc.id,
-                lat: lat,
-                lng: lng,
-                accuracy: Math.round(pos.coords.accuracy || 10),
-                event: eventLabel,
-                switchTitle: title,
-                city: hostCityText || 'Switch Geolog',
-                address: lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E',
-                time: instantLoc.time,
-                timestamp: instantLoc.timestamp,
-                source: 'Mobile GPS'
-              };
-              updateMobileLocationCards(refinedLoc);
-              sendHardwareAction('LOC_SYNC', { location: refinedLoc, syncOnly: true });
-            });
-          },
-          function() {
-            // Geolocation not available or denied - instantLoc already rendered and saved!
-          },
-          { timeout: 5000, enableHighAccuracy: true }
-        );
+      // 8. Confirm ESP32 response (Important Failure Handling)
+      if (!res || !res.success) {
+        revertSwitchUI();
+        updateSwitchHint(id, 'ESP32 failed to confirm state', 'error');
+        showLocationModal({
+          title: 'Switch Action Failed',
+          description: 'The ESP32 did not confirm the requested state (' + (res?.error || 'No response') + ').<br>The switch has not been changed.',
+          icon: '❌',
+          cancelText: 'Dismiss',
+          hidePrimary: true
+        });
+        return;
       }
 
+      // 9. ESP32 Confirmed! Save Event & Update UI
+      geoEvent.esp32Confirmed = true;
+      if (switchEl) switchEl.disabled = false;
+      if (card) {
+        if (checked) card.classList.add('glow-blue');
+        else card.classList.remove('glow-blue');
+      }
+
+      updateSwitchHint(id, 'Switch ' + targetAction + ' at ' + geoEvent.city + ' (Accuracy: ' + geoEvent.accuracy + 'm)', 'success');
+      setTimeout(function() {
+        updateSwitchHint(id, 'Location required for ON/OFF logging', '');
+      }, 5000);
+
+      // Update location cards & history with fresh accuracy
+      updateMobileLocationCards(geoEvent);
+
+      // Close modal
+      closeLocationModal();
+      isSwitchOperationInProgress = false;
+      pendingSwitchContext = null;
+
+      addLog('✅ [SUCCESS] Switch ' + targetAction + ' logged at ' + geoEvent.city + ' (Acc: ' + geoEvent.accuracy + 'm)');
       evalRules(id, checked, title);
     }
 
@@ -1274,6 +1849,7 @@ export const getStandaloneHtmlContent = ({
           switchEl = document.getElementById('input-w-led') || document.querySelector('input[type="checkbox"]');
         }
         if (switchEl && typeof val === 'boolean') {
+          if (isSwitchOperationInProgress) return;
           if (switchEl.checked !== val) {
             switchEl.checked = val;
             var card = document.getElementById('card-' + widgetId) || switchEl.closest('.card');

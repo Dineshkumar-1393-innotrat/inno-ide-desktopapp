@@ -23,6 +23,10 @@ const electronAPI = {
     }
   },
 
+  agent: {
+    chat: (command) => ipcRenderer.invoke('agent:chat', command)
+  },
+
   project: {
     getRecent: () => ipcRenderer.invoke('project:get-recent'),
     create: (path, metadata) => ipcRenderer.invoke('project:create', { path, metadata }),

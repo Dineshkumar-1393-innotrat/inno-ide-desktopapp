@@ -271,6 +271,10 @@ function AppBuilderStudio({
               handleOpenEditCrudRecord={handleOpenEditCrudRecord}
               handleDeleteCrudRecord={handleDeleteCrudRecord}
               deviceDetectedLocation={deviceDetectedLocation}
+              handleCalibrateLocation={handleCalibrateLocation}
+              isDetectingLocation={isDetectingLocation}
+              fetchCurrentDeviceLocation={fetchCurrentDeviceLocation}
+              handleClearGeologs={handleClearGeologs}
               newQuestionInputs={newQuestionInputs}
               setNewQuestionInputs={setNewQuestionInputs}
               handleAddQuestionToForm={handleAddQuestionToForm}

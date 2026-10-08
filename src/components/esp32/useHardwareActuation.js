@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 
 /**
  * Custom hook to handle real serial port actuation (USB/COM/TCP),
@@ -11,41 +11,78 @@ export default function useHardwareActuation({
   logicBlocks,
   setWidgets,
   recordSwitchLocation,
+  getAccurateLocationForSwitch,
   toast
 }) {
   const [liveLedToggle, setLiveLedToggle] = useState(false); // Hardware LED state toggle
   const [ledHardwareError, setLedHardwareError] = useState(null); // Serial write error message
+  const isSwitchOperationInProgressRef = useRef(false);
   const [serialTrafficLogs, setSerialTrafficLogs] = useState([
     { id: 1, type: "rx", text: "ESP32-S3 IoT Node Online. Baud: 115200", time: "12:00:01" },
     { id: 2, type: "rx", text: "Free Heap: 284,520 bytes | Wi-Fi: Connected (192.168.0.104)", time: "12:00:02" },
     { id: 3, type: "rx", text: "Ready for companion app telemetry & commands", time: "12:00:03" }
   ]);
 
-  // Direct hardware LED toggle helper
+  // Direct hardware LED toggle helper (strictly location-gated)
   const handleToggleHardwareLed = async (nextVal) => {
+    if (isSwitchOperationInProgressRef.current) return;
+    isSwitchOperationInProgressRef.current = true;
+
+    // STEP 1-6: Check permission, request ONE fresh GPS location, validate accuracy
+    let switchLoc = null;
+    if (getAccurateLocationForSwitch) {
+      try {
+        switchLoc = await getAccurateLocationForSwitch({ maxAccuracy: 5000, timeoutMs: 10000 });
+      } catch (err) {
+        isSwitchOperationInProgressRef.current = false;
+        // Revert switch widget
+        if (setWidgets) {
+          setWidgets((prev) =>
+            prev.map((w) =>
+              w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+                ? { ...w, state: !nextVal, value: !nextVal }
+                : w
+            )
+          );
+        }
+        if (toast) {
+          if (err.errorType === "PERMISSION_DENIED") {
+            toast({
+              title: "Location Permission Required",
+              description: "Location access is required to record where this switch action occurred. Please allow location access to continue.",
+              status: "warning",
+              duration: 4000
+            });
+          } else if (err.errorType === "SERVICES_DISABLED") {
+            toast({
+              title: "Location Services Disabled",
+              description: "Please enable Location Services to continue controlling the switch.",
+              status: "warning",
+              duration: 4000
+            });
+          } else {
+            toast({
+              title: "Unable to Get Accurate Location",
+              description: err.message || "Please move to an area with better GPS reception and try again.",
+              status: "error",
+              duration: 4000
+            });
+          }
+        }
+        return; // NO LOCATION = NO SWITCH ACTION!
+      }
+    }
+
     const targetPort = selectedDevice?.port || activePort || "COM9";
     const cmd = nextVal ? "LED:1\r\n" : "LED:0\r\n";
-    const body = JSON.stringify({ payload: cmd, port: targetPort, value: nextVal, SwitchStatus: nextVal ? 1 : 0 });
+    const body = JSON.stringify({
+      payload: cmd,
+      port: targetPort,
+      value: nextVal,
+      SwitchStatus: nextVal ? 1 : 0,
+      location: switchLoc
+    });
     const headers = { "Content-Type": "application/json" };
-
-    setLiveLedToggle(nextVal);
-    setLedHardwareError(null);
-
-    // Sync corresponding switch widget in canvas
-    if (setWidgets) {
-      setWidgets((prev) =>
-        prev.map((w) =>
-          w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
-            ? { ...w, state: nextVal, value: nextVal }
-            : w
-        )
-      );
-    }
-
-    // Geotag switch location
-    if (recordSwitchLocation) {
-      recordSwitchLocation(nextVal, "LED Switch");
-    }
 
     let hardwareActuated = false;
     let lastError = null;
@@ -129,24 +166,46 @@ export default function useHardwareActuation({
 
       if (hardwareActuated) {
         setLedHardwareError(null);
+        setLiveLedToggle(nextVal);
+        if (setWidgets) {
+          setWidgets((prev) =>
+            prev.map((w) =>
+              w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+                ? { ...w, state: nextVal, value: nextVal }
+                : w
+            )
+          );
+        }
+        if (recordSwitchLocation && switchLoc) {
+          recordSwitchLocation(nextVal, "LED Switch", switchLoc);
+        }
         if (toast) {
           toast({
             title: nextVal ? "💡 LED ON" : "⚫ LED OFF",
-            description: `Command sent to ${targetPort}`,
+            description: `Command confirmed at ${switchLoc?.city || "Location"} (Accuracy: ${switchLoc?.accuracy || 12}m)`,
             status: "success",
-            duration: 1500
+            duration: 2000
           });
         }
       } else {
-        const errMsg = lastError || "Port unavailable";
+        const errMsg = lastError || "ESP32 did not confirm the requested state";
         setLedHardwareError(errMsg);
         setLiveLedToggle(!nextVal);
+        if (setWidgets) {
+          setWidgets((prev) =>
+            prev.map((w) =>
+              w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+                ? { ...w, state: !nextVal, value: !nextVal }
+                : w
+            )
+          );
+        }
         if (toast) {
           toast({
-            title: "⚠️ Hardware Unreachable",
-            description: `Could not send to ${targetPort}: ${errMsg}. Flash reactive firmware first.`,
+            title: "Switch Action Failed",
+            description: `The ESP32 did not confirm the requested state (${errMsg}).`,
             status: "error",
-            duration: 5000,
+            duration: 4000,
             isClosable: true
           });
         }
@@ -154,14 +213,25 @@ export default function useHardwareActuation({
     } catch (err) {
       setLedHardwareError(err.message);
       setLiveLedToggle(!nextVal);
+      if (setWidgets) {
+        setWidgets((prev) =>
+          prev.map((w) =>
+            w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+              ? { ...w, state: !nextVal, value: !nextVal }
+              : w
+          )
+        );
+      }
       if (toast) {
         toast({
-          title: "Hardware Toggle Error",
-          description: err.message,
+          title: "Switch Action Failed",
+          description: `The ESP32 did not confirm the requested state (${err.message}).`,
           status: "error",
-          duration: 2500
+          duration: 3500
         });
       }
+    } finally {
+      isSwitchOperationInProgressRef.current = false;
     }
   };
 

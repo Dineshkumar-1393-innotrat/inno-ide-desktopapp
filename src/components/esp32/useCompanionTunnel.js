@@ -187,6 +187,8 @@ export default function useCompanionTunnel({
           } else if (action.location) {
             const isCleanLoc = (item) => Boolean(item && item.lat && !isStaleTestGeolog(item));
             if (isCleanLoc(action.location)) {
+              const isOn = action.location.event === "ON" || action.value === true || action.value === 1 || action.SwitchStatus === 1;
+              const isOff = action.location.event === "OFF" || action.value === false || action.value === 0 || action.SwitchStatus === 0;
               setWidgets((prev) => {
                 const isMatch = (a, b) =>
                   (a.id && b.id && a.id === b.id) ||
@@ -196,7 +198,21 @@ export default function useCompanionTunnel({
                     const existing = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter(isCleanLoc);
                     const hist = [action.location, ...existing.filter((h) => !isMatch(h, action.location)).slice(0, 49)];
                     hist.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
-                    return { ...w, lastLocation: action.location, locationHistory: hist };
+                    return {
+                      ...w,
+                      lastLocation: action.location,
+                      lastOnLocation: isOn ? action.location : (w.lastOnLocation || (hist.find(h => h.event === "ON") || null)),
+                      lastOffLocation: isOff ? action.location : (w.lastOffLocation || (hist.find(h => h.event === "OFF") || null)),
+                      locationHistory: hist
+                    };
+                  }
+                  if (w.type === "switch" || w.id === "w-led") {
+                    return {
+                      ...w,
+                      lastLocation: action.location,
+                      lastOnLocation: isOn ? action.location : (w.lastOnLocation || null),
+                      lastOffLocation: isOff ? action.location : (w.lastOffLocation || null)
+                    };
                   }
                   return w;
                 });

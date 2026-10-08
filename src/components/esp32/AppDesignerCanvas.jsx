@@ -16,7 +16,8 @@ import {
   SliderThumb,
   Progress,
   Tooltip,
-  Spinner
+  Spinner,
+  useToast
 } from "@chakra-ui/react";
 import {
   FaTimes,
@@ -157,6 +158,10 @@ export default function AppDesignerCanvas({
   handleOpenEditCrudRecord,
   handleDeleteCrudRecord,
   deviceDetectedLocation,
+  handleCalibrateLocation,
+  isDetectingLocation = false,
+  fetchCurrentDeviceLocation,
+  handleClearGeologs,
   newQuestionInputs,
   setNewQuestionInputs,
   handleAddQuestionToForm,
@@ -166,6 +171,9 @@ export default function AppDesignerCanvas({
   handleDuplicateWidget,
   handleDeleteWidget
 }) {
+  const toast = useToast();
+  const setActiveWidgetId = setSelectedWidgetId;
+  const previewTab = "designer";
   const [starterAlertVisible, setStarterAlertVisible] = useState(false);
 
   return (
@@ -520,32 +528,160 @@ export default function AppDesignerCanvas({
                                   )}
 
                             {/* 1. LED Switch Widget */}
-                            {w.type === "switch" && (
-                              <HStack justify="space-between">
-                                <HStack spacing={2.5}>
-                                  <Box p={2} bg={w.state ? (w.color ? `${w.color}25` : "yellow.100") : (isDarkBg ? "whiteAlpha.200" : "gray.100")} color={w.state ? (w.color || "yellow.600") : (isDarkBg ? "gray.300" : "gray.400")} borderRadius="lg">
-                                    <FaLightbulb size={16} />
-                                  </Box>
-                                  <VStack align="start" spacing={0}>
-                                    <Text fontWeight="bold" fontSize={titleFontSize} color={primaryTextColor}>
-                                      {w.title}
-                                    </Text>
-                                    <Text fontSize="10px" color={secondaryTextColor}>
-                                      {w.boundTargetName || w.boundTarget}
-                                    </Text>
+                            {w.type === "switch" && (() => {
+                              const locWidget = (widgets || []).find((item) => item.type === "location");
+                              const allGeologs = (Array.isArray(locWidget?.locationHistory) ? [...locWidget.locationHistory] : [])
+                                .filter((h) => !isStaleTestGeolog(h))
+                                .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
+                              const switchOnLoc = w.lastOnLocation || (locWidget?.lastLocation?.event === "ON" ? locWidget.lastLocation : null) || (allGeologs.find((h) => h.event === "ON") || null);
+                              const switchOffLoc = w.lastOffLocation || (locWidget?.lastLocation?.event === "OFF" ? locWidget.lastLocation : null) || (allGeologs.find((h) => h.event === "OFF") || null);
+
+                              return (
+                                <VStack align="stretch" spacing={2}>
+                                  <HStack justify="space-between">
+                                    <HStack spacing={2.5}>
+                                      <Box p={2} bg={w.state ? (w.color ? `${w.color}25` : "yellow.100") : (isDarkBg ? "whiteAlpha.200" : "gray.100")} color={w.state ? (w.color || "yellow.600") : (isDarkBg ? "gray.300" : "gray.400")} borderRadius="lg">
+                                        <FaLightbulb size={16} />
+                                      </Box>
+                                      <VStack align="start" spacing={0}>
+                                        <Text fontWeight="bold" fontSize={titleFontSize} color={primaryTextColor}>
+                                          {w.title}
+                                        </Text>
+                                        <Text fontSize="10px" color={secondaryTextColor}>
+                                          {w.boundTargetName || w.boundTarget}
+                                        </Text>
+                                      </VStack>
+                                    </HStack>
+                                    <Switch
+                                      colorScheme={w.color ? undefined : "green"}
+                                      sx={w.color ? { "& .chakra-switch__track[data-checked]": { bg: w.color } } : {}}
+                                      isChecked={w.state}
+                                      onChange={(e) => {
+                                        e.stopPropagation();
+                                        handleUpdateWidget("state", e.target.checked, w.id);
+                                      }}
+                                    />
+                                  </HStack>
+                                  <HStack spacing={1} color="blue.500" fontSize="9px">
+                                    <FaMapMarkerAlt size={9} />
+                                    <Text fontWeight="semibold">Location required for ON/OFF logging</Text>
+                                  </HStack>
+
+                                  {/* Live ON and OFF Timing & Location on Switch Widget */}
+                                  <VStack align="stretch" spacing={1.5} pt={1} borderTop="1px solid" borderColor={isDarkBg ? "whiteAlpha.200" : "gray.200"}>
+                                    {/* ON Timing & Location */}
+                                    <Box
+                                      p={2}
+                                      bg={isDarkBg ? "rgba(34, 197, 94, 0.12)" : "green.50"}
+                                      borderRadius="md"
+                                      border="1px solid"
+                                      borderColor={switchOnLoc ? (isDarkBg ? "green.600" : "green.300") : (isDarkBg ? "whiteAlpha.100" : "gray.200")}
+                                    >
+                                      <HStack justify="space-between" align="center" mb={0.5}>
+                                        <HStack spacing={1}>
+                                          <Box w="6px" h="6px" borderRadius="full" bg={switchOnLoc ? "green.500" : "gray.400"} />
+                                          <Text fontSize="9px" fontWeight="extrabold" color={switchOnLoc ? (isDarkBg ? "green.300" : "green.700") : "gray.400"} textTransform="uppercase">
+                                            Switch ON Timing & Location
+                                          </Text>
+                                        </HStack>
+                                        <Text fontSize="9px" fontWeight="bold" color={switchOnLoc ? (isDarkBg ? "green.300" : "green.600") : "gray.400"} fontFamily="monospace">
+                                          {switchOnLoc ? formatGeologTime(switchOnLoc) : "--:--:--"}
+                                        </Text>
+                                      </HStack>
+                                      {switchOnLoc ? (
+                                        <HStack justify="space-between" align="center">
+                                          <Text fontSize="10px" fontWeight="bold" color={isDarkBg ? "white" : "green.800"} noOfLines={1}>
+                                            📍 {switchOnLoc.city || "Logged Location"}
+                                          </Text>
+                                          <Text fontSize="8px" fontWeight="bold" color={isDarkBg ? "green.300" : "green.600"}>
+                                            Acc: {switchOnLoc.accuracy || 12}m
+                                          </Text>
+                                        </HStack>
+                                      ) : (
+                                        <Text fontSize="9px" color="gray.400" fontStyle="italic">
+                                          No switch ON event recorded yet
+                                        </Text>
+                                      )}
+                                      {switchOnLoc?.lat && (
+                                        <HStack justify="space-between" align="center" mt={0.5}>
+                                          <Text fontSize="8px" color="gray.400" fontFamily="monospace">
+                                            {switchOnLoc.lat}° N, {switchOnLoc.lng}° E
+                                          </Text>
+                                          <Text
+                                            as="a"
+                                            href={`https://www.google.com/maps?q=${switchOnLoc.lat},${switchOnLoc.lng}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            fontSize="8px"
+                                            fontWeight="bold"
+                                            color="green.500"
+                                            _hover={{ textDecoration: "underline" }}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            View Map ↗
+                                          </Text>
+                                        </HStack>
+                                      )}
+                                    </Box>
+
+                                    {/* OFF Timing & Location */}
+                                    <Box
+                                      p={2}
+                                      bg={isDarkBg ? "rgba(239, 68, 68, 0.12)" : "red.50"}
+                                      borderRadius="md"
+                                      border="1px solid"
+                                      borderColor={switchOffLoc ? (isDarkBg ? "red.600" : "red.300") : (isDarkBg ? "whiteAlpha.100" : "gray.200")}
+                                    >
+                                      <HStack justify="space-between" align="center" mb={0.5}>
+                                        <HStack spacing={1}>
+                                          <Box w="6px" h="6px" borderRadius="full" bg={switchOffLoc ? "red.500" : "gray.400"} />
+                                          <Text fontSize="9px" fontWeight="extrabold" color={switchOffLoc ? (isDarkBg ? "red.300" : "red.700") : "gray.400"} textTransform="uppercase">
+                                            Switch OFF Timing & Location
+                                          </Text>
+                                        </HStack>
+                                        <Text fontSize="9px" fontWeight="bold" color={switchOffLoc ? (isDarkBg ? "red.300" : "red.600") : "gray.400"} fontFamily="monospace">
+                                          {switchOffLoc ? formatGeologTime(switchOffLoc) : "--:--:--"}
+                                        </Text>
+                                      </HStack>
+                                      {switchOffLoc ? (
+                                        <HStack justify="space-between" align="center">
+                                          <Text fontSize="10px" fontWeight="bold" color={isDarkBg ? "white" : "red.800"} noOfLines={1}>
+                                            📍 {switchOffLoc.city || "Logged Location"}
+                                          </Text>
+                                          <Text fontSize="8px" fontWeight="bold" color={isDarkBg ? "red.300" : "red.600"}>
+                                            Acc: {switchOffLoc.accuracy || 10}m
+                                          </Text>
+                                        </HStack>
+                                      ) : (
+                                        <Text fontSize="9px" color="gray.400" fontStyle="italic">
+                                          No switch OFF event recorded yet
+                                        </Text>
+                                      )}
+                                      {switchOffLoc?.lat && (
+                                        <HStack justify="space-between" align="center" mt={0.5}>
+                                          <Text fontSize="8px" color="gray.400" fontFamily="monospace">
+                                            {switchOffLoc.lat}° N, {switchOffLoc.lng}° E
+                                          </Text>
+                                          <Text
+                                            as="a"
+                                            href={`https://www.google.com/maps?q=${switchOffLoc.lat},${switchOffLoc.lng}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            fontSize="8px"
+                                            fontWeight="bold"
+                                            color="red.500"
+                                            _hover={{ textDecoration: "underline" }}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            View Map ↗
+                                          </Text>
+                                        </HStack>
+                                      )}
+                                    </Box>
                                   </VStack>
-                                </HStack>
-                                <Switch
-                                  colorScheme={w.color ? undefined : "green"}
-                                  sx={w.color ? { "& .chakra-switch__track[data-checked]": { bg: w.color } } : {}}
-                                  isChecked={w.state}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    handleUpdateWidget("state", e.target.checked, w.id);
-                                  }}
-                                />
-                              </HStack>
-                            )}
+                                </VStack>
+                              );
+                            })()}
 
                             {/* 2. Servo Angle Slider Widget */}
                             {w.type === "slider" && (
@@ -1046,24 +1182,38 @@ export default function AppDesignerCanvas({
                                     border="1.5px solid"
                                     borderColor={lastOnLoc ? "green.300" : "green.100"}
                                   >
-                                    <HStack spacing={1.5} mb={1.5}>
-                                      <Box w="8px" h="8px" borderRadius="full" bg={lastOnLoc ? "green.500" : "gray.300"} />
-                                      <Text fontSize="10px" fontWeight="extrabold" color={lastOnLoc ? "green.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
-                                        Switch ON Location
-                                      </Text>
-                                      {lastOnLoc && <Badge colorScheme="green" fontSize="7px" px={1.5}>Latest</Badge>}
+                                    <HStack spacing={1.5} mb={1.5} justify="space-between">
+                                      <HStack spacing={1.5}>
+                                        <Box w="8px" h="8px" borderRadius="full" bg={lastOnLoc ? "green.500" : "gray.300"} />
+                                        <Text fontSize="10px" fontWeight="extrabold" color={lastOnLoc ? "green.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
+                                          Switch ON Timing & Location
+                                        </Text>
+                                        {lastOnLoc && <Badge colorScheme="green" fontSize="7px" px={1.5}>Latest</Badge>}
+                                      </HStack>
+                                      {lastOnLoc && (
+                                        <Badge colorScheme="green" fontSize="9px" fontFamily="monospace" px={1.5}>
+                                          ⏱️ {formatGeologTime(lastOnLoc)}
+                                        </Badge>
+                                      )}
                                     </HStack>
                                     {lastOnLoc ? (
                                       <VStack align="stretch" spacing={0.5}>
-                                        <Text fontSize="11px" fontWeight="bold" color="green.800">
-                                          🟢 {lastOnLoc.city}
-                                        </Text>
+                                        <HStack justify="space-between" align="center">
+                                          <Text fontSize="11px" fontWeight="bold" color="green.800">
+                                            🟢 {lastOnLoc.city}
+                                          </Text>
+                                          <Badge colorScheme="green" variant="subtle" fontSize="9px" fontFamily="monospace">
+                                            {formatGeologTime(lastOnLoc)}
+                                          </Badge>
+                                        </HStack>
                                         <Text fontSize="9px" color="green.600" noOfLines={1}>{lastOnLoc.address}</Text>
                                         <HStack justify="space-between">
                                           <Text fontSize="9px" color="green.500" fontFamily="monospace" fontWeight="semibold">
                                             {lastOnLoc.lat ? `${lastOnLoc.lat}° N, ${lastOnLoc.lng}° E` : "Coordinates pending"}
                                           </Text>
-                                          <Text fontSize="8px" color="green.400">{formatGeologTime(lastOnLoc)}</Text>
+                                          <Text fontSize="9px" color="green.700" fontWeight="bold">
+                                            Accuracy: {lastOnLoc.accuracy || 12} m
+                                          </Text>
                                         </HStack>
                                         <Button
                                           size="xs"
@@ -1096,24 +1246,38 @@ export default function AppDesignerCanvas({
                                     border="1.5px solid"
                                     borderColor={lastOffLoc ? "red.300" : "red.100"}
                                   >
-                                    <HStack spacing={1.5} mb={1.5}>
-                                      <Box w="8px" h="8px" borderRadius="full" bg={lastOffLoc ? "red.500" : "gray.300"} />
-                                      <Text fontSize="10px" fontWeight="extrabold" color={lastOffLoc ? "red.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
-                                        Switch OFF Location
-                                      </Text>
-                                      {lastOffLoc && <Badge colorScheme="red" fontSize="7px" px={1.5}>Latest</Badge>}
+                                    <HStack spacing={1.5} mb={1.5} justify="space-between">
+                                      <HStack spacing={1.5}>
+                                        <Box w="8px" h="8px" borderRadius="full" bg={lastOffLoc ? "red.500" : "gray.300"} />
+                                        <Text fontSize="10px" fontWeight="extrabold" color={lastOffLoc ? "red.700" : "gray.400"} textTransform="uppercase" letterSpacing="wider">
+                                          Switch OFF Timing & Location
+                                        </Text>
+                                        {lastOffLoc && <Badge colorScheme="red" fontSize="7px" px={1.5}>Latest</Badge>}
+                                      </HStack>
+                                      {lastOffLoc && (
+                                        <Badge colorScheme="red" fontSize="9px" fontFamily="monospace" px={1.5}>
+                                          ⏱️ {formatGeologTime(lastOffLoc)}
+                                        </Badge>
+                                      )}
                                     </HStack>
                                     {lastOffLoc ? (
                                       <VStack align="stretch" spacing={0.5}>
-                                        <Text fontSize="11px" fontWeight="bold" color="red.800">
-                                          🔴 {lastOffLoc.city}
-                                        </Text>
+                                        <HStack justify="space-between" align="center">
+                                          <Text fontSize="11px" fontWeight="bold" color="red.800">
+                                            🔴 {lastOffLoc.city}
+                                          </Text>
+                                          <Badge colorScheme="red" variant="subtle" fontSize="9px" fontFamily="monospace">
+                                            {formatGeologTime(lastOffLoc)}
+                                          </Badge>
+                                        </HStack>
                                         <Text fontSize="9px" color="red.600" noOfLines={1}>{lastOffLoc.address}</Text>
                                         <HStack justify="space-between">
                                           <Text fontSize="9px" color="red.500" fontFamily="monospace" fontWeight="semibold">
                                             {lastOffLoc.lat ? `${lastOffLoc.lat}° N, ${lastOffLoc.lng}° E` : "Coordinates pending"}
                                           </Text>
-                                          <Text fontSize="8px" color="red.400">{formatGeologTime(lastOffLoc)}</Text>
+                                          <Text fontSize="9px" color="red.700" fontWeight="bold">
+                                            Accuracy: {lastOffLoc.accuracy || 10} m
+                                          </Text>
                                         </HStack>
                                         <Button
                                           size="xs"
@@ -1170,6 +1334,12 @@ export default function AppDesignerCanvas({
                                           return (
                                             <HStack
                                               key={item.id || idx}
+                                              as="a"
+                                              href={`https://www.google.com/maps?q=${item.lat},${item.lng}`}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              cursor="pointer"
+                                              onClick={(e) => e.stopPropagation()}
                                               justify="space-between"
                                               p={1.5}
                                               bg={badgeBg}
@@ -1177,6 +1347,7 @@ export default function AppDesignerCanvas({
                                               fontSize="9px"
                                               border="1px solid"
                                               borderColor={badgeBorder}
+                                              _hover={{ shadow: "xs" }}
                                             >
                                               <HStack spacing={1.5}>
                                                 <Badge colorScheme={badgeColor} fontSize="7px" px={1}>{item.event || "LOG"}</Badge>
@@ -1185,7 +1356,7 @@ export default function AppDesignerCanvas({
                                                 </Text>
                                                 {item.lat && (
                                                   <Text color="gray.400" fontFamily="monospace" fontSize="8px">
-                                                    {Number(item.lat).toFixed(3)}°N{item.lng ? `, ${Number(item.lng).toFixed(3)}°E` : ""}
+                                                    {Number(item.lat).toFixed(3)}°N{item.lng ? `, ${Number(item.lng).toFixed(3)}°E` : ""} • Acc: {item.accuracy || 12}m
                                                   </Text>
                                                 )}
                                               </HStack>

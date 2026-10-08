@@ -321,7 +321,8 @@ export default function ESP32Flasher({
     isDetectingLocation,
     fetchCurrentDeviceLocation,
     handleCalibrateLocation,
-    recordSwitchLocation
+    recordSwitchLocation,
+    getAccurateLocationForSwitch
   } = useDeviceLocation({
     widgets,
     setWidgets,
@@ -346,6 +347,7 @@ export default function ESP32Flasher({
     logicBlocks,
     setWidgets,
     recordSwitchLocation,
+    getAccurateLocationForSwitch,
     toast
   });
 

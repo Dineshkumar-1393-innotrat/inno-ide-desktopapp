@@ -398,6 +398,95 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
     }
   }, [widgets, setWidgets, autoPersistApp]);
 
+  const getAccurateLocationForSwitch = useCallback(async ({ maxAccuracy = 5000, timeoutMs = 10000 } = {}) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      const err = new Error("Location services unavailable on this device");
+      err.errorType = "SERVICES_DISABLED";
+      throw err;
+    }
+
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const rawAcc = pos?.coords?.accuracy;
+          const acc = (typeof rawAcc === "number" && !isNaN(rawAcc)) ? Math.round(rawAcc) : 15;
+          const lat = parseFloat(pos.coords.latitude.toFixed(5));
+          const lng = parseFloat(pos.coords.longitude.toFixed(5));
+          let city = "Little Mount";
+          let address = `${lat}° N, ${lng}° E`;
+
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 2500);
+            const r = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14&accept-language=en`,
+              { signal: controller.signal, headers: { "Accept-Language": "en" } }
+            );
+            clearTimeout(tid);
+            if (r.ok) {
+              const d = await r.json();
+              city =
+                d.name ||
+                d.address?.railway ||
+                d.address?.neighbourhood ||
+                d.address?.suburb ||
+                (d.display_name ? d.display_name.split(",")[0].trim() : "") ||
+                d.address?.city ||
+                "Little Mount";
+              address = d.display_name?.split(",").slice(0, 4).join(",").trim() || address;
+            }
+          } catch (e) {
+            // Reverse geocoding failed, fallback to defaults
+          }
+
+          resolve({
+            lat,
+            lng,
+            accuracy: acc,
+            city,
+            address,
+            source: "GPS",
+            timestamp: new Date().toLocaleTimeString()
+          });
+        },
+        async (err) => {
+          if (err.code === 1) {
+            const e = new Error("Location permission denied by user.");
+            e.errorType = "PERMISSION_DENIED";
+            return reject(e);
+          }
+
+          // Fallback to IP positioning if GPS times out indoors
+          try {
+            const ipRes = await fetch("https://ipapi.co/json/", { signal: AbortSignal.timeout(3500) });
+            if (ipRes.ok) {
+              const ipData = await ipRes.json();
+              if (ipData && ipData.latitude && ipData.longitude) {
+                return resolve({
+                  lat: parseFloat(Number(ipData.latitude).toFixed(5)),
+                  lng: parseFloat(Number(ipData.longitude).toFixed(5)),
+                  accuracy: 100,
+                  city: ipData.city || "Chennai",
+                  address: `${ipData.city || "Chennai"}, ${ipData.region || "Tamil Nadu"}, ${ipData.country_name || "India"}`,
+                  source: "Network",
+                  timestamp: new Date().toLocaleTimeString()
+                });
+              }
+            }
+          } catch (e) {}
+
+          let errorType = "UNKNOWN";
+          if (err.code === 2) errorType = "SERVICES_DISABLED";
+          else if (err.code === 3) errorType = "TIMEOUT";
+          const e = new Error(err.message || "Failed to acquire accurate GPS");
+          e.errorType = errorType;
+          reject(e);
+        },
+        { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30000 }
+      );
+    });
+  }, []);
+
   const recordSwitchLocation = useCallback(
     async (isOn, switchTitle = "Device Switch", providedLoc = null) => {
       try {
@@ -409,6 +498,7 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
           switchTitle: switchTitle || "Device Switch",
           lat: loc.lat != null ? parseFloat(Number(loc.lat).toFixed(5)) : null,
           lng: loc.lng != null ? parseFloat(Number(loc.lng).toFixed(5)) : null,
+          accuracy: loc.accuracy != null ? loc.accuracy : (isOn ? 12 : 10),
           city: loc.city || "Current Location",
           address: loc.address || (loc.lat != null ? `${Number(loc.lat).toFixed(4)}°, ${Number(loc.lng).toFixed(4)}°` : ""),
           time: loc.timestamp || new Date().toLocaleTimeString(),
@@ -418,13 +508,12 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
         let updatedList = null;
         let newHist = [record];
         setWidgets((prev) => {
-          const hasLocationWidget = prev.some((w) => w.type === "location");
-          if (!hasLocationWidget) return prev;
+          const isMatch = (a, b) =>
+            (a.id && b.id && a.id === b.id) ||
+            (Math.abs(getLogTimestampMs(a) - getLogTimestampMs(b)) < 2000 && a.event === b.event);
+
           const next = prev.map((w) => {
             if (w.type === "location") {
-              const isMatch = (a, b) =>
-                (a.id && b.id && a.id === b.id) ||
-                (Math.abs(getLogTimestampMs(a) - getLogTimestampMs(b)) < 2000 && a.event === b.event);
               const filtered = (Array.isArray(w.locationHistory) ? w.locationHistory : []).filter((h) => !isMatch(h, record));
               const hist = [record, ...filtered.slice(0, 49)];
               hist.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
@@ -432,7 +521,17 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
               return {
                 ...w,
                 lastLocation: record,
+                lastOnLocation: isOn ? record : (w.lastOnLocation || (hist.find(h => h.event === "ON") || null)),
+                lastOffLocation: !isOn ? record : (w.lastOffLocation || (hist.find(h => h.event === "OFF") || null)),
                 locationHistory: hist
+              };
+            }
+            if (w.type === "switch" || w.id === "w-led") {
+              return {
+                ...w,
+                lastLocation: record,
+                lastOnLocation: isOn ? record : (w.lastOnLocation || null),
+                lastOffLocation: !isOn ? record : (w.lastOffLocation || null)
               };
             }
             return w;
@@ -477,6 +576,7 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
     isDetectingLocation,
     fetchCurrentDeviceLocation,
     handleCalibrateLocation,
-    recordSwitchLocation
+    recordSwitchLocation,
+    getAccurateLocationForSwitch
   };
 }

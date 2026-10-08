@@ -124,6 +124,7 @@ import { checkProductDefinition } from "./EmbeddedFileManagement/EmbeddedFileMan
 import { fetchFileSystem } from "./EmbeddedFileManagement/EmbeddedFileManagement";
 import { buildTree } from "./EmbeddedFileManagement/EmbeddedFileManagement";
 import CreateProductButton from "./shared/CreateProductButton";
+import SimulationAIAssistant from "./AIAssistant/SimulationAIAssistant";
 import ProjectSelectionModal from "./ProjectSelectionModal/ProjectSelectionModal";
 import ProjectChangePopup from "./ProjectSelectionPopup/ProjectSelectionPopup";
 import { validationManager } from "../validation/ValidationManager";
@@ -897,7 +898,7 @@ const SimulationNode = React.memo(({
         >
           <img
             src={item.symbol.src}
-            alt={item.symbol.name}
+            alt={item.symbol.label || item.symbol.name}
             style={{
               width: "100%",
               height: "100%",
@@ -907,7 +908,30 @@ const SimulationNode = React.memo(({
           />
         </Tooltip>
 
-        {item.symbol.name === "Microcontroller" && !hasConn && (
+        {item.symbol.label && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: "-18px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: "#1e293b",
+              color: "#ffffff",
+              fontSize: "10px",
+              fontWeight: "600",
+              padding: "1px 6px",
+              borderRadius: "4px",
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+              zIndex: 10
+            }}
+          >
+            {item.symbol.label}
+          </div>
+        )}
+
+        {(item.symbol.name === "Microcontroller" || item.symbol.label === "ESP32" || item.symbol.name?.toLowerCase().includes("esp32") || item.symbol.name?.toLowerCase().includes("microcontroller")) && !hasConn && (
           <>
             <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translate(-50%, -50%)', background: '#3b82f6', color: 'white', fontSize: '10px', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>Z1</div>
             <div style={{ position: 'absolute', top: '25%', right: 0, transform: 'translate(50%, -50%)', background: '#3b82f6', color: 'white', fontSize: '10px', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>Z2</div>
@@ -961,6 +985,12 @@ const BlockDiagram = () => {
   const droppedItems = activeTab?.symbols || [];
   const connections = activeTab?.connections || [];
 
+  const [activeSymbol, setActiveSymbol] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const contextMenuRef = useRef(null);
+  const [sparkEffects, setSparkEffects] = useState([]); // Track active spark animations
+  const [rotatingItem, setRotatingItem] = useState(null); // Optimize rotation performance
+
   const handleSidebarAddSymbol = useCallback((symbol) => {
     const componentWidth = 100;
     const componentHeight = 100;
@@ -976,6 +1006,96 @@ const BlockDiagram = () => {
     };
     dispatch(addSymbolToTab({ tabId: activeTabId, symbol: newSymbol }));
   }, [activeTabId, dispatch, droppedItems.length]);
+
+  // AI Agent Drag-and-Drop canvas command handlers
+  const handleAddSymbolAtPosition = useCallback((symbol, position = null) => {
+    const componentWidth = 100;
+    const componentHeight = 100;
+    let targetX = position && typeof position.x === "number" ? position.x : 200;
+    let targetY = position && typeof position.y === "number" ? position.y : 200;
+
+    // If an item is already close to target (within 30px), stagger slightly so both remain visible
+    const isOccupied = droppedItems.some(
+      item => Math.abs(item.x - targetX) < 30 && Math.abs(item.y - targetY) < 30
+    );
+    if (isOccupied) {
+      const offset = ((droppedItems.length % 5) + 1) * 35;
+      targetX += offset;
+      targetY += offset;
+    }
+
+    const newSymbol = {
+      symbol: symbol,
+      x: Math.max(10, targetX),
+      y: Math.max(10, targetY),
+      width: componentWidth,
+      height: componentHeight,
+      rotation: 0,
+      id: Date.now() + Math.random(),
+    };
+    dispatch(addSymbolToTab({ tabId: activeTabId, symbol: newSymbol }));
+    setActiveSymbol(droppedItems.length);
+    return newSymbol;
+  }, [activeTabId, dispatch, droppedItems, setActiveSymbol]);
+
+  const handleRemoveSymbolByNameOrId = useCallback((identifier) => {
+    if (!identifier) return null;
+    const idStr = String(identifier).toLowerCase().trim();
+    const target = droppedItems.find(item => 
+      String(item.id).toLowerCase() === idStr ||
+      (item.symbol?.name && item.symbol.name.toLowerCase().includes(idStr)) ||
+      (item.symbol?.label && item.symbol.label.toLowerCase().includes(idStr))
+    );
+    if (target) {
+      dispatch(removeSymbolFromTab({ tabId: activeTabId, symbolId: target.id }));
+      setActiveSymbol(null);
+      return target;
+    }
+    return null;
+  }, [activeTabId, dispatch, droppedItems, setActiveSymbol]);
+
+  const handleMoveSymbolByNameOrId = useCallback((identifier, position) => {
+    if (!identifier || !position) return null;
+    const idStr = String(identifier).toLowerCase().trim();
+    const target = droppedItems.find(item => 
+      String(item.id).toLowerCase() === idStr ||
+      (item.symbol?.name && item.symbol.name.toLowerCase().includes(idStr)) ||
+      (item.symbol?.label && item.symbol.label.toLowerCase().includes(idStr))
+    );
+    if (target) {
+      dispatch(updateSymbolInTab({
+        tabId: activeTabId,
+        symbolId: target.id,
+        updates: { x: position.x, y: position.y }
+      }));
+      return target;
+    }
+    return null;
+  }, [activeTabId, dispatch, droppedItems]);
+
+  const handleConnectSymbolsByNameOrId = useCallback((sourceId, targetId) => {
+    if (!sourceId || !targetId) return null;
+    const sStr = String(sourceId).toLowerCase().trim();
+    const tStr = String(targetId).toLowerCase().trim();
+    const sItem = droppedItems.find(i => 
+      String(i.id).toLowerCase() === sStr || 
+      (i.symbol?.name && i.symbol.name.toLowerCase().includes(sStr)) ||
+      (i.symbol?.label && i.symbol.label.toLowerCase().includes(sStr))
+    );
+    const tItem = droppedItems.find(i => 
+      String(i.id).toLowerCase() === tStr || 
+      (i.symbol?.name && i.symbol.name.toLowerCase().includes(tStr)) ||
+      (i.symbol?.label && i.symbol.label.toLowerCase().includes(tStr))
+    );
+    if (sItem && tItem && sItem.id !== tItem.id) {
+      const connectionKey = [sItem.id, tItem.id].sort().join("-");
+      if (!connections.includes(connectionKey)) {
+        dispatch(addConnectionToTab({ tabId: activeTabId, connection: connectionKey }));
+      }
+      return connectionKey;
+    }
+    return null;
+  }, [activeTabId, connections, dispatch, droppedItems]);
 
   // Internal simulation tab switching
   const handleSimulationTabClick = useCallback((id) => {
@@ -1097,17 +1217,12 @@ const BlockDiagram = () => {
     };
   }, [droppedItems, connections, activeTab, tabs]);
 
-  const [activeSymbol, setActiveSymbol] = useState(null);
-  const [contextMenu, setContextMenu] = useState(null);
-  const contextMenuRef = useRef(null);
   const [openCategories, setOpenCategories] = useState({}); // Moved here
   const [searchQuery, setSearchQuery] = useState("");
   const [sidebarMode, setSidebarMode] = useState("components");
   const navigate = useNavigate();
   const toast = useToast();
   // const [connections, setConnections] = useState(new Set()); // REMOVED - using Redux
-  const [sparkEffects, setSparkEffects] = useState([]); // Track active spark animations
-  const [rotatingItem, setRotatingItem] = useState(null); // Optimize rotation performance
   const { isOpen: isSidebarOpen, onToggle: onToggleSidebar, onClose: onCloseSidebar } = useDisclosure({ defaultIsOpen: true });
   const { sidebarWidth, startResizing } = useResizableSidebar(240, 160, 480);
 
@@ -1686,10 +1801,18 @@ const BlockDiagram = () => {
         // connections is array of strings (connectionKeys)
         const exists = connections.includes(connectionKey);
 
-        // If the target or dragged item is a Microcontroller, snap it automatically
-        if (item.symbol.name === "Microcontroller" || movedItem.symbol.name === "Microcontroller") {
-          const mcItem = item.symbol.name === "Microcontroller" ? item : movedItem;
-          const otherItem = item.symbol.name === "Microcontroller" ? movedItem : item;
+        // If the target or dragged item is a Microcontroller or ESP32, snap it automatically
+        const isMCUSymbol = (sym) => {
+          const n = (sym?.name || "").toLowerCase();
+          const l = (sym?.label || "").toLowerCase();
+          return n.includes("microcontroller") || n.includes("esp32") || l.includes("esp32") || l.includes("microcontroller");
+        };
+        const itemIsMCU = isMCUSymbol(item.symbol);
+        const movedIsMCU = isMCUSymbol(movedItem.symbol);
+
+        if (itemIsMCU || movedIsMCU) {
+          const mcItem = itemIsMCU ? item : movedItem;
+          const otherItem = itemIsMCU ? movedItem : item;
 
           // Determine which zone (Z1-Z6) is closest to otherItem's center
           const ox = otherItem.x + otherItem.width / 2;
@@ -2100,7 +2223,7 @@ const BlockDiagram = () => {
             </Button> */}
           {/* </Box> */}
 
-          <Box display="flex" alignItems="center" gap={3} justifyContent="flex-end" width="100%">
+          <Box display="flex" alignItems="center" gap={2} justifyContent="flex-end" width="100%" flexWrap="nowrap" pr={1}>
             <SimulationOne />
 
             <Button
@@ -2141,6 +2264,19 @@ const BlockDiagram = () => {
               View Data
             </Button>
             <CreateProductButton />
+            <SimulationAIAssistant
+              droppedItems={droppedItems}
+              connections={connections}
+              activeTab={activeTab}
+              activeTabId={activeTabId}
+              activeProjectName={activeProjectName}
+              activeProductName={activeProductName}
+              symbolsData={symbolsData}
+              onAddSymbolAtPosition={handleAddSymbolAtPosition}
+              onRemoveSymbol={handleRemoveSymbolByNameOrId}
+              onMoveSymbol={handleMoveSymbolByNameOrId}
+              onConnectSymbols={handleConnectSymbolsByNameOrId}
+            />
           </Box>
         </div>
 

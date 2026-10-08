@@ -557,6 +557,21 @@ export function registerAllIPCHandlers(getMainWindow) {
     return { success: false, error: 'Invalid URL protocol' };
   });
 
+  // Drag and Drop Agent Chatbot Proxy (Zero-CORS IPC for Electron)
+  ipcMain.handle('agent:chat', async (_event, command) => {
+    try {
+      const response = await fetch('https://drag-and-drop-agent-1.onrender.com/api/agent/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command })
+      });
+      const data = await response.json();
+      return { success: true, data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // Local Companion HTTP Server for instant phone camera scanning
   async function ensureCompanionServer(port = 5055) {
     if (companionServer) {
@@ -685,6 +700,15 @@ export function registerAllIPCHandlers(getMainWindow) {
             if (!data.syncOnly) {
               console.log(`[CompanionServer] Dispatching to ${targetPort}:`, payload.trim());
               writeResult = await serialService.writePort(targetPort, payload);
+              if (writeResult && writeResult.success === false) {
+                console.warn(`[CompanionServer] Hardware write to ${targetPort} failed:`, writeResult.reason);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({
+                  success: false,
+                  error: writeResult.reason || `ESP32 on ${targetPort} did not confirm switch command`,
+                  writeResult
+                }));
+              }
             } else {
               console.log(`[CompanionServer] syncOnly — state broadcast only (serial write skipped for ${targetPort})`);
             }

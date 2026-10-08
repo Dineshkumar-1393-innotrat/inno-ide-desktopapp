@@ -18,9 +18,9 @@
 #define LED_COUNT 1
 #define COMMAND_BUFFER_SIZE 64
 
-#define LED_COLOR_R 255
-#define LED_COLOR_G 0
-#define LED_COLOR_B 255
+#define LED_COLOR_R 0
+#define LED_COLOR_G 255
+#define LED_COLOR_B 0
 #define BLINK_DELAY_MS 1000
 
 static led_strip_handle_t s_strip = NULL;

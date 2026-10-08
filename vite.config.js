@@ -69,6 +69,19 @@ export default defineConfig({
       "Content-Security-Policy": "",
     },
     proxy: {
+      // ─── Drag and Drop Agent API ──────────────────────────────────────────
+      '/api/agent': {
+        target: 'https://drag-and-drop-agent-1.onrender.com',
+        changeOrigin: true,
+        secure: false,
+        timeout: 60000,
+        proxyTimeout: 60000,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.error('[Vite Proxy Error - DragDropAgent]:', err.message);
+          });
+        }
+      },
       // ─── Eureka backend (REST API) ───────────────────────────────────────
       '/api/v1': {
         target: 'http://localhost:5004',
