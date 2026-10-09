@@ -1,4 +1,5 @@
-import React from "react";
+/* eslint-disable react/prop-types */
+import { useState } from "react";
 import {
   Modal,
   ModalOverlay,
@@ -33,9 +34,20 @@ import {
   FaDownload,
   FaFileCode,
   FaSave,
-  FaChevronRight
+  FaChevronRight,
+  FaShareAlt,
+  FaImage,
+  FaWhatsapp
 } from "react-icons/fa";
 import SafeQRCode from "./SafeQRCode.jsx";
+import ShareQrModal from "./ShareQrModal.jsx";
+import {
+  getQrSvgElement,
+  copyQrImageToClipboard,
+  downloadQrImagePng,
+  buildShareMessage,
+  openSocialShare
+} from "./qrShareUtils.js";
 
 export default function PublishCompanionModal({
   isOpen,
@@ -72,6 +84,11 @@ export default function PublishCompanionModal({
   effectiveDeviceType
 }) {
   const toast = useToast();
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isShareExpanded, setIsShareExpanded] = useState(false);
+  const [isQuickCopying, setIsQuickCopying] = useState(false);
+  const [isQuickSaving, setIsQuickSaving] = useState(false);
+
   const inputBg = useColorModeValue("gray.50", "gray.800");
   const cardBg = useColorModeValue("white", "gray.850");
   const borderCard = useColorModeValue("gray.200", "gray.700");
@@ -79,7 +96,75 @@ export default function PublishCompanionModal({
   const urlBoxBorder = useColorModeValue("gray.200", "gray.750");
   const urlTextColor = useColorModeValue("gray.800", "gray.100");
 
+  const isCloud = companionNetworkMode === "cloud" || isCloudActive;
+  const currentModeLabel = qrPayloadMode === "bundle"
+    ? "UI & Logics Bundle"
+    : isCloud ? "Cloud Remote (4G/5G Accessible)" : "Local Wi-Fi Network";
+
+  const handleQuickCopyImage = async () => {
+    try {
+      setIsQuickCopying(true);
+      const svg = getQrSvgElement("publish-companion-qr-container");
+      if (!svg) throw new Error("QR Code preview not found");
+
+      await copyQrImageToClipboard({
+        svgElement: svg,
+        projectName,
+        modeLabel: currentModeLabel,
+        detailText: qrPayloadMode === "bundle" ? `${widgets.length} UI • ${logicBlocks.length} Rules` : (webAppQrPayload || activeQrPayload)
+      });
+
+      toast({
+        title: "QR Image Copied!",
+        description: "Paste (Ctrl+V) directly into WhatsApp, Slack, Teams, or documents.",
+        status: "success",
+        duration: 2500
+      });
+    } catch (err) {
+      toast({
+        title: "Could not copy image",
+        description: err.message || "Clipboard image copying not supported.",
+        status: "warning",
+        duration: 3000
+      });
+    } finally {
+      setIsQuickCopying(false);
+    }
+  };
+
+  const handleQuickDownloadPng = async () => {
+    try {
+      setIsQuickSaving(true);
+      const svg = getQrSvgElement("publish-companion-qr-container");
+      if (!svg) throw new Error("QR Code preview not found");
+
+      await downloadQrImagePng({
+        svgElement: svg,
+        projectName,
+        modeLabel: currentModeLabel,
+        detailText: qrPayloadMode === "bundle" ? `${widgets.length} UI • ${logicBlocks.length} Rules` : (webAppQrPayload || activeQrPayload)
+      });
+
+      toast({
+        title: "QR Image Downloaded",
+        description: "Saved high-resolution PNG image to your downloads.",
+        status: "success",
+        duration: 2500
+      });
+    } catch (err) {
+      toast({
+        title: "Download failed",
+        description: err.message,
+        status: "error",
+        duration: 2500
+      });
+    } finally {
+      setIsQuickSaving(false);
+    }
+  };
+
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={onClose}
@@ -335,7 +420,7 @@ export default function PublishCompanionModal({
                       <Box position="absolute" bottom="-2px" left="-2px" w="20px" h="20px" borderBottom={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderLeft={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomLeftRadius="12px" />
                       <Box position="absolute" bottom="-2px" right="-2px" w="20px" h="20px" borderBottom={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderRight={`4px solid ${qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#A855F7" : "#22D3EE"}`} borderBottomRightRadius="12px" />
 
-                      <Box bg="white" borderRadius="16px" p={3} position="relative" zIndex={1} minW="240px" minH="240px" display="flex" alignItems="center" justifyContent="center">
+                      <Box id="publish-companion-qr-container" bg="white" borderRadius="16px" p={3} position="relative" zIndex={1} minW="240px" minH="240px" display="flex" alignItems="center" justifyContent="center">
                         <SafeQRCode
                           value={activeQrPayload}
                           size={240}
@@ -350,6 +435,208 @@ export default function PublishCompanionModal({
                   </Box>
                 </Box>
 
+                {/* QR Quick Action Bar (Share, Copy Image, Download PNG) */}
+                <Box px={4} pb={2}>
+                  <HStack
+                    bg="#080E1A"
+                    p={1.5}
+                    borderRadius="xl"
+                    border="1px solid"
+                    borderColor="rgba(255,255,255,0.08)"
+                    justify="center"
+                    spacing={2}
+                  >
+                    <Button
+                      size="xs"
+                      colorScheme="teal"
+                      bg={isShareExpanded ? "#059669" : (qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#8B5CF6" : "#06B6D4")}
+                      color="white"
+                      _hover={{ bg: isShareExpanded ? "#047857" : (qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#7C3AED" : "#0891B2") }}
+                      h="28px"
+                      px={3}
+                      borderRadius="lg"
+                      fontWeight="700"
+                      fontSize="11px"
+                      leftIcon={<FaShareAlt size={11} />}
+                      onClick={() => setIsShareExpanded((prev) => !prev)}
+                    >
+                      {isShareExpanded ? "Hide Share" : "Share QR..."}
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      colorScheme="purple"
+                      borderColor="rgba(168,85,247,0.4)"
+                      color="#C084FC"
+                      _hover={{ bg: "rgba(168,85,247,0.15)" }}
+                      h="28px"
+                      px={2.5}
+                      borderRadius="lg"
+                      fontWeight="600"
+                      fontSize="11px"
+                      isLoading={isQuickCopying}
+                      leftIcon={<FaImage size={11} />}
+                      onClick={handleQuickCopyImage}
+                      title="Copy QR Code image as PNG to clipboard"
+                    >
+                      Copy Image
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      colorScheme="cyan"
+                      borderColor="rgba(34,211,238,0.4)"
+                      color="#22D3EE"
+                      _hover={{ bg: "rgba(34,211,238,0.15)" }}
+                      h="28px"
+                      px={2.5}
+                      borderRadius="lg"
+                      fontWeight="600"
+                      fontSize="11px"
+                      isLoading={isQuickSaving}
+                      leftIcon={<FaDownload size={10} />}
+                      onClick={handleQuickDownloadPng}
+                      title="Download branded QR Code image (PNG)"
+                    >
+                      Save PNG
+                    </Button>
+                  </HStack>
+                </Box>
+
+                {/* Inline Share Options Hub (Direct 1-Click sharing without modal overlay) */}
+                {isShareExpanded && (
+                  <Box px={4} pb={2}>
+                    <Box
+                      p={3}
+                      borderRadius="xl"
+                      bg="#070D18"
+                      border="1px solid"
+                      borderColor={qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "rgba(168,85,247,0.35)" : "rgba(34,211,238,0.35)"}
+                      boxShadow="0 4px 20px rgba(0,0,0,0.3)"
+                    >
+                      <HStack justify="space-between" mb={2}>
+                        <HStack spacing={1.5}>
+                          <Text fontSize="12px">📤</Text>
+                          <Text fontSize="11px" fontWeight="bold" color="#E2E8F0">
+                            Quick Share Channels
+                          </Text>
+                        </HStack>
+                        <HStack spacing={1.5}>
+                          <Button
+                            size="xs"
+                            variant="link"
+                            colorScheme="purple"
+                            fontSize="10px"
+                            onClick={() => setIsShareModalOpen(true)}
+                          >
+                            Full Dialog ↗
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            colorScheme="gray"
+                            h="20px"
+                            fontSize="10px"
+                            onClick={() => setIsShareExpanded(false)}
+                          >
+                            ✕
+                          </Button>
+                        </HStack>
+                      </HStack>
+
+                      {/* WhatsApp Direct Share */}
+                      <Button
+                        size="xs"
+                        h="32px"
+                        w="100%"
+                        mb={2}
+                        bg="rgba(37,211,102,0.18)"
+                        color="#25D366"
+                        _hover={{ bg: "rgba(37,211,102,0.3)" }}
+                        border="1px solid rgba(37,211,102,0.35)"
+                        leftIcon={<FaWhatsapp size={14} />}
+                        fontWeight="bold"
+                        fontSize="11px"
+                        onClick={() => {
+                          openSocialShare("whatsapp", {
+                            shareText: buildShareMessage({
+                              projectName,
+                              qrPayloadMode,
+                              companionNetworkMode,
+                              activeQrPayload,
+                              webAppQrPayload,
+                              widgetsCount: widgets.length,
+                              rulesCount: logicBlocks.length
+                            }),
+                            shareUrl: qrPayloadMode === "bundle" ? "" : (webAppQrPayload || activeQrPayload),
+                            projectName
+                          });
+                          toast({ title: "Opening WhatsApp...", status: "info", duration: 1500 });
+                        }}
+                      >
+                        Share via WhatsApp
+                      </Button>
+
+                      {/* Secondary Quick Actions */}
+                      <Grid templateColumns="repeat(3, 1fr)" gap={2}>
+                        <Button
+                          size="xs"
+                          h="26px"
+                          variant="outline"
+                          colorScheme="purple"
+                          borderColor="rgba(168,85,247,0.4)"
+                          color="#C084FC"
+                          fontSize="10px"
+                          leftIcon={<FaImage size={10} />}
+                          isLoading={isQuickCopying}
+                          onClick={handleQuickCopyImage}
+                        >
+                          Copy Image
+                        </Button>
+                        <Button
+                          size="xs"
+                          h="26px"
+                          variant="outline"
+                          colorScheme="cyan"
+                          borderColor="rgba(34,211,238,0.4)"
+                          color="#22D3EE"
+                          fontSize="10px"
+                          leftIcon={<FaDownload size={10} />}
+                          isLoading={isQuickSaving}
+                          onClick={handleQuickDownloadPng}
+                        >
+                          Save PNG
+                        </Button>
+                        <Button
+                          size="xs"
+                          h="26px"
+                          variant="outline"
+                          colorScheme="teal"
+                          borderColor="rgba(20,184,166,0.4)"
+                          color="#2DD4BF"
+                          fontSize="10px"
+                          leftIcon={<FaCopy size={10} />}
+                          onClick={() => {
+                            const msg = buildShareMessage({
+                              projectName,
+                              qrPayloadMode,
+                              companionNetworkMode,
+                              activeQrPayload,
+                              webAppQrPayload,
+                              widgetsCount: widgets.length,
+                              rulesCount: logicBlocks.length
+                            });
+                            navigator.clipboard.writeText(msg);
+                            toast({ title: "Share Message Copied", status: "success", duration: 2000 });
+                          }}
+                        >
+                          Copy Msg
+                        </Button>
+                      </Grid>
+                    </Box>
+                  </Box>
+                )}
+
                 {/* Google Lens / Camera Guidance Notice */}
                 {qrPayloadMode === "bundle" ? (
                   <Box px={4} pb={2}>
@@ -361,7 +648,7 @@ export default function PublishCompanionModal({
                             Scanning with Google Lens or Phone Camera?
                           </Text>
                           <Text fontSize="9px" color="#94A3B8" noOfLines={1}>
-                            Switch to "Web App URL" above to open the full UI &amp; logic in Chrome/Safari.
+                            Switch to &quot;Web App URL&quot; above to open the full UI &amp; logic in Chrome/Safari.
                           </Text>
                         </VStack>
                       </HStack>
@@ -460,6 +747,24 @@ export default function PublishCompanionModal({
                       </Box>
 
                       <HStack spacing={2} flexShrink={0}>
+                        <Button
+                          size="xs"
+                          colorScheme="teal"
+                          bg={isShareExpanded ? "#059669" : (qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#8B5CF6" : "#06B6D4")}
+                          color="white"
+                          _hover={{ bg: isShareExpanded ? "#047857" : (qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "#7C3AED" : "#0891B2") }}
+                          h="28px"
+                          px={3}
+                          borderRadius="lg"
+                          fontWeight="bold"
+                          fontSize="11px"
+                          flexShrink={0}
+                          leftIcon={<FaShareAlt size={11} />}
+                          onClick={() => setIsShareExpanded((prev) => !prev)}
+                          title="Toggle Quick Share Channels"
+                        >
+                          {isShareExpanded ? "Share ▾" : "Share"}
+                        </Button>
                         <Button
                           size="xs"
                           colorScheme={qrPayloadMode === "bundle" || companionNetworkMode === "cloud" ? "purple" : "cyan"}
@@ -577,6 +882,41 @@ export default function PublishCompanionModal({
               <Text fontSize="xs" fontWeight="extrabold" color="gray.500" letterSpacing="wider" mb={1}>
                 Export &amp; React Native Options
               </Text>
+
+              {/* Share Companion App & QR Code */}
+              <HStack
+                p={3.5}
+                borderRadius="2xl"
+                border="2px solid"
+                borderColor="teal.300"
+                bg="teal.50"
+                _hover={{ borderColor: "teal.500", bg: "teal.100", transform: "translateY(-1px)" }}
+                cursor="pointer"
+                transition="all 0.15s"
+                justify="space-between"
+                shadow="sm"
+                onClick={() => setIsShareModalOpen(true)}
+              >
+                <HStack spacing={3}>
+                  <Box p={2.5} bg="teal.500" color="white" borderRadius="xl" shadow="sm">
+                    <FaShareAlt size={16} />
+                  </Box>
+                  <VStack align="start" spacing={0}>
+                    <HStack spacing={1.5}>
+                      <Text fontWeight="extrabold" fontSize="xs" color="teal.950">
+                        Share Companion QR &amp; App
+                      </Text>
+                      <Badge colorScheme="teal" fontSize="9px" px={1.5}>
+                        WhatsApp • Image • Link
+                      </Badge>
+                    </HStack>
+                    <Text fontSize="11px" color="teal.800">
+                      Share QR image, WhatsApp link, or native share sheet
+                    </Text>
+                  </VStack>
+                </HStack>
+                <FaShareAlt size={13} color="#0d9488" />
+              </HStack>
 
               {/* Option 1: Export React Native Expo Project (.zip) */}
               <HStack
@@ -746,5 +1086,21 @@ export default function PublishCompanionModal({
         </ModalFooter>
       </ModalContent>
     </Modal>
+
+    {/* Share QR Code Modal */}
+    <ShareQrModal
+      isOpen={isShareModalOpen}
+      onClose={() => setIsShareModalOpen(false)}
+      projectName={projectName}
+      qrPayloadMode={qrPayloadMode}
+      companionNetworkMode={companionNetworkMode}
+      activeQrPayload={activeQrPayload}
+      webAppQrPayload={webAppQrPayload}
+      widgets={widgets}
+      logicBlocks={logicBlocks}
+      isCloudActive={isCloudActive}
+      remoteTunnelState={remoteTunnelState}
+    />
+    </>
   );
 }

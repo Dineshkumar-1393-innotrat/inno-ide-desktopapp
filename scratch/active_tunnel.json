@@ -1,6 +1,9 @@
 {
-  "url": "https://5edb9f6a013074.lhr.life",
-  "timestamp": 1791452922517,
+  "url": "https://99624b479dfe2e.lhr.life",
+  "timestamp": 1791550135291,
   "active": true,
-  "provider": "localhost.run"
+  "provider": "localhost.run",
+  "connectedAt": 1791549895235,
+  "uptimeSeconds": 240,
+  "uptimeFormatted": "4m 0s"
 }
