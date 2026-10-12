@@ -37,10 +37,15 @@ import {
   CheckCircle2,
   Layers,
   Activity,
-  Zap
+  Zap,
+  Mic,
+  MicOff,
+  Square
 } from "lucide-react";
 import {
   sendAgentCommand,
+  sendAgentVoiceCommand,
+  buildCanvasState,
   executeAgentCommands,
   findSymbolForComponent
 } from "../../services/dragDropAgentService";
@@ -48,7 +53,7 @@ import {
   analyzeCanvasState,
   processLocalAIQuery
 } from "./circuitIntelligenceEngine";
-import { addSymbolToTab } from "../../store/slices/simulationSlice";
+import { addSymbolToTab, setTabSymbolsAndConnections } from "../../store/slices/simulationSlice";
 
 export const SimulationAIAssistant = ({
   droppedItems = [],
@@ -61,7 +66,8 @@ export const SimulationAIAssistant = ({
   onAddSymbolAtPosition = null,
   onRemoveSymbol = null,
   onMoveSymbol = null,
-  onConnectSymbols = null
+  onConnectSymbols = null,
+  onDisconnectSymbols = null
 }) => {
   const dispatch = useDispatch();
   const reduxActiveTab = useSelector((state) => state.simulation.activeTab);
@@ -83,6 +89,11 @@ export const SimulationAIAssistant = ({
   const [isTyping, setIsTyping] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const [agentStatus, setAgentStatus] = useState("ready"); // "ready" | "busy" | "error"
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const toast = useToast();
@@ -96,6 +107,17 @@ export const SimulationAIAssistant = ({
       scrollToBottom();
     }
   }, [messages, isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+    };
+  }, []);
 
   // Local fallback add handler if parent didn't provide one
   const handleAddSymbolFallback = useCallback((symbol, pos) => {
@@ -119,6 +141,168 @@ export const SimulationAIAssistant = ({
     return newSymbol;
   }, [currentTabId, dispatch, onAddSymbolAtPosition]);
 
+  // Local fallback disconnect handler if parent didn't provide one
+  const handleDisconnectFallback = useCallback((sourceOrKey, targetId) => {
+    if (typeof onDisconnectSymbols === "function") {
+      return onDisconnectSymbols(sourceOrKey, targetId);
+    }
+    const sStr = String(sourceOrKey || "").trim();
+    let keyToRemove = null;
+
+    if (connections.includes(sStr)) {
+      keyToRemove = sStr;
+    } else {
+      const rev = sStr.split("-").reverse().join("-");
+      if (connections.includes(rev)) {
+        keyToRemove = rev;
+      }
+    }
+
+    if (!keyToRemove && targetId) {
+      const tStr = String(targetId).trim();
+      const sItem = droppedItems.find(i => 
+        String(i.id).toLowerCase() === sStr.toLowerCase() || 
+        (i.symbol?.name && i.symbol.name.toLowerCase().includes(sStr.toLowerCase())) ||
+        (i.symbol?.label && i.symbol.label.toLowerCase().includes(sStr.toLowerCase()))
+      );
+      const tItem = droppedItems.find(i => 
+        String(i.id).toLowerCase() === tStr.toLowerCase() || 
+        (i.symbol?.name && i.symbol.name.toLowerCase().includes(tStr.toLowerCase())) ||
+        (i.symbol?.label && i.symbol.label.toLowerCase().includes(tStr.toLowerCase()))
+      );
+      if (sItem && tItem) {
+        const k1 = `${sItem.id}-${tItem.id}`;
+        const k2 = `${tItem.id}-${sItem.id}`;
+        keyToRemove = connections.find(c => c === k1 || c === k2);
+      }
+    }
+
+    if (keyToRemove) {
+      const next = connections.filter(c => c !== keyToRemove);
+      dispatch(setTabSymbolsAndConnections({ tabId: currentTabId, symbols: droppedItems, connections: next }));
+      return keyToRemove;
+    }
+    return null;
+  }, [connections, currentTabId, dispatch, droppedItems, onDisconnectSymbols]);
+
+  // Unified response processor for chat and voice commands
+  const handleProcessAgentResponse = (data, queryText) => {
+    if (data && data.status === "success" && Array.isArray(data.commands) && data.commands.length > 0) {
+      // Execute canvas commands
+      const executed = executeAgentCommands(data.commands, data.results || [], {
+        symbolsData,
+        onAddSymbolAtPosition: handleAddSymbolFallback,
+        onRemoveSymbol,
+        onMoveSymbol,
+        onConnectSymbols,
+        onDisconnectSymbols: handleDisconnectFallback,
+        connections,
+        droppedItems,
+        activeTabId: currentTabId,
+        dispatch
+      });
+
+      // Show toast notification for each placed component
+      executed.forEach((ex) => {
+        if (ex.method === "canvas.addComponent") {
+          toast({
+            title: `✨ Added ${ex.name}`,
+            description: `Position: (${ex.position?.x ?? 200}, ${ex.position?.y ?? 200})`,
+            status: "success",
+            duration: 2500,
+            isClosable: true,
+            position: "top"
+          });
+        } else if (ex.method === "canvas.removeComponent") {
+          toast({
+            title: `🗑️ Removed ${ex.componentId}`,
+            status: "info",
+            duration: 2000,
+            isClosable: true,
+            position: "top"
+          });
+        } else if (ex.method === "canvas.disconnectComponents") {
+          toast({
+            title: `🔌 Disconnected ${ex.source || ex.name || "connection"}`,
+            description: ex.target ? `Disconnected from ${ex.target}` : undefined,
+            status: "info",
+            duration: 2500,
+            isClosable: true,
+            position: "top"
+          });
+        }
+      });
+
+      // Format conversational reply
+      let replyText = `**${data.message || "Command executed successfully"}**\n\n`;
+      executed.forEach((ex) => {
+        if (ex.method === "canvas.addComponent") {
+          replyText += `• Added **${ex.name}** onto your simulation canvas at position \`(${ex.position?.x ?? 200}, ${ex.position?.y ?? 200})\`.\n`;
+        } else if (ex.method === "canvas.removeComponent") {
+          replyText += `• Removed component \`${ex.componentId}\` from the canvas.\n`;
+        } else if (ex.method === "canvas.connectComponents") {
+          replyText += `• Connected \`${ex.source}\` ↔ \`${ex.target}\`.\n`;
+        } else if (ex.method === "canvas.disconnectComponents") {
+          replyText += `• Disconnected \`${ex.source || "component"}\` ↮ \`${ex.target || "component"}\`.\n`;
+        }
+      });
+
+      replyText += `\n💡 *Tip: Wire your sensors and actuators to Microcontroller connector zones (Z1 - Z6), or ask me to "Generate Arduino code"!*`;
+
+      const aiMsg = {
+        id: (Date.now() + 1).toString(),
+        sender: "ai",
+        text: replyText,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        commandsExecuted: executed,
+        results: data.results || []
+      };
+      setMessages((prev) => [...prev, aiMsg]);
+      setAgentStatus("ready");
+    } else {
+      // Agent returned error status or no commands (e.g. conversational question like "Explain circuit")
+      const lowerQ = (queryText || "").toLowerCase();
+      const isGeneralQuestion =
+        lowerQ.includes("explain") ||
+        lowerQ.includes("circuit") ||
+        lowerQ.includes("code") ||
+        lowerQ.includes("arduino") ||
+        lowerQ.includes("wire") ||
+        lowerQ.includes("pin") ||
+        lowerQ.includes("safety") ||
+        lowerQ.includes("bom") ||
+        lowerQ.includes("hello") ||
+        lowerQ.includes("hi") ||
+        lowerQ.includes("error") ||
+        lowerQ.includes("debug");
+
+      if (isGeneralQuestion) {
+        // Use intelligent circuit analysis engine
+        const analysis = analyzeCanvasState(droppedItems, connections, activeTab, activeProjectName, activeProductName);
+        const localResponse = processLocalAIQuery(queryText, analysis);
+
+        const aiMsg = {
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: localResponse.content,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+      } else {
+        // Unrecognized command advice
+        const msg = data?.message || "No execution plan could be created for this request.";
+        const aiMsg = {
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: `⚠️ **${msg}**\n\nYou can use natural drag-and-drop commands:\n• **"Add ESP32"** — Places the central Microcontroller\n• **"Add Temperature Sensor"** — Adds temperature sensing module\n• **"Add Servo Motors"** — Places a servo motor actuator\n• **"Add Buzzer"** — Adds an audio indicator\n• **"Add LED"** — Adds RGB status LED\n• **"Remove ESP32"** — Deletes component\n\nOr ask questions about wiring, pinouts, and Arduino code!`,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+      }
+      setAgentStatus("ready");
+    }
+  };
+
   // Handle user query submission with remote Drag-and-Drop agent API
   const handleSendQuery = async (textToSend) => {
     const text = (textToSend || input).trim();
@@ -137,108 +321,13 @@ export const SimulationAIAssistant = ({
     setAgentStatus("busy");
 
     try {
-      // 1. Call Drag and Drop Agent endpoint: POST https://drag-and-drop-agent-1.onrender.com/api/agent/chat
-      const data = await sendAgentCommand(text);
+      // 1. Build canvas_state: { tabId, tabName, components, connections }
+      const canvasState = buildCanvasState(droppedItems, connections, activeTab, currentTabId);
 
-      if (data && data.status === "success" && Array.isArray(data.commands) && data.commands.length > 0) {
-        // Execute canvas commands
-        const executed = executeAgentCommands(data.commands, data.results || [], {
-          symbolsData,
-          onAddSymbolAtPosition: handleAddSymbolFallback,
-          onRemoveSymbol,
-          onMoveSymbol,
-          onConnectSymbols,
-          droppedItems
-        });
+      // 2. Call Drag and Drop Agent endpoint: POST /api/agent/chat
+      const data = await sendAgentCommand(text, canvasState);
 
-        // Show toast notification for each placed component
-        executed.forEach((ex) => {
-          if (ex.method === "canvas.addComponent") {
-            toast({
-              title: `✨ Added ${ex.name}`,
-              description: `Position: (${ex.position?.x ?? 200}, ${ex.position?.y ?? 200})`,
-              status: "success",
-              duration: 2500,
-              isClosable: true,
-              position: "top"
-            });
-          } else if (ex.method === "canvas.removeComponent") {
-            toast({
-              title: `🗑️ Removed ${ex.componentId}`,
-              status: "info",
-              duration: 2000,
-              isClosable: true,
-              position: "top"
-            });
-          }
-        });
-
-        // Format conversational reply
-        let replyText = `**${data.message || "Command executed successfully"}**\n\n`;
-        executed.forEach((ex) => {
-          if (ex.method === "canvas.addComponent") {
-            replyText += `• Added **${ex.name}** onto your simulation canvas at position \`(${ex.position?.x ?? 200}, ${ex.position?.y ?? 200})\`.\n`;
-          } else if (ex.method === "canvas.removeComponent") {
-            replyText += `• Removed component \`${ex.componentId}\` from the canvas.\n`;
-          } else if (ex.method === "canvas.connectComponents") {
-            replyText += `• Connected \`${ex.source}\` ↔ \`${ex.target}\`.\n`;
-          }
-        });
-
-        replyText += `\n💡 *Tip: Wire your sensors and actuators to Microcontroller connector zones (Z1 - Z6), or ask me to "Generate Arduino code"!*`;
-
-        const aiMsg = {
-          id: (Date.now() + 1).toString(),
-          sender: "ai",
-          text: replyText,
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          commandsExecuted: executed,
-          results: data.results || []
-        };
-        setMessages((prev) => [...prev, aiMsg]);
-        setAgentStatus("ready");
-      } else {
-        // Agent returned error status or no commands (e.g. conversational question like "Explain circuit")
-        const lowerQ = text.toLowerCase();
-        const isGeneralQuestion =
-          lowerQ.includes("explain") ||
-          lowerQ.includes("circuit") ||
-          lowerQ.includes("code") ||
-          lowerQ.includes("arduino") ||
-          lowerQ.includes("wire") ||
-          lowerQ.includes("pin") ||
-          lowerQ.includes("safety") ||
-          lowerQ.includes("bom") ||
-          lowerQ.includes("hello") ||
-          lowerQ.includes("hi") ||
-          lowerQ.includes("error") ||
-          lowerQ.includes("debug");
-
-        if (isGeneralQuestion) {
-          // Use intelligent circuit analysis engine
-          const analysis = analyzeCanvasState(droppedItems, connections, activeTab, activeProjectName, activeProductName);
-          const localResponse = processLocalAIQuery(text, analysis);
-
-          const aiMsg = {
-            id: (Date.now() + 1).toString(),
-            sender: "ai",
-            text: localResponse.content,
-            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          };
-          setMessages((prev) => [...prev, aiMsg]);
-        } else {
-          // Unrecognized command advice
-          const msg = data?.message || "No execution plan could be created for this request.";
-          const aiMsg = {
-            id: (Date.now() + 1).toString(),
-            sender: "ai",
-            text: `⚠️ **${msg}**\n\nYou can use natural drag-and-drop commands:\n• **"Add ESP32"** — Places the central Microcontroller\n• **"Add Temperature Sensor"** — Adds temperature sensing module\n• **"Add Servo Motors"** — Places a servo motor actuator\n• **"Add Buzzer"** — Adds an audio indicator\n• **"Add LED"** — Adds RGB status LED\n• **"Remove ESP32"** — Deletes component\n\nOr ask questions about wiring, pinouts, and Arduino code!`,
-            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          };
-          setMessages((prev) => [...prev, aiMsg]);
-        }
-        setAgentStatus("ready");
-      }
+      handleProcessAgentResponse(data, text);
     } catch (err) {
       console.warn("[SimulationAIAssistant] Remote agent error, trying local handler:", err);
       setAgentStatus("error");
@@ -280,6 +369,68 @@ export const SimulationAIAssistant = ({
         }
       }
 
+      if (lower.startsWith("disconnect") || lower.startsWith("remove connection") || lower.startsWith("unwire")) {
+        let disconnectedKey = null;
+        for (const conn of connections) {
+          const [id1, id2] = typeof conn === "string" ? conn.split("-") : [];
+          const item1 = droppedItems.find(i => String(i.id) === id1);
+          const item2 = droppedItems.find(i => String(i.id) === id2);
+          const name1 = (item1?.symbol?.name || item1?.name || "").toLowerCase();
+          const label1 = (item1?.symbol?.label || item1?.label || "").toLowerCase();
+          const name2 = (item2?.symbol?.name || item2?.name || "").toLowerCase();
+          const label2 = (item2?.symbol?.label || item2?.label || "").toLowerCase();
+
+          const match1 = (name1 && lower.includes(name1)) || (label1 && lower.includes(label1)) || (name1.includes("microcontroller") && lower.includes("esp"));
+          const match2 = (name2 && lower.includes(name2)) || (label2 && lower.includes(label2)) || (name2.includes("microcontroller") && lower.includes("esp"));
+
+          if (match1 && match2) {
+            disconnectedKey = conn;
+            break;
+          }
+        }
+        if (!disconnectedKey && connections.length === 1) {
+          disconnectedKey = connections[0];
+        }
+
+        if (disconnectedKey) {
+          const removed = handleDisconnectFallback(disconnectedKey);
+          if (removed) {
+            toast({
+              title: "🔌 Disconnected components",
+              description: "Removed wire connection via local fallback",
+              status: "info",
+              duration: 2500,
+              isClosable: true,
+              position: "top"
+            });
+            const [id1, id2] = disconnectedKey.split("-");
+            const item1 = droppedItems.find(i => String(i.id) === id1);
+            const item2 = droppedItems.find(i => String(i.id) === id2);
+            const n1 = item1?.symbol?.label || item1?.symbol?.name || "Component 1";
+            const n2 = item2?.symbol?.label || item2?.symbol?.name || "Component 2";
+            const aiMsg = {
+              id: (Date.now() + 1).toString(),
+              sender: "ai",
+              text: `✅ **Disconnected \`${n1}\` ↮ \`${n2}\`**.\n\n*(Executed via local fallback)*`,
+              time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              commandsExecuted: [
+                {
+                  method: "canvas.disconnectComponents",
+                  name: `${n1} ↔ ${n2}`,
+                  source: n1,
+                  target: n2,
+                  connectionKey: disconnectedKey,
+                  success: true
+                }
+              ]
+            };
+            setMessages((prev) => [...prev, aiMsg]);
+            setIsTyping(false);
+            return;
+          }
+        }
+      }
+
       // Default fallback response
       const analysis = analyzeCanvasState(droppedItems, connections, activeTab, activeProjectName, activeProductName);
       const localResponse = processLocalAIQuery(text, analysis);
@@ -291,6 +442,157 @@ export const SimulationAIAssistant = ({
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       };
       setMessages((prev) => [...prev, aiMsg]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  // Voice recording handlers (POST /api/agent/voice)
+  const startRecording = async () => {
+    if (isRecording || isTyping) return;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        toast({
+          title: "Microphone Not Supported",
+          description: "Your environment does not support audio recording.",
+          status: "error",
+          duration: 3000,
+          isClosable: true
+        });
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      let mimeType = "";
+      if (typeof MediaRecorder !== "undefined") {
+        if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+          mimeType = "audio/webm;codecs=opus";
+        } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+          mimeType = "audio/webm";
+        } else if (MediaRecorder.isTypeSupported("audio/ogg")) {
+          mimeType = "audio/ogg";
+        } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+          mimeType = "audio/mp4";
+        }
+      }
+
+      const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mimeType || "audio/webm"
+        });
+
+        if (audioBlob.size > 0) {
+          await handleSendVoiceQuery(audioBlob);
+        }
+      };
+
+      mediaRecorder.start(250);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("[SimulationAIAssistant] Microphone access error:", err);
+      toast({
+        title: "Microphone Access Denied",
+        description: "Please allow microphone permission to use voice commands.",
+        status: "error",
+        duration: 3500,
+        isClosable: true
+      });
+    }
+  };
+
+  const stopRecording = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const cancelRecording = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+      if (mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+    }
+    audioChunksRef.current = [];
+  };
+
+  const handleSendVoiceQuery = async (audioBlob) => {
+    setIsTyping(true);
+    setAgentStatus("busy");
+
+    const tempUserMsgId = Date.now().toString();
+    const tempUserMsg = {
+      id: tempUserMsgId,
+      sender: "user",
+      text: "🎤 Sending voice command...",
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    };
+
+    setMessages((prev) => [...prev, tempUserMsg]);
+
+    try {
+      // POST /api/agent/voice (multipart/form-data)
+      const data = await sendAgentVoiceCommand(audioBlob);
+
+      const transcriptText = data.transcript || data.normalized_command || "Voice Command";
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempUserMsgId ? { ...m, text: `🎤 "${transcriptText}"` } : m
+        )
+      );
+
+      handleProcessAgentResponse(data, transcriptText);
+    } catch (err) {
+      console.warn("[SimulationAIAssistant] Voice command error:", err);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempUserMsgId ? { ...m, text: "🎤 (Voice command audio sent)" } : m
+        )
+      );
+      toast({
+        title: "Voice Command Failed",
+        description: err.message || "Failed to process voice command.",
+        status: "error",
+        duration: 3500,
+        isClosable: true
+      });
+      const aiMsg = {
+        id: (Date.now() + 1).toString(),
+        sender: "ai",
+        text: `⚠️ **Could not process voice command**: ${err.message || "Server error"}\n\nPlease speak clearly in English (max 25 MB, English only) or type your command (e.g., *"Add ESP32"*).`,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      };
+      setMessages((prev) => [...prev, aiMsg]);
+      setAgentStatus("ready");
     } finally {
       setIsTyping(false);
     }
@@ -636,11 +938,11 @@ export const SimulationAIAssistant = ({
                                   border="1px solid #dcfce7"
                                 >
                                   <HStack spacing={1.5}>
-                                    <Badge colorScheme="purple" fontSize="9px" px={1.5}>
+                                    <Badge colorScheme={cmd.method?.toLowerCase().includes("disconnect") ? "orange" : "purple"} fontSize="9px" px={1.5}>
                                       {cmd.method}
                                     </Badge>
                                     <Text fontWeight="600" color="#1e293b" fontSize="11px">
-                                      {cmd.name || cmd.componentId}
+                                      {cmd.name || cmd.componentId || (cmd.source && cmd.target ? `${cmd.source} ↔ ${cmd.target}` : cmd.connectionKey || "")}
                                     </Text>
                                   </HStack>
                                   {cmd.position && (
@@ -699,99 +1001,180 @@ export const SimulationAIAssistant = ({
 
           {/* Footer Input Bar */}
           <DrawerFooter p={3} borderTop="1px solid #f1f5f9" bg="#ffffff">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendQuery();
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                width: "100%",
-                gap: "8px",
-                margin: 0,
-                padding: 0
-              }}
-            >
+            {isRecording ? (
               <div
                 style={{
-                  flex: 1,
-                  height: "40px",
-                  minHeight: "40px",
-                  maxHeight: "40px",
-                  backgroundColor: isInputFocused ? "#ffffff" : "#f8fafc",
-                  border: isInputFocused ? "1.5px solid #7c3aed" : "1.5px solid #cbd5e1",
-                  borderRadius: "9999px",
                   display: "flex",
                   alignItems: "center",
-                  padding: "0 16px",
-                  boxShadow: isInputFocused ? "0 0 0 2px rgba(124, 58, 237, 0.15)" : "none",
-                  transition: "border-color 0.15s ease, box-shadow 0.15s ease",
-                  cursor: "text",
+                  width: "100%",
+                  gap: "10px",
+                  backgroundColor: "#fef2f2",
+                  border: "1.5px solid #f87171",
+                  borderRadius: "9999px",
+                  padding: "4px 14px",
                   boxSizing: "border-box"
                 }}
-                onClick={() => inputRef.current?.focus()}
               >
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder='e.g. "Add ESP32" or "Add Temperature Sensor"'
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onFocus={() => setIsInputFocused(true)}
-                  onBlur={() => setIsInputFocused(false)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleSendQuery();
-                    }
-                  }}
+                <Box
+                  w="10px"
+                  h="10px"
+                  borderRadius="full"
+                  bg="#ef4444"
+                  animation="pulse 1.2s infinite"
+                />
+                <Text fontSize="12px" fontWeight="600" color="#dc2626" flex="1">
+                  Listening... ({recordingDuration}s) Speak command (English)
+                </Text>
+                <Tooltip label="Cancel recording" fontSize="xs">
+                  <IconButton
+                    size="xs"
+                    icon={<X size={14} />}
+                    aria-label="Cancel recording"
+                    variant="ghost"
+                    colorScheme="red"
+                    onClick={cancelRecording}
+                  />
+                </Tooltip>
+                <Tooltip label="Send voice command" fontSize="xs">
+                  <IconButton
+                    size="xs"
+                    icon={<Check size={14} />}
+                    aria-label="Send voice command"
+                    colorScheme="red"
+                    borderRadius="full"
+                    onClick={stopRecording}
+                  />
+                </Tooltip>
+              </div>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendQuery();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  gap: "8px",
+                  margin: 0,
+                  padding: 0
+                }}
+              >
+                <div
                   style={{
-                    width: "100%",
-                    height: "22px",
-                    lineHeight: "22px",
-                    fontSize: "13px",
-                    color: "#0f172a",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    padding: 0,
-                    margin: 0,
+                    flex: 1,
+                    height: "40px",
+                    minHeight: "40px",
+                    maxHeight: "40px",
+                    backgroundColor: isInputFocused ? "#ffffff" : "#f8fafc",
+                    border: isInputFocused ? "1.5px solid #7c3aed" : "1.5px solid #cbd5e1",
+                    borderRadius: "9999px",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "0 16px",
+                    boxShadow: isInputFocused ? "0 0 0 2px rgba(124, 58, 237, 0.15)" : "none",
+                    transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                    cursor: "text",
                     boxSizing: "border-box"
                   }}
-                />
-              </div>
+                  onClick={() => inputRef.current?.focus()}
+                >
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder='e.g. "Add ESP32" or "Add Temperature Sensor"'
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onFocus={() => setIsInputFocused(true)}
+                    onBlur={() => setIsInputFocused(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSendQuery();
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      height: "22px",
+                      lineHeight: "22px",
+                      fontSize: "13px",
+                      color: "#0f172a",
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      padding: 0,
+                      margin: 0,
+                      boxSizing: "border-box"
+                    }}
+                  />
+                </div>
 
-              <button
-                type="submit"
-                disabled={!input.trim() || isTyping}
-                aria-label="Send message"
-                style={{
-                  width: "40px",
-                  height: "40px",
-                  minWidth: "40px",
-                  maxWidth: "40px",
-                  minHeight: "40px",
-                  maxHeight: "40px",
-                  borderRadius: "50%",
-                  backgroundColor: input.trim() ? "#7c3aed" : "#e2e8f0",
-                  color: input.trim() ? "#ffffff" : "#94a3b8",
-                  border: "none",
-                  outline: "none",
-                  margin: 0,
-                  padding: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: input.trim() && !isTyping ? "pointer" : "default",
-                  flexShrink: 0,
-                  transition: "background-color 0.15s ease, color 0.15s ease",
-                  boxSizing: "border-box"
-                }}
-              >
-                <Send size={16} style={{ display: "block", transform: "translate(-0.5px, 0.5px)" }} />
-              </button>
-            </form>
+                {/* Voice Command Button */}
+                <Tooltip label="Voice command (speak to add/control components)" fontSize="xs">
+                  <button
+                    type="button"
+                    disabled={isTyping}
+                    onClick={startRecording}
+                    aria-label="Record voice command"
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      minWidth: "40px",
+                      maxWidth: "40px",
+                      minHeight: "40px",
+                      maxHeight: "40px",
+                      borderRadius: "50%",
+                      backgroundColor: "#f8fafc",
+                      color: "#7c3aed",
+                      border: "1px solid #cbd5e1",
+                      outline: "none",
+                      margin: 0,
+                      padding: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: !isTyping ? "pointer" : "default",
+                      flexShrink: 0,
+                      transition: "all 0.15s ease",
+                      boxSizing: "border-box"
+                    }}
+                  >
+                    <Mic size={17} color="#7c3aed" style={{ display: "block" }} />
+                  </button>
+                </Tooltip>
+
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isTyping}
+                  aria-label="Send message"
+                  style={{
+                    width: "40px",
+                    height: "40px",
+                    minWidth: "40px",
+                    maxWidth: "40px",
+                    minHeight: "40px",
+                    maxHeight: "40px",
+                    borderRadius: "50%",
+                    backgroundColor: input.trim() ? "#7c3aed" : "#e2e8f0",
+                    color: input.trim() ? "#ffffff" : "#94a3b8",
+                    border: "none",
+                    outline: "none",
+                    margin: 0,
+                    padding: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: input.trim() && !isTyping ? "pointer" : "default",
+                    flexShrink: 0,
+                    transition: "background-color 0.15s ease, color 0.15s ease",
+                    boxSizing: "border-box"
+                  }}
+                >
+                  <Send size={16} style={{ display: "block", transform: "translate(-0.5px, 0.5px)" }} />
+                </button>
+              </form>
+            )}
           </DrawerFooter>
         </DrawerContent>
       </Drawer>

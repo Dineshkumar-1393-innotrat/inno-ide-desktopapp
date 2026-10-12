@@ -86,6 +86,18 @@ const simulationSlice = createSlice({
                 tab.dirty = true;
             }
         },
+        removeConnectionFromTab: (state, action) => {
+            const { tabId, connection } = action.payload;
+            let tab = state.tabs.find(t => String(t.id) === String(tabId));
+            if (!tab) {
+                tab = state.tabs.find(t => String(t.id) === String(state.activeTab)) || state.tabs[0];
+            }
+            if (tab && Array.isArray(tab.connections)) {
+                const rev = typeof connection === "string" ? connection.split("-").reverse().join("-") : "";
+                tab.connections = tab.connections.filter(c => c !== connection && c !== rev);
+                tab.dirty = true;
+            }
+        },
         setTabSymbolsAndConnections: (state, action) => {
             const { tabId, symbols, connections } = action.payload;
             let tab = state.tabs.find(t => String(t.id) === String(tabId));
@@ -134,6 +146,7 @@ export const {
     updateSymbolInTab,
     removeSymbolFromTab,
     addConnectionToTab,
+    removeConnectionFromTab,
     setTabSymbolsAndConnections,
     updateTabContent,
     renameTab,

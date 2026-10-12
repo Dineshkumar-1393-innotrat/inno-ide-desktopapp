@@ -949,11 +949,11 @@ const Output = forwardRef(({ editorRef, language, onExpand, onCollapse, ...rest 
       {/* Primary Tool Selection Buttons matching screenshot exactly */}
       <HStack spacing={3} mb={4} flexWrap="wrap">
         {[
+          { id: "flash", label: "Flash", action: handleCodeFlash },
           { id: "viewOutput", label: "View Output" },
           { id: "problem", label: "Problem", count: allProblems.length },
           { id: "debug", label: "Debug Console", isConnected: isConnectedToDevice },
           { id: "terminal", label: "Terminal" },
-          { id: "flash", label: "Flash", action: handleCodeFlash },
           { id: "postman", label: "Postman" },
           { id: "restApi", label: "REST API" },
         ].map((item) => {

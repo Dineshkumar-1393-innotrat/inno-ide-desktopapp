@@ -1048,11 +1048,19 @@ const BlockDiagram = () => {
     );
     if (target) {
       dispatch(removeSymbolFromTab({ tabId: activeTabId, symbolId: target.id }));
+      const remainingConns = connections.filter(conn => !conn.includes(String(target.id)));
+      if (remainingConns.length !== connections.length) {
+        dispatch(setTabSymbolsAndConnections({
+          tabId: activeTabId,
+          symbols: droppedItems.filter(s => s.id !== target.id),
+          connections: remainingConns
+        }));
+      }
       setActiveSymbol(null);
       return target;
     }
     return null;
-  }, [activeTabId, dispatch, droppedItems, setActiveSymbol]);
+  }, [activeTabId, connections, dispatch, droppedItems, setActiveSymbol]);
 
   const handleMoveSymbolByNameOrId = useCallback((identifier, position) => {
     if (!identifier || !position) return null;
@@ -1094,6 +1102,49 @@ const BlockDiagram = () => {
       }
       return connectionKey;
     }
+    return null;
+  }, [activeTabId, connections, dispatch, droppedItems]);
+
+  const handleDisconnectSymbolsByNameOrId = useCallback((sourceOrKey, targetId) => {
+    if (!sourceOrKey) return null;
+
+    const sStr = String(sourceOrKey).trim();
+    let keyToRemove = null;
+
+    if (connections.includes(sStr)) {
+      keyToRemove = sStr;
+    } else {
+      const rev = sStr.split("-").reverse().join("-");
+      if (connections.includes(rev)) {
+        keyToRemove = rev;
+      }
+    }
+
+    if (!keyToRemove && targetId) {
+      const tStr = String(targetId).trim();
+      const sItem = droppedItems.find(i => 
+        String(i.id).toLowerCase() === sStr.toLowerCase() || 
+        (i.symbol?.name && i.symbol.name.toLowerCase().includes(sStr.toLowerCase())) ||
+        (i.symbol?.label && i.symbol.label.toLowerCase().includes(sStr.toLowerCase()))
+      );
+      const tItem = droppedItems.find(i => 
+        String(i.id).toLowerCase() === tStr.toLowerCase() || 
+        (i.symbol?.name && i.symbol.name.toLowerCase().includes(tStr.toLowerCase())) ||
+        (i.symbol?.label && i.symbol.label.toLowerCase().includes(tStr.toLowerCase()))
+      );
+      if (sItem && tItem) {
+        const k1 = `${sItem.id}-${tItem.id}`;
+        const k2 = `${tItem.id}-${sItem.id}`;
+        keyToRemove = connections.find(c => c === k1 || c === k2);
+      }
+    }
+
+    if (keyToRemove) {
+      const next = connections.filter(c => c !== keyToRemove);
+      dispatch(setTabSymbolsAndConnections({ tabId: activeTabId, symbols: droppedItems, connections: next }));
+      return keyToRemove;
+    }
+
     return null;
   }, [activeTabId, connections, dispatch, droppedItems]);
 
@@ -2276,6 +2327,7 @@ const BlockDiagram = () => {
               onRemoveSymbol={handleRemoveSymbolByNameOrId}
               onMoveSymbol={handleMoveSymbolByNameOrId}
               onConnectSymbols={handleConnectSymbolsByNameOrId}
+              onDisconnectSymbols={handleDisconnectSymbolsByNameOrId}
             />
           </Box>
         </div>

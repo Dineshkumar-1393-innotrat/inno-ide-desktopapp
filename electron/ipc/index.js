@@ -558,12 +558,15 @@ export function registerAllIPCHandlers(getMainWindow) {
   });
 
   // Drag and Drop Agent Chatbot Proxy (Zero-CORS IPC for Electron)
-  ipcMain.handle('agent:chat', async (_event, command) => {
+  ipcMain.handle('agent:chat', async (_event, payload) => {
     try {
+      const body = typeof payload === 'object' && payload !== null
+        ? payload
+        : { command: payload };
       const response = await fetch('https://drag-and-drop-agent-1.onrender.com/api/agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command })
+        body: JSON.stringify(body)
       });
       const data = await response.json();
       return { success: true, data };
