@@ -4,7 +4,6 @@ import {
   Box,
   Button,
   Drawer,
-  DrawerOverlay,
   DrawerContent,
   DrawerHeader,
   DrawerBody,
@@ -97,6 +96,65 @@ export const SimulationAIAssistant = ({
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const toast = useToast();
+
+  // Adjustable drawer width state with persistence
+  const [drawerWidth, setDrawerWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem("simulation_ai_assistant_width");
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 320 && parsed <= 900) {
+          return parsed;
+        }
+      }
+    } catch (_) {}
+    return 400;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(drawerWidth);
+
+  const startResizing = useCallback((e) => {
+    setIsResizing(true);
+    resizeStartXRef.current = e.clientX;
+    resizeStartWidthRef.current = drawerWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  }, [drawerWidth]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e) => {
+      // Since drawer is anchored to the right, moving left increases width
+      const delta = resizeStartXRef.current - e.clientX;
+      const nextWidth = resizeStartWidthRef.current + delta;
+      const minW = 320;
+      const maxW = Math.min(Math.floor(window.innerWidth * 0.85), 900);
+      const clamped = Math.min(Math.max(nextWidth, minW), maxW);
+      setDrawerWidth(clamped);
+    };
+
+    const stopResizing = () => {
+      setIsResizing(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try {
+        localStorage.setItem("simulation_ai_assistant_width", String(drawerWidth));
+      } catch (_) {}
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", stopResizing);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", stopResizing);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing, drawerWidth]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -646,7 +704,7 @@ export const SimulationAIAssistant = ({
         px={3.5}
         fontWeight="600"
         fontSize="13px"
-        onClick={onOpen}
+        onClick={isOpen ? onClose : onOpen}
         leftIcon={<Bot size={15} />}
         flexShrink={0}
         whiteSpace="nowrap"
@@ -654,18 +712,64 @@ export const SimulationAIAssistant = ({
         AI Assistant
       </Button>
 
-      {/* Modern AI Assistant Chatbot Drawer */}
-      <Drawer isOpen={isOpen} placement="right" onClose={onClose} size="sm">
-        <DrawerOverlay bg="rgba(15, 23, 42, 0.4)" backdropFilter="blur(2px)" />
+      {/* Modern AI Assistant Chatbot Drawer (Resizable width & no blur overlay) */}
+      <Drawer
+        isOpen={isOpen}
+        placement="right"
+        onClose={onClose}
+        blockScrollOnMount={false}
+        trapFocus={false}
+      >
         <DrawerContent
           bg="#ffffff"
           color="#1e293b"
-          maxW={{ base: "100%", sm: "400px" }}
-          w="100%"
+          maxW={{ base: "100%", sm: `${drawerWidth}px` }}
+          w={{ base: "100%", sm: `${drawerWidth}px` }}
           display="flex"
           flexDirection="column"
           boxShadow="-6px 0 24px rgba(0, 0, 0, 0.12)"
+          position="relative"
+          borderLeft="1px solid #e2e8f0"
+          style={{
+            width: `${drawerWidth}px`,
+            maxWidth: "85vw",
+            transition: isResizing ? "none" : undefined
+          }}
         >
+          {/* Left edge resize handle */}
+          <Box
+            position="absolute"
+            left={0}
+            top={0}
+            bottom={0}
+            w="8px"
+            cursor="col-resize"
+            zIndex={30}
+            onMouseDown={startResizing}
+            onDoubleClick={() => setDrawerWidth(400)}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            _hover={{
+              bg: "rgba(124, 58, 237, 0.08)",
+              "& > .resize-line": {
+                bg: "#7c3aed",
+                opacity: 1
+              }
+            }}
+            transition="background-color 0.15s ease"
+            title="Drag to resize panel (Double-click to reset)"
+          >
+            <Box
+              className="resize-line"
+              w="3px"
+              h="36px"
+              borderRadius="full"
+              bg={isResizing ? "#7c3aed" : "transparent"}
+              opacity={isResizing ? 1 : 0}
+              transition="all 0.15s ease"
+            />
+          </Box>
           {/* Header */}
           <DrawerHeader
             bg="#ffffff"
