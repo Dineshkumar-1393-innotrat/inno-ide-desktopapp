@@ -47,16 +47,52 @@ export function ProjectProvider({ children }) {
   const [user, setUser] = useState(getUserInfo);
 
   const [activeProjectId, setActiveProjectId] = useState(() => {
-    return localStorage.getItem("activeProjectId") || null;
+    const direct = localStorage.getItem("activeProjectId");
+    if (direct) return direct;
+    try {
+      const u = getUserInfo();
+      const uid = u?.userId || u?._id || u?.id;
+      if (uid) {
+        return localStorage.getItem(`innoide:last_project_id:${uid}`) || null;
+      }
+    } catch (e) {}
+    return null;
   });
   const [activeProjectName, setActiveProjectName] = useState(() => {
-    return localStorage.getItem("activeProjectName") || null;
+    const direct = localStorage.getItem("activeProjectName");
+    if (direct) return direct;
+    try {
+      const u = getUserInfo();
+      const uid = u?.userId || u?._id || u?.id;
+      if (uid) {
+        return localStorage.getItem(`innoide:last_project_name:${uid}`) || null;
+      }
+    } catch (e) {}
+    return null;
   });
   const [activeProductId, setActiveProductId] = useState(() => {
-    return localStorage.getItem("activeProductId") || null;
+    const direct = localStorage.getItem("activeProductId");
+    if (direct) return direct;
+    try {
+      const u = getUserInfo();
+      const uid = u?.userId || u?._id || u?.id;
+      if (uid) {
+        return localStorage.getItem(`innoide:last_product_id:${uid}`) || null;
+      }
+    } catch (e) {}
+    return null;
   });
   const [activeProductName, setActiveProductName] = useState(() => {
-    return localStorage.getItem("activeProductName") || null;
+    const direct = localStorage.getItem("activeProductName");
+    if (direct) return direct;
+    try {
+      const u = getUserInfo();
+      const uid = u?.userId || u?._id || u?.id;
+      if (uid) {
+        return localStorage.getItem(`innoide:last_product_name:${uid}`) || null;
+      }
+    } catch (e) {}
+    return null;
   });
   const [activeDeviceId, setActiveDeviceId] = useState(() => {
     return localStorage.getItem("activeDeviceId") || null;
@@ -73,14 +109,28 @@ export function ProjectProvider({ children }) {
 
   const [isSwitchingProject, setIsSwitchingProject] = useState(false);
 
-  // --- Identity Synchronization ---
+  // --- Identity Synchronization & User Updates ---
   useEffect(() => {
-    const handleStorageChange = (e) => {
-      if (e.key === "userData") {
-        const freshUser = getUserInfo();
+    const syncUser = () => {
+      const freshUser = getUserInfo();
+      const currentUserId = user?.userId || user?._id || user?.id;
+      const freshUserId = freshUser?.userId || freshUser?._id || freshUser?.id;
+      if (freshUserId !== currentUserId) {
         setUser(freshUser);
-        console.log("[ProjectContext] User identity updated from storage.");
+        console.log("[ProjectContext] User identity updated from storage:", freshUserId);
       }
+    };
+
+    syncUser();
+
+    const handleStorageChange = (e) => {
+      if (!e || e.key === "userData") {
+        syncUser();
+      }
+    };
+
+    const handleAuthChange = () => {
+      syncUser();
     };
 
     const handleProjectDeleted = (e) => {
@@ -99,12 +149,16 @@ export function ProjectProvider({ children }) {
     };
 
     window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("innoide:auth-change", handleAuthChange);
+    window.addEventListener("user-logged-in", handleAuthChange);
     window.addEventListener("project-deleted", handleProjectDeleted);
     return () => {
       window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("innoide:auth-change", handleAuthChange);
+      window.removeEventListener("user-logged-in", handleAuthChange);
       window.removeEventListener("project-deleted", handleProjectDeleted);
     };
-  }, [activeProjectId]);
+  }, [activeProjectId, user]);
   const [isHydrated, setIsHydrated] = useState(true); // Initially true if we have a project
   const [isRestoring, setIsRestoring] = useState(false);
   const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
@@ -422,20 +476,34 @@ export function ProjectProvider({ children }) {
   // --- Reset Project State (isolation) ---
   const logout = useCallback(async () => {
     console.log("[ProjectContext] Performing project context logout cleanup...");
+    const userId = user?.userId || user?._id || user?.id;
     
-    // 1. Flush any pending auto-saves
+    // 0. Dispatch force-canvas-save event so canvas components commit their current state immediately
+    window.dispatchEvent(new CustomEvent('innoide:force-canvas-save'));
+
+    // 1. Remember user's last project before cleanup
+    if (userId && activeProjectId) {
+      try {
+        localStorage.setItem(`innoide:last_project_id:${userId}`, activeProjectId);
+        if (activeProjectName) localStorage.setItem(`innoide:last_project_name:${userId}`, activeProjectName);
+        if (activeProductId) localStorage.setItem(`innoide:last_product_id:${userId}`, activeProductId);
+        if (activeProductName) localStorage.setItem(`innoide:last_product_name:${userId}`, activeProductName);
+      } catch (e) {}
+    }
+
+    // 2. Flush any pending auto-saves
     await autoSaveManager.saveAll({ parallel: true });
     autoSaveManager.clearAll();
     cancelAllRequests();
 
-    // 2. Clear LocalStorage keys
+    // 3. Clear session identity keys
     [
       "activeProjectId", "activeProjectName", 
       "activeProductId", "activeProductName", 
       "activeDeviceId", "userData"
     ].forEach(k => localStorage.removeItem(k));
 
-    // 3. Reset Local State
+    // 4. Reset Local State
     setActiveProjectId(null);
     setActiveProjectName(null);
     setActiveProductId(null);
@@ -449,9 +517,9 @@ export function ProjectProvider({ children }) {
     setHasFetchedOnce(false);
     setIsHydrated(false);
     setUser(null);
-  }, [cancelAllRequests]);
+  }, [cancelAllRequests, user, activeProjectId, activeProjectName, activeProductId, activeProductName]);
 
-  // --- Identity Guard: Reset project state if user identity changes ---
+  // --- Identity Guard & Project Auto-Restoration on Login ---
   useEffect(() => {
     const userId = user?.userId || user?._id || user?.id;
     if (userId) {
@@ -470,29 +538,109 @@ export function ProjectProvider({ children }) {
          });
        }
        localStorage.setItem("lastUserId", String(userId));
+
+       // If user is logged in but activeProjectId is null, restore last project or find first project from backend
+       if (!activeProjectId) {
+         const savedProjId = localStorage.getItem(`innoide:last_project_id:${userId}`) || localStorage.getItem("activeProjectId");
+         const savedProjName = localStorage.getItem(`innoide:last_project_name:${userId}`) || localStorage.getItem("activeProjectName");
+         const savedProdId = localStorage.getItem(`innoide:last_product_id:${userId}`) || localStorage.getItem("activeProductId");
+         const savedProdName = localStorage.getItem(`innoide:last_product_name:${userId}`) || localStorage.getItem("activeProductName");
+
+         if (savedProjId) {
+           console.log(`[ProjectContext] Restoring last active project for user ${userId}:`, savedProjId, savedProjName);
+           setActiveProjectId(savedProjId);
+           localStorage.setItem("activeProjectId", savedProjId);
+           if (savedProjName) {
+             setActiveProjectName(savedProjName);
+             localStorage.setItem("activeProjectName", savedProjName);
+           }
+           if (savedProdId) {
+             setActiveProductId(savedProdId);
+             localStorage.setItem("activeProductId", savedProdId);
+           }
+           if (savedProdName) {
+             setActiveProductName(savedProdName);
+             localStorage.setItem("activeProductName", savedProdName);
+           }
+           switchPersistenceToProject(userId, savedProjId);
+           autoSaveManager.setProjectContext(userId, savedProjId);
+         } else {
+           // Attempt to query user files from backend and auto-select first project folder
+           axios.get(`${baseURL}/api/v1/files/${userId}`, { timeout: 3000 })
+             .then((res) => {
+               if (res.data?.success && Array.isArray(res.data.files)) {
+                 const firstFolder = res.data.files.find(f => f.type === 'folder' && f.name !== 'root');
+                 if (firstFolder) {
+                   console.log(`[ProjectContext] Auto-selecting initial project folder for user ${userId}:`, firstFolder.name, firstFolder._id);
+                   setActiveProjectId(firstFolder._id);
+                   setActiveProjectName(firstFolder.name);
+                   localStorage.setItem("activeProjectId", firstFolder._id);
+                   localStorage.setItem("activeProjectName", firstFolder.name);
+                   if (firstFolder.productId) {
+                     setActiveProductId(firstFolder.productId);
+                     localStorage.setItem("activeProductId", firstFolder.productId);
+                   }
+                   switchPersistenceToProject(userId, firstFolder._id);
+                   autoSaveManager.setProjectContext(userId, firstFolder._id);
+                 }
+               }
+             })
+             .catch((err) => {
+               console.warn("[ProjectContext] Auto-select project folder check failed:", err.message);
+             });
+         }
+       } else {
+         // activeProjectId already exists: ensure store and autoSaveManager are switched
+         switchPersistenceToProject(userId, activeProjectId);
+         autoSaveManager.setProjectContext(userId, activeProjectId);
+       }
     }
-  }, [user]);
+  }, [user, activeProjectId]);
 
   // --- Side Effects for LocalStorage Sync ---
   useEffect(() => {
-    if (activeProjectId) localStorage.setItem("activeProjectId", activeProjectId);
-    else localStorage.removeItem("activeProjectId");
-  }, [activeProjectId]);
+    const userId = user?.userId || user?._id || user?.id;
+    if (activeProjectId) {
+      localStorage.setItem("activeProjectId", activeProjectId);
+      if (userId) {
+        localStorage.setItem(`innoide:last_project_id:${userId}`, activeProjectId);
+        switchPersistenceToProject(userId, activeProjectId);
+        autoSaveManager.setProjectContext(userId, activeProjectId);
+      }
+    } else {
+      localStorage.removeItem("activeProjectId");
+    }
+  }, [activeProjectId, user]);
 
   useEffect(() => {
-    if (activeProjectName) localStorage.setItem("activeProjectName", activeProjectName);
-    else localStorage.removeItem("activeProjectName");
-  }, [activeProjectName]);
+    const userId = user?.userId || user?._id || user?.id;
+    if (activeProjectName) {
+      localStorage.setItem("activeProjectName", activeProjectName);
+      if (userId) localStorage.setItem(`innoide:last_project_name:${userId}`, activeProjectName);
+    } else {
+      localStorage.removeItem("activeProjectName");
+    }
+  }, [activeProjectName, user]);
 
   useEffect(() => {
-    if (activeProductId) localStorage.setItem("activeProductId", activeProductId);
-    else localStorage.removeItem("activeProductId");
-  }, [activeProductId]);
+    const userId = user?.userId || user?._id || user?.id;
+    if (activeProductId) {
+      localStorage.setItem("activeProductId", activeProductId);
+      if (userId) localStorage.setItem(`innoide:last_product_id:${userId}`, activeProductId);
+    } else {
+      localStorage.removeItem("activeProductId");
+    }
+  }, [activeProductId, user]);
 
   useEffect(() => {
-    if (activeProductName) localStorage.setItem("activeProductName", activeProductName);
-    else localStorage.removeItem("activeProductName");
-  }, [activeProductName]);
+    const userId = user?.userId || user?._id || user?.id;
+    if (activeProductName) {
+      localStorage.setItem("activeProductName", activeProductName);
+      if (userId) localStorage.setItem(`innoide:last_product_name:${userId}`, activeProductName);
+    } else {
+      localStorage.removeItem("activeProductName");
+    }
+  }, [activeProductName, user]);
 
   useEffect(() => {
     if (activeDeviceId) localStorage.setItem("activeDeviceId", activeDeviceId);

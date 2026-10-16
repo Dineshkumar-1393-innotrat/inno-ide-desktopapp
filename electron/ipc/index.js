@@ -12,6 +12,12 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  defaultLocationOtpService,
+  isLocationMismatch,
+  calculateDistanceMeters,
+  formatDistance
+} from '../../src/components/esp32/locationOtpService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -575,6 +581,47 @@ export function registerAllIPCHandlers(getMainWindow) {
     }
   });
 
+  // Location-Mismatch OTP IPC Handlers for Desktop Simulator & In-App Preview
+  ipcMain.handle('otp:request', async (_event, params) => {
+    try {
+      const prev = params?.previousLocation || companionState.lastLocation;
+      return defaultLocationOtpService.createChallenge({
+        ...params,
+        previousLocation: prev
+      });
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('otp:verify', async (_event, params) => {
+    try {
+      return defaultLocationOtpService.verifyOtp(params || {});
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('otp:resend', async (_event, params) => {
+    try {
+      return defaultLocationOtpService.resendOtp(params || {});
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('otp:cancel', async (_event, params) => {
+    try {
+      return defaultLocationOtpService.cancelChallenge(params || {});
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('otp:get-last-location', async () => {
+    return companionState.lastLocation;
+  });
+
   // Local Companion HTTP Server for instant phone camera scanning
   async function ensureCompanionServer(port = 5055) {
     if (companionServer) {
@@ -632,6 +679,88 @@ export function registerAllIPCHandlers(getMainWindow) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, error: e.message }));
           }
+        });
+        return;
+      }
+
+      // Location-Mismatch OTP Verification Endpoints
+      if (pathname.startsWith('/api/otp/')) {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+          let data = {};
+          if (body) {
+            try { data = JSON.parse(body); } catch { }
+          }
+          for (const [k, v] of searchParams.entries()) {
+            if (data[k] === undefined) data[k] = v;
+          }
+
+          res.setHeader('Content-Type', 'application/json');
+
+          if (pathname === '/api/otp/request') {
+            let prevLoc = data.previousLocation;
+            if (!prevLoc) {
+              if (Array.isArray(companionState.switchLocations) && companionState.switchLocations.length > 0) {
+                prevLoc = companionState.switchLocations.find(l => !isStaleGeolog(l) && (l.lat != null || l.latitude != null));
+              }
+              if (!prevLoc && companionState.lastLocation && !isStaleGeolog(companionState.lastLocation)) {
+                prevLoc = companionState.lastLocation;
+              }
+            }
+
+            const result = defaultLocationOtpService.createChallenge({
+              widgetId: data.widgetId || 'w-led',
+              switchTitle: data.switchTitle || 'Switch',
+              action: data.action || (data.value ? 'ON' : 'OFF'),
+              deviceId: data.deviceId || `ESP32 (${companionState.activePort || 'COM9'})`,
+              currentLocation: data.currentLocation || data.location,
+              previousLocation: prevLoc
+            });
+            res.writeHead(200);
+            return res.end(JSON.stringify(result));
+          }
+
+          if (pathname === '/api/otp/verify') {
+            const result = defaultLocationOtpService.verifyOtp({
+              challengeId: data.challengeId,
+              otp: data.otp,
+              widgetId: data.widgetId,
+              action: data.action
+            });
+            res.writeHead(result.success ? 200 : 400);
+            return res.end(JSON.stringify(result));
+          }
+
+          if (pathname === '/api/otp/resend') {
+            const result = defaultLocationOtpService.resendOtp({
+              challengeId: data.challengeId
+            });
+            res.writeHead(result.success ? 200 : 429);
+            return res.end(JSON.stringify(result));
+          }
+
+          if (pathname === '/api/otp/cancel') {
+            const result = defaultLocationOtpService.cancelChallenge({
+              challengeId: data.challengeId
+            });
+            res.writeHead(200);
+            return res.end(JSON.stringify(result));
+          }
+
+          if (pathname === '/api/otp/status' || pathname === '/api/otp/config') {
+            res.writeHead(200);
+            return res.end(JSON.stringify({
+              success: true,
+              threshold: defaultLocationOtpService.distanceThresholdMeters,
+              devDemoMode: defaultLocationOtpService.devDemoMode,
+              otpExpirySeconds: defaultLocationOtpService.otpExpirySeconds,
+              lastLocation: companionState.lastLocation
+            }));
+          }
+
+          res.writeHead(404);
+          return res.end(JSON.stringify({ success: false, error: 'Unknown OTP endpoint' }));
         });
         return;
       }
@@ -695,6 +824,62 @@ export function registerAllIPCHandlers(getMainWindow) {
             }
 
             if (!payload.endsWith('\n')) payload += '\r\n';
+
+            // Location Mismatch OTP Enforcement for Switch Operations
+            const isSwitchCommand = isExplicitOn || isExplicitOff;
+            if (isSwitchCommand && !data.syncOnly && !data.initSync) {
+              if (!data.location) {
+                console.warn('[CompanionServer] Switch command rejected: missing location data.');
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({
+                  success: false,
+                  error: 'Device location is required before executing switch operation.',
+                  code: 'LOCATION_REQUIRED'
+                }));
+              }
+
+              let prevLocation = null;
+              if (Array.isArray(companionState.switchLocations) && companionState.switchLocations.length > 0) {
+                prevLocation = companionState.switchLocations.find(l => !isStaleGeolog(l) && (l.lat != null || l.latitude != null));
+              }
+              if (!prevLocation && companionState.lastLocation && !isStaleGeolog(companionState.lastLocation) && (companionState.lastLocation.lat != null || companionState.lastLocation.latitude != null)) {
+                prevLocation = companionState.lastLocation;
+              }
+
+              const mismatch = isLocationMismatch(prevLocation, data.location, defaultLocationOtpService.distanceThresholdMeters);
+              if (mismatch.isMismatch) {
+                const targetAction = isExplicitOn ? 'ON' : 'OFF';
+                let tokenCheck = defaultLocationOtpService.validateToken({
+                  token: data.verificationToken,
+                  widgetId: data.widgetId,
+                  action: targetAction
+                });
+
+                // If running in dev demo mode, accept client-generated verification tokens (vt-local-...)
+                if (!tokenCheck.valid && defaultLocationOtpService.devDemoMode && typeof data.verificationToken === 'string' && data.verificationToken.startsWith('vt-')) {
+                  tokenCheck = { valid: true, demoAuthorized: true };
+                }
+
+                if (!tokenCheck.valid) {
+                  console.warn(`[CompanionServer] Location mismatch: authorization failed (${tokenCheck.error}). Distance: ${mismatch.distance}m`);
+                  res.writeHead(403, { 'Content-Type': 'application/json' });
+                  return res.end(JSON.stringify({
+                    success: false,
+                    error: 'Location mismatch detected: OTP verification required before switch operation.',
+                    requiresOtp: true,
+                    code: tokenCheck.code || 'OTP_REQUIRED',
+                    distance: mismatch.distance,
+                    threshold: mismatch.threshold,
+                    previousLocation: prevLocation,
+                    currentLocation: data.location
+                  }));
+                }
+
+                // Consume single-use token immediately before hardware actuation
+                defaultLocationOtpService.consumeToken(data.verificationToken);
+                console.log('[CompanionServer] Location mismatch authorized with token. Proceeding to hardware actuation.');
+              }
+            }
 
             // When syncOnly is set, skip the serial write — only update state store + broadcast SSE.
             // This is used by the desktop toggle to avoid duplicate serial writes when the primary
@@ -1010,6 +1195,12 @@ export function registerAllIPCHandlers(getMainWindow) {
           states: companionState.states,
           success: true
         }));
+      }
+
+      // Return 404 JSON for any unhandled /api/* route to prevent unexpected HTML DOCTYPE errors
+      if (pathname.startsWith('/api/')) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: 'Endpoint not found: ' + pathname }));
       }
 
       res.writeHead(200, {

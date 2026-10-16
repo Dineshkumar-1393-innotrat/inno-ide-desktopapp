@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { isLocationMismatch } from "./locationOtpService.js";
 
 /**
  * Custom hook to handle real serial port actuation (USB/COM/TCP),
@@ -16,6 +17,9 @@ export default function useHardwareActuation({
 }) {
   const [liveLedToggle, setLiveLedToggle] = useState(false); // Hardware LED state toggle
   const [ledHardwareError, setLedHardwareError] = useState(null); // Serial write error message
+  const [activeOtpChallenge, setActiveOtpChallenge] = useState(null);
+  const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
+  const pendingOtpPromiseResolverRef = useRef(null);
   const isSwitchOperationInProgressRef = useRef(false);
   const [serialTrafficLogs, setSerialTrafficLogs] = useState([
     { id: 1, type: "rx", text: "ESP32-S3 IoT Node Online. Baud: 115200", time: "12:00:01" },
@@ -75,12 +79,116 @@ export default function useHardwareActuation({
 
     const targetPort = selectedDevice?.port || activePort || "COM9";
     const cmd = nextVal ? "LED:1\r\n" : "LED:0\r\n";
+
+    // Location Mismatch Check against previous recorded operation
+    let prevLoc = null;
+    if (window.electronAPI?.otp?.getLastLocation) {
+      try {
+        prevLoc = await window.electronAPI.otp.getLastLocation();
+      } catch {}
+    }
+    if (!prevLoc) {
+      try {
+        const statusRes = await fetch("http://localhost:5055/api/otp/status").then(async (r) => {
+          const text = await r.text();
+          return text.trim().startsWith("<") ? null : JSON.parse(text);
+        });
+        if (statusRes?.lastLocation) prevLoc = statusRes.lastLocation;
+      } catch {}
+    }
+
+    const mismatch = isLocationMismatch(prevLoc, switchLoc, 100);
+    let verificationToken = null;
+
+    if (mismatch.isMismatch) {
+      // Create OTP challenge
+      let challenge = null;
+      if (window.electronAPI?.otp?.request) {
+        challenge = await window.electronAPI.otp.request({
+          widgetId: "w-led",
+          switchTitle: "Switch",
+          action: nextVal ? "ON" : "OFF",
+          currentLocation: switchLoc,
+          previousLocation: prevLoc
+        });
+      } else {
+        try {
+          const cr = await fetch("http://localhost:5055/api/otp/request", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              widgetId: "w-led",
+              switchTitle: "Switch",
+              action: nextVal ? "ON" : "OFF",
+              currentLocation: switchLoc,
+              previousLocation: prevLoc
+            })
+          });
+          const text = await cr.text();
+          if (text.trim().startsWith("<")) {
+            throw new Error("SERVER_RETURNED_HTML");
+          }
+          challenge = JSON.parse(text);
+        } catch (fetchErr) {
+          const fallbackOtp = String(Math.floor(100000 + Math.random() * 900000));
+          challenge = {
+            success: true,
+            challengeId: `local-${Date.now()}`,
+            widgetId: "w-led",
+            switchTitle: "Switch",
+            action: nextVal ? "ON" : "OFF",
+            currentLocation: switchLoc,
+            previousLocation: prevLoc,
+            distance: mismatch.distance,
+            threshold: mismatch.threshold || 100,
+            expiresInSeconds: 300,
+            resendCooldownSeconds: 30,
+            devDemoMode: true,
+            devOtp: fallbackOtp
+          };
+        }
+      }
+
+      if (challenge && challenge.success) {
+        setActiveOtpChallenge(challenge);
+        setIsOtpModalOpen(true);
+
+        verificationToken = await new Promise((resolve) => {
+          pendingOtpPromiseResolverRef.current = resolve;
+        });
+
+        if (!verificationToken) {
+          isSwitchOperationInProgressRef.current = false;
+          // Revert switch widget
+          if (setWidgets) {
+            setWidgets((prev) =>
+              prev.map((w) =>
+                w.id === "w-led" || w.type === "switch" || /led|light/i.test(w.title || "")
+                  ? { ...w, state: !nextVal, value: !nextVal }
+                  : w
+              )
+            );
+          }
+          if (toast) {
+            toast({
+              title: "Verification Cancelled",
+              description: "Location verification cancelled. Switch state not changed.",
+              status: "warning",
+              duration: 3000
+            });
+          }
+          return;
+        }
+      }
+    }
+
     const body = JSON.stringify({
       payload: cmd,
       port: targetPort,
       value: nextVal,
       SwitchStatus: nextVal ? 1 : 0,
-      location: switchLoc
+      location: switchLoc,
+      verificationToken
     });
     const headers = { "Content-Type": "application/json" };
 
@@ -412,6 +520,22 @@ export default function useHardwareActuation({
     [logicBlocks]
   );
 
+  const handleOtpVerified = useCallback((token) => {
+    setIsOtpModalOpen(false);
+    if (pendingOtpPromiseResolverRef.current) {
+      pendingOtpPromiseResolverRef.current(token);
+      pendingOtpPromiseResolverRef.current = null;
+    }
+  }, []);
+
+  const handleOtpCancelled = useCallback(() => {
+    setIsOtpModalOpen(false);
+    if (pendingOtpPromiseResolverRef.current) {
+      pendingOtpPromiseResolverRef.current(null);
+      pendingOtpPromiseResolverRef.current = null;
+    }
+  }, []);
+
   return {
     liveLedToggle,
     setLiveLedToggle,
@@ -422,6 +546,10 @@ export default function useHardwareActuation({
     handleToggleHardwareLed,
     handleTestHardwareSignal,
     handleExecuteRule,
-    evaluateRulesForWidget
+    evaluateRulesForWidget,
+    activeOtpChallenge,
+    isOtpModalOpen,
+    handleOtpVerified,
+    handleOtpCancelled
   };
 }

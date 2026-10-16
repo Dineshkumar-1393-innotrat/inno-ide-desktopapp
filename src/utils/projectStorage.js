@@ -21,8 +21,35 @@
 
 // ─── Internal state ───────────────────────────────────────────────────────────
 
-let _currentUserId = 'anonymous';
-let _currentProjectId = 'default';
+const getInitialUserId = () => {
+  try {
+    const userData = typeof window !== 'undefined' ? (window.localStorage.getItem("userData") || window.sessionStorage.getItem("userData")) : null;
+    if (userData) {
+      const parsed = JSON.parse(userData);
+      const uid = parsed.userId || parsed._id || parsed.id;
+      if (uid) return String(uid);
+    }
+    const directUserId = typeof window !== 'undefined' ? (window.localStorage.getItem("userId") || window.sessionStorage.getItem("userId")) : null;
+    if (directUserId) return String(directUserId);
+  } catch (e) {}
+  return 'anonymous';
+};
+
+const getInitialProjectId = () => {
+  try {
+    const projId = typeof window !== 'undefined' ? window.localStorage.getItem("activeProjectId") : null;
+    if (projId) return String(projId);
+    const uid = getInitialUserId();
+    if (uid && uid !== 'anonymous' && typeof window !== 'undefined') {
+      const lastProj = window.localStorage.getItem(`innoide:last_project_id:${uid}`);
+      if (lastProj) return String(lastProj);
+    }
+  } catch (e) {}
+  return 'default';
+};
+
+let _currentUserId = getInitialUserId();
+let _currentProjectId = getInitialProjectId();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

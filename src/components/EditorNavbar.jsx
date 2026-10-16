@@ -215,12 +215,23 @@ const EditorNavbar = ({
   }, [accountOpen, activeMenu, isHelpReferenceOpen, downloadMenuOpen]);
 
   const handleLogout = () => {
+    try {
+      window.dispatchEvent(new CustomEvent('innoide:force-canvas-save'));
+      const currentUserId = resolvedUser?.userId || resolvedUser?._id || resolvedUser?.id || localStorage.getItem('userId');
+      const currentPath = window.location.pathname || (typeof location !== 'undefined' ? location.pathname : null);
+      if (currentUserId && currentPath && currentPath !== '/' && currentPath !== '/logout') {
+        localStorage.setItem(`innoide:last_active_route:${currentUserId}`, currentPath);
+        localStorage.setItem('innoide:last_active_route', currentPath);
+      }
+    } catch (e) {
+      console.warn('Failed to save route before logout', e);
+    }
+
     Promise.resolve(projectLogout?.()).then(() => {
       return Promise.resolve(onLogout?.());
     }).finally(() => {
       setAccountOpen(false);
       try {
-        localStorage.removeItem('innoide:last_active_route');
         localStorage.removeItem('token');
         localStorage.removeItem('userData');
         sessionStorage.clear();

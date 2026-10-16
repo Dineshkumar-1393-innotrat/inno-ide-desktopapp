@@ -142,10 +142,28 @@ const Home = () => {
       }
 
       if (data.status === "success") {
+        const uId = data.userData.userId;
         sessionStorage.setItem("token", data.token);
-        sessionStorage.setItem("userId", data.userData.userId);
+        sessionStorage.setItem("userId", uId);
         localStorage.setItem("token", data.token);
         localStorage.setItem("userData", JSON.stringify(data.userData));
+        localStorage.setItem("userId", uId);
+
+        // Restore active project if available for this user
+        const savedProjId = localStorage.getItem(`innoide:last_project_id:${uId}`) || localStorage.getItem("activeProjectId");
+        const savedProjName = localStorage.getItem(`innoide:last_project_name:${uId}`) || localStorage.getItem("activeProjectName");
+        const savedProdId = localStorage.getItem(`innoide:last_product_id:${uId}`) || localStorage.getItem("activeProductId");
+        const savedProdName = localStorage.getItem(`innoide:last_product_name:${uId}`) || localStorage.getItem("activeProductName");
+
+        if (savedProjId) {
+          localStorage.setItem("activeProjectId", savedProjId);
+          if (savedProjName) localStorage.setItem("activeProjectName", savedProjName);
+          if (savedProdId) localStorage.setItem("activeProductId", savedProdId);
+          if (savedProdName) localStorage.setItem("activeProductName", savedProdName);
+        }
+
+        window.dispatchEvent(new CustomEvent("innoide:auth-change", { detail: data.userData }));
+        window.dispatchEvent(new CustomEvent("user-logged-in", { detail: data.userData }));
 
         toast({
           title: "Success",
@@ -155,7 +173,12 @@ const Home = () => {
           isClosable: true,
         });
 
-        navigate("/editor", { state: { userId: data.userData.userId } });
+        // Restore user's last active route if they were on a canvas or editor screen
+        const lastRoute = localStorage.getItem(`innoide:last_active_route:${uId}`) 
+          || localStorage.getItem("innoide:last_active_route");
+        const targetRoute = (lastRoute && lastRoute !== "/" && lastRoute !== "/logout") ? lastRoute : "/editor";
+
+        navigate(targetRoute, { state: { userId: uId } });
       } else {
         throw new Error(data.message || "Sign in failed");
       }
@@ -308,10 +331,28 @@ const Home = () => {
                           const data = await handleGoogleAuth(userInfo, token);
 
                           if (data.status === "success") {
+                            const uId = data.userData.userId;
                             sessionStorage.setItem("token", data.token);
-                            sessionStorage.setItem("userId", data.userData.userId);
+                            sessionStorage.setItem("userId", uId);
                             localStorage.setItem("token", data.token);
                             localStorage.setItem("userData", JSON.stringify(data.userData));
+                            localStorage.setItem("userId", uId);
+
+                            // Restore active project if available for this user
+                            const savedProjId = localStorage.getItem(`innoide:last_project_id:${uId}`) || localStorage.getItem("activeProjectId");
+                            const savedProjName = localStorage.getItem(`innoide:last_project_name:${uId}`) || localStorage.getItem("activeProjectName");
+                            const savedProdId = localStorage.getItem(`innoide:last_product_id:${uId}`) || localStorage.getItem("activeProductId");
+                            const savedProdName = localStorage.getItem(`innoide:last_product_name:${uId}`) || localStorage.getItem("activeProductName");
+
+                            if (savedProjId) {
+                              localStorage.setItem("activeProjectId", savedProjId);
+                              if (savedProjName) localStorage.setItem("activeProjectName", savedProjName);
+                              if (savedProdId) localStorage.setItem("activeProductId", savedProdId);
+                              if (savedProdName) localStorage.setItem("activeProductName", savedProdName);
+                            }
+
+                            window.dispatchEvent(new CustomEvent("innoide:auth-change", { detail: data.userData }));
+                            window.dispatchEvent(new CustomEvent("user-logged-in", { detail: data.userData }));
 
                             toast({
                               title: "Success",
@@ -320,7 +361,11 @@ const Home = () => {
                               duration: 3000,
                             });
 
-                            navigate("/editor", { state: { userId: data.userData.userId } });
+                            const lastRoute = localStorage.getItem(`innoide:last_active_route:${uId}`) 
+                              || localStorage.getItem("innoide:last_active_route");
+                            const targetRoute = (lastRoute && lastRoute !== "/" && lastRoute !== "/logout") ? lastRoute : "/editor";
+
+                            navigate(targetRoute, { state: { userId: uId } });
                           } else {
                             throw new Error(data.message || "Google Sign in failed");
                           }

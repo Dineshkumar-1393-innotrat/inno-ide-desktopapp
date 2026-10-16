@@ -34,523 +34,616 @@ export const getStandaloneHtmlContent = ({
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>${projectName} - IoT Companion App</title>
   <style>
-    :root { --primary: #38bdf8; --bg: #090d16; --card: #131b2e; --border: #1e293b; --text: #f8fafc; --subtext: #94a3b8; }
+    :root { 
+      --primary: #2563eb; 
+      --bg: #f1f5f9; 
+      --phone-bg: #f8fafc; 
+      --card: #ffffff; 
+      --border: #e2e8f0; 
+      --text: #0f172a; 
+      --subtext: #64748b; 
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; justify-content: center; padding: 16px; }
-    .phone { width: 100%; max-width: 440px; background: #0f172a; border-radius: 28px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); padding: 20px; display: flex; flex-direction: column; gap: 16px; border: 1px solid var(--border); }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 24px 16px; }
+    .phone-wrapper { width: 100%; max-width: 380px; min-height: 640px; background: #ffffff; border-radius: 42px; border: 10px solid #0f172a; box-shadow: 0 25px 60px -15px rgba(0,0,0,0.25); overflow: hidden; display: flex; flex-direction: column; }
+    .status-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px 6px 24px; font-size: 10px; font-weight: 700; color: #475569; background: #ffffff; border-bottom: 1px solid #f1f5f9; }
+    .phone { width: 100%; flex: 1; background: var(--phone-bg); padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+    @media (max-width: 480px) {
+      body { padding: 0; background: var(--phone-bg); }
+      .phone-wrapper { border: none; border-radius: 0; box-shadow: none; max-width: 100%; min-height: 100vh; }
+      .status-bar { display: none; }
+      .phone { padding: 16px; min-height: 100vh; }
+    }
     .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-    .brand-sub { font-size: 10px; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px; }
-    .header h1 { font-size: 18px; font-weight: 800; color: #fff; margin-top: 2px; }
-    .badge { font-size: 11px; padding: 4px 10px; border-radius: 9999px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 700; display: flex; align-items: center; gap: 5px; }
-    .badge-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+    .brand-sub { font-size: 9px; font-weight: 800; color: #2563eb; text-transform: uppercase; letter-spacing: 0.8px; }
+    .header h1 { font-size: 16px; font-weight: 800; color: #0f172a; margin-top: 1px; }
+    .badge { font-size: 10px; padding: 3px 9px; border-radius: 9999px; background: #dcfce7; color: #15803d; border: 1px solid #86efac; font-weight: 700; display: flex; align-items: center; gap: 5px; }
+    .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
     .controls-list { display: flex; flex-direction: column; gap: 14px; }
-    .card { background: var(--card); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--border); }
-    .card.glow-blue { border-color: #2563eb; background: #101a38; }
-    .card.glow-red { border-color: #ef4444; background: #261214; }
+    .card { background: var(--card); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card.glow-blue { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.15), 0 1px 3px rgba(0,0,0,0.05); }
+    .card.glow-red { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,0.15), 0 1px 3px rgba(0,0,0,0.05); }
     .row { display: flex; align-items: center; justify-content: space-between; }
-    .title { font-weight: 700; font-size: 15px; color: #f8fafc; }
-    .meta { font-size: 12px; color: var(--subtext); margin-top: 2px; }
-    .btn { background: #ea580c; color: white; border: none; border-radius: 14px; padding: 14px 20px; font-weight: 800; cursor: pointer; width: 100%; font-size: 14px; text-align: center; }
+    .title { font-weight: 700; font-size: 14px; color: #0f172a; }
+    .meta { font-size: 11px; color: var(--subtext); margin-top: 1px; }
+    .btn { background: #ea580c; color: white; border: none; border-radius: 14px; padding: 12px 18px; font-weight: 800; cursor: pointer; width: 100%; font-size: 14px; text-align: center; box-shadow: 0 2px 4px rgba(234, 88, 12, 0.2); }
     .toggle { position: relative; width: 48px; height: 26px; }
     .toggle input { opacity: 0; width: 0; height: 0; }
-    .slider-toggle { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #334155; border-radius: 26px; transition: 0.3s; }
-    .slider-toggle:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }
-    input:checked + .slider-toggle { background: #2563eb; }
+    .slider-toggle { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #cbd5e1; border-radius: 26px; transition: 0.3s; }
+    .slider-toggle:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: 0.3s; }
+    input:checked + .slider-toggle { background: #22c55e; }
     input:checked + .slider-toggle:before { transform: translateX(22px); }
     .slider-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-    .step-btn { background: #1e293b; color: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-weight: 800; font-size: 11px; cursor: pointer; }
-    .slider-bar-wrap { flex: 1; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; }
-    .slider-bar-fill { height: 100%; background: #a855f7; border-radius: 4px; }
-    .gauge-big { font-size: 36px; font-weight: 900; text-align: center; color: #38bdf8; margin: 6px 0; }
-    .live-pill { font-size: 10px; font-weight: 800; background: #082f49; color: #38bdf8; padding: 3px 8px; border-radius: 6px; }
-    .live-pill.alert { background: #7f1d1d; color: #fca5a5; }
-    .test-btn { background: #1e293b; color: #38bdf8; border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
-    .switch-hint { font-size: 10px; color: #38bdf8; margin-top: 5px; display: flex; align-items: center; gap: 4px; transition: color 0.3s; }
-    .switch-hint.pending { color: #facc15; }
-    .switch-hint.success { color: #4ade80; }
-    .switch-hint.error { color: #f87171; }
+    .step-btn { background: #f8fafc; color: #334155; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-weight: 800; font-size: 11px; cursor: pointer; }
+    .slider-bar-wrap { flex: 1; height: 8px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }
+    .slider-bar-fill { height: 100%; background: #8b5cf6; border-radius: 4px; }
+    .gauge-big { font-size: 32px; font-weight: 900; text-align: center; color: #ef4444; margin: 4px 0; }
+    .live-pill { font-size: 9px; font-weight: 800; background: #eff6ff; color: #2563eb; padding: 3px 8px; border-radius: 6px; }
+    .live-pill.alert { background: #fee2e2; color: #b91c1c; }
+    .test-btn { background: #f8fafc; color: #2563eb; border: 1px solid #cbd5e1; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 800; cursor: pointer; }
+    .switch-hint { font-size: 9px; color: #2563eb; margin-top: 4px; display: flex; align-items: center; gap: 4px; font-weight: 600; transition: color 0.3s; }
+    .switch-hint.pending { color: #d97706; }
+    .switch-hint.success { color: #16a34a; }
+    .switch-hint.error { color: #dc2626; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    .modal-spinner { width: 40px; height: 40px; border: 3px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
-    .geolog-history-item:hover { border-color: #38bdf8 !important; background: #0f1c32 !important; }
+    .modal-spinner { width: 38px; height: 38px; border: 3px solid rgba(37, 99, 235, 0.15); border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
+    .geolog-history-item:hover { border-color: #93c5fd !important; background: #f8fafc !important; }
   </style>
 </head>
 <body>
-  <div class="phone">
-    <div class="header">
-      <div>
-        <div class="brand-sub">InnoIDE Companion</div>
-        <h1>🌱 ${projectName}</h1>
-      </div>
-      <div class="badge" id="companionStatusBadge" onclick="pingCompanionServer()" style="cursor:pointer;" title="Tap to test connection">
-        <div class="badge-dot" id="companionStatusDot"></div>
-        <span id="companionStatusText">ESP32 Linked</span>
+  <div class="phone-wrapper">
+    <div class="status-bar">
+      <span>9:41</span>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 11px;">📶</span>
+        <span style="font-size: 9px; font-weight: 800;">5G</span>
+        <span style="font-size: 11px;">🔋</span>
       </div>
     </div>
-
-    <div id="scannerNotice" style="display:none; background:rgba(34,211,238,0.12); border:1px solid rgba(34,211,238,0.3); border-radius:12px; padding:8px 12px; font-size:11px; color:#38bdf8; align-items:center; justify-content:space-between; margin-bottom:12px;">
-      <span>📱 <b>Tip:</b> If switches don't respond on other phones, tap <b>⋮</b> and select <b>"Open in Chrome / Safari"</b>.</span>
-      <button onclick="document.getElementById('scannerNotice').style.display='none'" style="background:transparent; border:none; color:#94a3b8; font-size:16px; cursor:pointer; padding:0 4px; line-height:1;">&times;</button>
-    </div>
-
-    <!-- UI CONTROLS ONLY -->
-    <div id="tab-controls" class="controls-list">
-      ${widgets.filter(w => w.visible !== false).length === 0 ? `
-        <div class="card" style="text-align: center; padding: 32px 16px; color: var(--subtext);">
-          <div style="font-size: 24px; margin-bottom: 8px;">📱</div>
-          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No Components Added</div>
-          <div style="font-size: 12px;">Add components in InnoIDE App Designer to control hardware from this companion app.</div>
+    <div class="phone">
+      <div class="header">
+        <div>
+          <div class="brand-sub">InnoIDE Companion</div>
+          <h1>🌱 ${projectName}</h1>
         </div>
-      ` : widgets.filter(w => w.visible !== false).map(w => {
-      if (w.type === 'switch') {
-        const switchOnLoc = w.lastOnLocation || initialOnLoc;
-        const switchOffLoc = w.lastOffLocation || initialOffLoc;
-        return `
-          <div class="card ${w.state ? 'glow-blue' : ''}" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
-            <div class="row">
-              <div>
-                <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
-                <div class="meta">Target: ${w.boundTarget || w.target || 'GPIO Pin'}</div>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="input-${w.id}" ${w.state ? 'checked' : ''} onchange="handleSwitch('${w.id}', this.checked, '${w.title}')">
-                <span class="slider-toggle"></span>
-              </label>
-            </div>
-            <div id="switch-hint-${w.id}" class="switch-hint">
-              <span>📍</span> <span id="switch-hint-text-${w.id}">Location required for ON/OFF logging</span>
-            </div>
+        <div class="badge" id="companionStatusBadge" onclick="pingCompanionServer()" style="cursor:pointer;" title="Tap to test connection">
+          <div class="badge-dot" id="companionStatusDot"></div>
+          <span id="companionStatusText">ESP32 Linked</span>
+        </div>
+      </div>
 
-            <!-- LIVE ON & OFF TIMING AND LOCATION DISPLAY -->
-            <div id="switch-telemetry-${w.id}" style="margin-top: 10px; border-top: 1px solid #1e293b; padding-top: 10px; display: flex; flex-direction: column; gap: 6px;">
-              <!-- ON Timing & Location -->
-              <div id="switch-on-row-${w.id}" style="background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.25); border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span style="font-size: 9px; font-weight: 800; color: #4ade80; display: flex; align-items: center; gap: 4px;">
-                    <span style="width: 6px; height: 6px; border-radius: 50%; background: #22c55e;"></span> SWITCH ON TIMING & LOCATION
-                  </span>
-                  <span id="switch-on-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #86efac; font-family: monospace;">
-                    ${switchOnLoc ? formatGeologTime(switchOnLoc) : '--:--:--'}
-                  </span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
-                  <span style="font-size: 11px; font-weight: 600; color: #f1f5f9;">📍 <span id="switch-on-city-${w.id}">${switchOnLoc?.city || 'No ON event recorded yet'}</span></span>
-                  <span id="switch-on-acc-${w.id}" style="font-size: 9px; color: #86efac; font-weight: 700;">${switchOnLoc ? ('Acc: ' + (switchOnLoc.accuracy != null ? switchOnLoc.accuracy : '12') + 'm') : ''}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span id="switch-on-coords-${w.id}" style="font-size: 9px; color: #64748b; font-family: monospace;">
-                    ${switchOnLoc?.lat ? (parseFloat(switchOnLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOnLoc.lng).toFixed(4) + '° E') : ''}
-                  </span>
-                  <a id="switch-on-map-link-${w.id}" href="${switchOnLoc?.lat ? ('https://www.google.com/maps?q=' + switchOnLoc.lat + ',' + switchOnLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #4ade80; text-decoration: none; display: ${switchOnLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
-                </div>
-              </div>
+      <div id="scannerNotice" style="display:none; background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:8px 12px; font-size:11px; color:#1d4ed8; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <span>📱 <b>Tip:</b> If switches don't respond on other phones, tap <b>⋮</b> and select <b>"Open in Chrome / Safari"</b>.</span>
+        <button onclick="document.getElementById('scannerNotice').style.display='none'" style="background:transparent; border:none; color:#64748b; font-size:16px; cursor:pointer; padding:0 4px; line-height:1;">&times;</button>
+      </div>
 
-              <!-- OFF Timing & Location -->
-              <div id="switch-off-row-${w.id}" style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span style="font-size: 9px; font-weight: 800; color: #f87171; display: flex; align-items: center; gap: 4px;">
-                    <span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> SWITCH OFF TIMING & LOCATION
-                  </span>
-                  <span id="switch-off-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #fca5a5; font-family: monospace;">
-                    ${switchOffLoc ? formatGeologTime(switchOffLoc) : '--:--:--'}
-                  </span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
-                  <span style="font-size: 11px; font-weight: 600; color: #f1f5f9;">📍 <span id="switch-off-city-${w.id}">${switchOffLoc?.city || 'No OFF event recorded yet'}</span></span>
-                  <span id="switch-off-acc-${w.id}" style="font-size: 9px; color: #fca5a5; font-weight: 700;">${switchOffLoc ? ('Acc: ' + (switchOffLoc.accuracy != null ? switchOffLoc.accuracy : '10') + 'm') : ''}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span id="switch-off-coords-${w.id}" style="font-size: 9px; color: #64748b; font-family: monospace;">
-                    ${switchOffLoc?.lat ? (parseFloat(switchOffLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOffLoc.lng).toFixed(4) + '° E') : ''}
-                  </span>
-                  <a id="switch-off-map-link-${w.id}" href="${switchOffLoc?.lat ? ('https://www.google.com/maps?q=' + switchOffLoc.lat + ',' + switchOffLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #f87171; text-decoration: none; display: ${switchOffLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
-                </div>
-              </div>
-            </div>
-          </div>`;
-      }
-      if (w.type === 'slider') {
-        return `
-          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
-            <div class="row">
-              <div>
-                <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
-                <div class="meta">PWM Target: ${w.boundTarget || w.target || 'GPIO 4 (Servo)'}</div>
-              </div>
-              <div style="font-weight: 800; font-size: ${w.fontSize ? Math.round(w.fontSize * 1.2) : 18}px; color: ${w.color || '#a855f7'};" id="val-${w.id}">${w.value || 90}${w.unit || '°'}</div>
-            </div>
-            <div class="slider-row">
-              <button class="step-btn" onclick="stepSlider('${w.id}', -10, ${w.min || 0}, ${w.max || 180}, '${w.title}')">-10°</button>
-              <button class="step-btn" onclick="stepSlider('${w.id}', -1, ${w.min || 0}, ${w.max || 180}, '${w.title}')">-1°</button>
-              <div class="slider-bar-wrap">
-                <div class="slider-bar-fill" id="bar-${w.id}" style="width: ${(((w.value || 90) - (w.min || 0)) / ((w.max || 180) - (w.min || 0))) * 100}%;"></div>
-              </div>
-              <button class="step-btn" onclick="stepSlider('${w.id}', 1, ${w.min || 0}, ${w.max || 180}, '${w.title}')">+1°</button>
-              <button class="step-btn" onclick="stepSlider('${w.id}', 10, ${w.min || 0}, ${w.max || 180}, '${w.title}')">+10°</button>
-            </div>
-          </div>`;
-      }
-      if (w.type === 'gauge') {
-        return `
-          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
-            <div class="row">
-              <div>
-                <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
-                <div class="meta">Source: ${w.boundTarget || w.target || 'ADC Telemetry'}</div>
-              </div>
-              <div class="live-pill" id="pill-${w.id}">● LIVE ADC</div>
-            </div>
-            <div class="gauge-big" id="val-${w.id}" style="color: ${w.color || '#38bdf8'};">${w.value || 24.3}${w.unit || '°C'}</div>
-            <div class="meta" style="text-align: center;">Range: ${w.min || 0} - ${w.max || 50}${w.unit || '°C'} (Guard Threshold: 30°C)</div>
-          </div>`;
-      }
-      if (w.type === 'button') {
-        return `
-          <button class="btn" style="background: ${w.backgroundColor || w.color || '#ea580c'}; color: ${w.textColor || 'white'}; font-size: ${w.fontSize || 14}px; border-radius: ${w.cornerRadius || 14}px;" onclick="handleBtn('${w.title}', '${w.boundTarget || w.target || 'GPIO 5'}', '${w.action || 'TRIGGER'}')">
-            🚨 ${w.title}
-          </button>`;
-      }
-      if (w.type === 'device_card') {
-        return `
-          <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
-            <div class="row">
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <div style="width: 34px; height: 34px; border-radius: 10px; background: rgba(37,99,235,0.2); display: flex; align-items: center; justify-content: center; font-size: 16px;">📡</div>
+      <!-- UI CONTROLS ONLY -->
+      <div id="tab-controls" class="controls-list">
+        ${widgets.filter(w => w.visible !== false).length === 0 ? `
+          <div class="card" style="text-align: center; padding: 32px 16px; color: var(--subtext);">
+            <div style="font-size: 24px; margin-bottom: 8px;">📱</div>
+            <div style="font-weight: 700; color: #0f172a; margin-bottom: 4px;">No Components Added</div>
+            <div style="font-size: 12px;">Add components in InnoIDE App Designer to control hardware from this companion app.</div>
+          </div>
+        ` : widgets.filter(w => w.visible !== false).map(w => {
+        if (w.type === 'switch') {
+          const switchOnLoc = w.lastOnLocation || initialOnLoc;
+          const switchOffLoc = w.lastOffLocation || initialOffLoc;
+          return `
+            <div class="card ${w.state ? 'glow-blue' : ''}" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
+              <div class="row">
                 <div>
-                  <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title || 'ESP32 Dev Board'}</div>
-                  <div style="font-size: 10px; color: #4ade80; font-weight: 700; margin-top: 2px;">● Online & Connected</div>
+                  <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
+                  <div class="meta">${w.boundTarget || w.target || 'GPIO Pin'}</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="input-${w.id}" ${w.state ? 'checked' : ''} onchange="handleSwitch('${w.id}', this.checked, '${w.title}')">
+                  <span class="slider-toggle"></span>
+                </label>
+              </div>
+              <div id="switch-hint-${w.id}" class="switch-hint">
+                <span>📍</span> <span id="switch-hint-text-${w.id}">Location required for ON/OFF logging</span>
+              </div>
+
+              <!-- LIVE ON & OFF TIMING AND LOCATION DISPLAY -->
+              <div id="switch-telemetry-${w.id}" style="margin-top: 8px; border-top: 1px solid #f1f5f9; padding-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+                <!-- ON Timing & Location -->
+                <div id="switch-on-row-${w.id}" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 9px; font-weight: 800; color: #15803d; display: flex; align-items: center; gap: 4px; text-transform: uppercase;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #22c55e;"></span> SWITCH ON TIMING & LOCATION
+                    </span>
+                    <span id="switch-on-time-${w.id}" style="font-size: 9px; font-weight: 700; color: #16a34a; font-family: monospace;">
+                      ${switchOnLoc ? formatGeologTime(switchOnLoc) : '--:--:--'}
+                    </span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
+                    <span style="font-size: 10px; font-weight: 700; color: #14532d;">📍 <span id="switch-on-city-${w.id}">${switchOnLoc?.city || 'No ON event recorded yet'}</span></span>
+                    <span id="switch-on-acc-${w.id}" style="font-size: 8px; color: #16a34a; font-weight: 700;">${switchOnLoc ? ('Acc: ' + (switchOnLoc.accuracy != null ? switchOnLoc.accuracy : '12') + 'm') : ''}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="switch-on-coords-${w.id}" style="font-size: 8px; color: #64748b; font-family: monospace;">
+                      ${switchOnLoc?.lat ? (parseFloat(switchOnLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOnLoc.lng).toFixed(4) + '° E') : ''}
+                    </span>
+                    <a id="switch-on-map-link-${w.id}" href="${switchOnLoc?.lat ? ('https://www.google.com/maps?q=' + switchOnLoc.lat + ',' + switchOnLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #16a34a; text-decoration: none; display: ${switchOnLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
+                  </div>
+                </div>
+
+                <!-- OFF Timing & Location -->
+                <div id="switch-off-row-${w.id}" style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 9px; font-weight: 800; color: #b91c1c; display: flex; align-items: center; gap: 4px; text-transform: uppercase;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> SWITCH OFF TIMING & LOCATION
+                    </span>
+                    <span id="switch-off-time-${w.id}" style="font-size: 9px; font-weight: 700; color: #dc2626; font-family: monospace;">
+                      ${switchOffLoc ? formatGeologTime(switchOffLoc) : '--:--:--'}
+                    </span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
+                    <span style="font-size: 10px; font-weight: 700; color: #7f1d1d;">📍 <span id="switch-off-city-${w.id}">${switchOffLoc?.city || 'No OFF event recorded yet'}</span></span>
+                    <span id="switch-off-acc-${w.id}" style="font-size: 8px; color: #dc2626; font-weight: 700;">${switchOffLoc ? ('Acc: ' + (switchOffLoc.accuracy != null ? switchOffLoc.accuracy : '10') + 'm') : ''}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="switch-off-coords-${w.id}" style="font-size: 8px; color: #64748b; font-family: monospace;">
+                      ${switchOffLoc?.lat ? (parseFloat(switchOffLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOffLoc.lng).toFixed(4) + '° E') : ''}
+                    </span>
+                    <a id="switch-off-map-link-${w.id}" href="${switchOffLoc?.lat ? ('https://www.google.com/maps?q=' + switchOffLoc.lat + ',' + switchOffLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #dc2626; text-decoration: none; display: ${switchOffLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
+                  </div>
                 </div>
               </div>
-              <div class="live-pill">WIFI 100%</div>
-            </div>
-          </div>`;
-      }
-      if (w.type === 'label') {
-        return `
-          <div class="card" id="card-${w.id}" style="padding: 12px 16px; ${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
-            <div class="title" style="color: ${w.textColor || w.color || '#f8fafc'}; font-size: ${w.fontSize || 15}px;">${w.title}</div>
-            ${(w.boundTarget || w.target) ? `<div class="meta">${w.boundTarget || w.target}</div>` : ''}
-          </div>`;
-      }
-      if (w.type === 'location') {
-        const hist = (Array.isArray(w.locationHistory) ? [...w.locationHistory] : [])
-          .filter(h => !isStaleTestGeolog(h))
-          .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
-        const lastOnLoc = (w.lastLocation && w.lastLocation.event === 'ON' && !isStaleTestGeolog(w.lastLocation))
-          ? w.lastLocation
-          : (hist.find(h => h.event === 'ON') || null);
-        const lastOffLoc = (w.lastLocation && w.lastLocation.event === 'OFF' && !isStaleTestGeolog(w.lastLocation))
-          ? w.lastLocation
-          : (hist.find(h => h.event === 'OFF') || null);
-        const esp32Loc = (deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation))
-          ? deviceDetectedLocation
-          : (w.lastLocation?.source === 'Network' && !isStaleTestGeolog(w.lastLocation) ? w.lastLocation : null);
-        return `
-          <div class="card" id="card-${w.id}" style="border: 1px solid #06b6d4; background: #0c1929; border-radius: ${w.cornerRadius || 16}px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
-            <div class="row" style="display: flex; align-items: center; justify-content: space-between;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(6,182,212,0.2); display: flex; align-items: center; justify-content: center; font-size: 16px;">📍</div>
+            </div>`;
+        }
+        if (w.type === 'slider') {
+          return `
+            <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
+              <div class="row">
                 <div>
-                  <div class="title" style="color: #38bdf8; font-size: ${w.fontSize || 14}px; font-weight: 700;">${w.title || 'Location Button'}</div>
-                  <div class="meta" style="color: #67e8f9; font-size: 11px;">GPS Switch Geologger</div>
+                  <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
+                  <div class="meta">PWM Target: ${w.boundTarget || w.target || 'GPIO 4 (Servo)'}</div>
                 </div>
+                <div style="font-weight: 800; font-size: ${w.fontSize ? Math.round(w.fontSize * 1.2) : 16}px; color: ${w.color || '#7c3aed'};" id="val-${w.id}">${w.value || 90}${w.unit || '°'}</div>
               </div>
-              <div style="display: flex; gap: 4px;">
-                <span id="badge-on-${w.id}" style="font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 9999px; background: rgba(34,197,94,0.2); color: #4ade80; display: ${lastOnLoc ? 'inline-block' : 'none'};">ON ✓</span>
-                <span id="badge-off-${w.id}" style="font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 9999px; background: rgba(239,68,68,0.2); color: #f87171; display: ${lastOffLoc ? 'inline-block' : 'none'};">OFF ✓</span>
-              </div>
-            </div>
-
-            <!-- Section 1: ESP32-S3 DEVICE (HOST) -->
-            <div style="background: #0c1d36; border: 1.5px solid #1d4ed8; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <span style="width: 8px; height: 8px; border-radius: 50%; background: #3b82f6; display: inline-block;"></span>
-                  <span style="font-size: 10px; font-weight: 800; color: #60a5fa; letter-spacing: 0.5px; text-transform: uppercase;">ESP32-S3 DEVICE (HOST)</span>
+              <div class="slider-row">
+                <button class="step-btn" onclick="stepSlider('${w.id}', -10, ${w.min || 0}, ${w.max || 180}, '${w.title}')">-10°</button>
+                <button class="step-btn" onclick="stepSlider('${w.id}', -1, ${w.min || 0}, ${w.max || 180}, '${w.title}')">-1°</button>
+                <div class="slider-bar-wrap">
+                  <div class="slider-bar-fill" id="bar-${w.id}" style="width: ${(((w.value || 90) - (w.min || 0)) / ((w.max || 180) - (w.min || 0))) * 100}%;"></div>
                 </div>
-                <span id="host-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(59,130,246,0.2); color: #93c5fd; padding: 2px 6px; border-radius: 4px;">CALIBRATED</span>
+                <button class="step-btn" onclick="stepSlider('${w.id}', 1, ${w.min || 0}, ${w.max || 180}, '${w.title}')">+1°</button>
+                <button class="step-btn" onclick="stepSlider('${w.id}', 10, ${w.min || 0}, ${w.max || 180}, '${w.title}')">+10°</button>
               </div>
-              <div id="host-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
-                📍 ${esp32Loc?.city || 'Calibrated Location'}${esp32Loc?.country ? ', ' + esp32Loc.country : ', India'}
-              </div>
-              <div id="host-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
-                ${esp32Loc?.address || 'Chennai, Tamil Nadu, India'}
-              </div>
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                <span id="host-gps-${w.id}" style="font-size: 10px; color: #60a5fa; font-family: monospace; font-weight: 600;">
-                  ${esp32Loc?.lat ? (esp32Loc.lat + '° N, ' + esp32Loc.lng + '° E') : '13.0147° N, 80.2242° E'}
-                </span>
-                <span id="host-source-${w.id}" style="font-size: 9px; color: #64748b;">
-                  ${esp32Loc?.source ? '(' + esp32Loc.source.replace('IP Geolocation ', '') + ')' : '(Host Calibrated)'}
-                </span>
-              </div>
-              <div style="display: flex; gap: 6px; margin-top: 6px;">
-                <button id="host-gps-btn-${w.id}" onclick="detectLiveGpsLocation('${w.id}')" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid #166534; border-radius: 6px; padding: 4px 8px; font-size: 9px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-                  🔄 Detect Live GPS
-                </button>
-                <button id="host-refresh-btn-${w.id}" onclick="refreshHostLocation('${w.id}')" style="background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid #1d4ed8; border-radius: 6px; padding: 4px 8px; font-size: 9px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-                  🎯 Calibrate Locality
-                </button>
-              </div>
-            </div>
-
-            <!-- Section 2: SWITCH ON TIMING & LOCATION -->
-            <div id="on-box-${w.id}" style="background: #092318; border: 1.5px solid ${lastOnLoc ? '#166534' : '#1e3a2b'}; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <span id="on-dot-${w.id}" style="width: 8px; height: 8px; border-radius: 50%; background: ${lastOnLoc ? '#22c55e' : '#475569'}; display: inline-block;"></span>
-                  <span id="on-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOnLoc ? '#4ade80' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH ON TIMING & LOCATION</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 4px;">
-                  <span id="on-time-badge-${w.id}" style="font-size: 9px; font-weight: 800; background: rgba(34,197,94,0.25); color: #4ade80; padding: 2px 6px; border-radius: 4px; font-family: monospace; display: ${lastOnLoc ? 'inline-block' : 'none'};">⏱️ ${lastOnLoc ? formatGeologTime(lastOnLoc) : ''}</span>
-                  <span id="on-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(34,197,94,0.2); color: #86efac; padding: 2px 6px; border-radius: 4px; display: ${lastOnLoc ? 'inline-block' : 'none'};">LATEST</span>
-                </div>
-              </div>
-              <div id="on-content-${w.id}" style="display: ${lastOnLoc ? 'block' : 'none'};">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                  <span id="on-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc;">
-                    🟢 ${lastOnLoc?.city || 'Logged Location'}
-                  </span>
-                  <span id="on-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #86efac; font-family: monospace;">
-                    ${lastOnLoc ? formatGeologTime(lastOnLoc) : ''}
-                  </span>
-                </div>
-                <div id="on-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 1px;">
-                  ${lastOnLoc?.address || ''}
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                  <span id="on-gps-${w.id}" style="font-size: 10px; color: #4ade80; font-family: monospace; font-weight: 600;">
-                    ${lastOnLoc?.lat ? (lastOnLoc.lat + '° N, ' + lastOnLoc.lng + '° E') : ''}
-                  </span>
-                  <span id="on-acc-row-${w.id}" style="font-size: 9px; color: #86efac; font-weight: 700; display: ${lastOnLoc ? 'inline' : 'none'};">
-                    Accuracy: <span id="on-acc-${w.id}">${lastOnLoc?.accuracy != null ? lastOnLoc.accuracy : '12'}</span> m
-                  </span>
-                </div>
-                <a id="on-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOnLoc?.lat || ''},${lastOnLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid #166534; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
-                  🗺️ View ON Location on Maps
-                </a>
-              </div>
-              <div id="on-empty-${w.id}" style="display: ${lastOnLoc ? 'none' : 'block'}; font-size: 10px; color: #64748b; font-style: italic; margin-top: 2px;">
-                No switch ON event recorded yet. Toggle the switch to capture location.
-              </div>
-            </div>
-
-            <!-- Section 3: SWITCH OFF TIMING & LOCATION -->
-            <div id="off-box-${w.id}" style="background: #261214; border: 1.5px solid ${lastOffLoc ? '#991b1b' : '#3a1e22'}; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <span id="off-dot-${w.id}" style="width: 8px; height: 8px; border-radius: 50%; background: ${lastOffLoc ? '#ef4444' : '#475569'}; display: inline-block;"></span>
-                  <span id="off-label-${w.id}" style="font-size: 10px; font-weight: 800; color: ${lastOffLoc ? '#f87171' : '#94a3b8'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH OFF TIMING & LOCATION</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 4px;">
-                  <span id="off-time-badge-${w.id}" style="font-size: 9px; font-weight: 800; background: rgba(239,68,68,0.25); color: #f87171; padding: 2px 6px; border-radius: 4px; font-family: monospace; display: ${lastOffLoc ? 'inline-block' : 'none'};">⏱️ ${lastOffLoc ? formatGeologTime(lastOffLoc) : ''}</span>
-                  <span id="off-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: rgba(239,68,68,0.2); color: #fca5a5; padding: 2px 6px; border-radius: 4px; display: ${lastOffLoc ? 'inline-block' : 'none'};">LATEST</span>
-                </div>
-              </div>
-              <div id="off-content-${w.id}" style="display: ${lastOffLoc ? 'block' : 'none'};">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                  <span id="off-city-${w.id}" style="font-size: 12px; font-weight: 700; color: #f8fafc;">
-                    🔴 ${lastOffLoc?.city || 'Logged Location'}
-                  </span>
-                  <span id="off-time-${w.id}" style="font-size: 10px; font-weight: 700; color: #fca5a5; font-family: monospace;">
-                    ${lastOffLoc ? formatGeologTime(lastOffLoc) : ''}
-                  </span>
-                </div>
-                <div id="off-addr-${w.id}" style="font-size: 10px; color: #94a3b8; line-height: 1.3; margin-top: 1px;">
-                  ${lastOffLoc?.address || ''}
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                  <span id="off-gps-${w.id}" style="font-size: 10px; color: #f87171; font-family: monospace; font-weight: 600;">
-                    ${lastOffLoc?.lat ? (lastOffLoc.lat + '° N, ' + lastOffLoc.lng + '° E') : ''}
-                  </span>
-                  <span id="off-acc-row-${w.id}" style="font-size: 9px; color: #fca5a5; font-weight: 700; display: ${lastOffLoc ? 'inline' : 'none'};">
-                    Accuracy: <span id="off-acc-${w.id}">${lastOffLoc?.accuracy != null ? lastOffLoc.accuracy : '10'}</span> m
-                  </span>
-                </div>
-                <a id="off-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOffLoc?.lat || ''},${lastOffLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid #991b1b; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
-                  🗺️ View OFF Location on Maps
-                </a>
-              </div>
-              <div id="off-empty-${w.id}" style="display: ${lastOffLoc ? 'none' : 'block'}; font-size: 10px; color: #64748b; font-style: italic; margin-top: 2px;">
-                No switch OFF event recorded yet. Toggle the switch to capture location.
-              </div>
-            </div>
-
-            <!-- Section 4: SWITCH GEOLOG HISTORY -->
-            <div style="margin-top: 4px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <div style="font-size: 10px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
-                  SWITCH GEOLOG HISTORY (<span id="hist-count-${w.id}">${hist.length}</span>)
-                </div>
-                <button onclick="clearMobileGeologs('${w.id}')" style="background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; padding: 2px 6px; font-size: 9px; font-weight: 700; cursor: pointer;">
-                  Clear
-                </button>
-              </div>
-              <div id="hist-list-${w.id}" style="display: flex; flex-direction: column; gap: 5px; max-height: 130px; overflow-y: auto;">
-                ${hist.length === 0 ? `
-                  <div id="hist-empty-${w.id}" style="font-size: 10px; color: #64748b; text-align: center; padding: 8px; background: #0b1322; border-radius: 8px;">
-                    No location history yet. Toggle switches to record geologs.
-                  </div>
-                ` : hist.slice(0, 10).map(item => {
-                  const isON = item.event === 'ON';
-                  const isOFF = item.event === 'OFF';
-                  const badgeBg = isON ? 'rgba(34,197,94,0.2)' : (isOFF ? 'rgba(239,68,68,0.2)' : 'rgba(56,189,248,0.2)');
-                  const badgeColor = isON ? '#4ade80' : (isOFF ? '#f87171' : '#38bdf8');
-                  const latStr = (item.lat && item.lng) 
-                    ? (parseFloat(item.lat).toFixed(3) + '°N, ' + parseFloat(item.lng).toFixed(3) + '°E') 
-                    : (item.lat ? (parseFloat(item.lat).toFixed(3) + '°') : '');
-                  const accStr = item.accuracy != null ? (' • Acc: ' + item.accuracy + 'm') : '';
-                  const timeFormatted = formatGeologTime(item);
-                  return `
-                    <div class="geolog-history-item" onclick="window.open('https://www.google.com/maps?q=${item.lat},${item.lng}', '_blank')" title="View on Google Maps" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b; transition: all 0.2s;">
-                      <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: ${badgeBg}; color: ${badgeColor};">${item.event || 'LOG'}</span>
-                        <div style="display: flex; flex-direction: column;">
-                          <span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">${item.city || 'Location'}</span>
-                          ${latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + accStr + '</span>' : ''}
-                        </div>
-                      </div>
-                      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-                        <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">${timeFormatted}</span>
-                        <span style="font-size: 9px; color: #38bdf8;">🗺️ Maps</span>
-                      </div>
-                    </div>`;
-                }).join('')}
-              </div>
-            </div>
-
-            <button onclick="recordAndSendMobileLocation('${w.id}')" style="width: 100%; margin-top: 4px; background: #1e293b; color: #38bdf8; border: 1px solid #334155; border-radius: 10px; padding: 8px 12px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
-              🎯 Share My Mobile GPS Location
-            </button>
-          </div>`;
-      }
-      if (w.type === 'textfield') {
-        const questionsList = (Array.isArray(w.questions) ? w.questions : []).filter(q => !isHardcodedTextFieldQuestion(q));
-        const activeQIds = questionsList.map(q => q.id);
-        const activeQTexts = questionsList.map(q => String(q.text || '').trim().toLowerCase());
-        const responsesList = (Array.isArray(w.responses) ? w.responses : []).filter(r => {
-          if (isHardcodedTextFieldResponse(r)) return false;
-          const rQText = String(r.questionText || r.question || '').trim().toLowerCase();
-          const rQId = String(r.questionId || '');
-          return (rQId && activeQIds.includes(rQId)) || (rQText && activeQTexts.includes(rQText));
-        });
-        return `
-          <div class="card" id="card-${w.id}" style="border: 1px solid #6366f1; background: #0e122b; border-radius: ${w.cornerRadius || 16}px;">
-            <div class="row">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(99,102,241,0.25); display: flex; align-items: center; justify-content: center; font-size: 14px;">📝</div>
+            </div>`;
+        }
+        if (w.type === 'gauge') {
+          return `
+            <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
+              <div class="row">
                 <div>
-                  <div class="title" style="color: #a5b4fc; font-size: ${w.fontSize || 14}px;">${w.title || 'Dynamic Form'}</div>
-                  <div class="meta" style="color: #818cf8;">Question & Response Survey</div>
+                  <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title}</div>
+                  <div class="meta">Source: ${w.boundTarget || w.target || 'ADC Telemetry'}</div>
+                </div>
+                <div class="live-pill" id="pill-${w.id}">● LIVE ADC</div>
+              </div>
+              <div class="gauge-big" id="val-${w.id}" style="color: ${w.color || '#ef4444'};">${w.value || 24.3}${w.unit || '°C'}</div>
+              <div class="meta" style="text-align: center;">Range: ${w.min || 0} - ${w.max || 50}${w.unit || '°C'} (Guard Threshold: 30°C)</div>
+            </div>`;
+        }
+        if (w.type === 'button') {
+          return `
+            <button class="btn" style="background: ${w.backgroundColor || w.color || '#ea580c'}; color: ${w.textColor || 'white'}; font-size: ${w.fontSize || 14}px; border-radius: ${w.cornerRadius || 14}px;" onclick="handleBtn('${w.title}', '${w.boundTarget || w.target || 'GPIO 5'}', '${w.action || 'TRIGGER'}')">
+              🚨 ${w.title}
+            </button>`;
+        }
+        if (w.type === 'device_card') {
+          return `
+            <div class="card" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
+              <div class="row">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div style="width: 34px; height: 34px; border-radius: 10px; background: #eff6ff; display: flex; align-items: center; justify-content: center; font-size: 16px;">📡</div>
+                  <div>
+                    <div class="title" style="${w.fontSize ? `font-size: ${w.fontSize}px;` : ''}${w.textColor ? `color: ${w.textColor};` : ''}">${w.title || 'ESP32 Dev Board'}</div>
+                    <div style="font-size: 10px; color: #16a34a; font-weight: 700; margin-top: 2px;">● Online & Connected</div>
+                  </div>
+                </div>
+                <div class="live-pill">WIFI 100%</div>
+              </div>
+            </div>`;
+        }
+        if (w.type === 'label') {
+          return `
+            <div class="card" id="card-${w.id}" style="padding: 12px 16px; ${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
+              <div class="title" style="color: ${w.textColor || w.color || '#0f172a'}; font-size: ${w.fontSize || 14}px;">${w.title}</div>
+              ${(w.boundTarget || w.target) ? `<div class="meta">${w.boundTarget || w.target}</div>` : ''}
+            </div>`;
+        }
+        if (w.type === 'location') {
+          const hist = (Array.isArray(w.locationHistory) ? [...w.locationHistory] : [])
+            .filter(h => !isStaleTestGeolog(h))
+            .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
+          const lastOnLoc = (w.lastLocation && w.lastLocation.event === 'ON' && !isStaleTestGeolog(w.lastLocation))
+            ? w.lastLocation
+            : (hist.find(h => h.event === 'ON') || null);
+          const lastOffLoc = (w.lastLocation && w.lastLocation.event === 'OFF' && !isStaleTestGeolog(w.lastLocation))
+            ? w.lastLocation
+            : (hist.find(h => h.event === 'OFF') || null);
+          const esp32Loc = (deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation))
+            ? deviceDetectedLocation
+            : (w.lastLocation?.source === 'Network' && !isStaleTestGeolog(w.lastLocation) ? w.lastLocation : null);
+          return `
+            <div class="card" id="card-${w.id}" style="border: 1px solid #e2e8f0; background: #ffffff; border-radius: ${w.cornerRadius || 16}px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+              <div class="row" style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <div style="width: 32px; height: 32px; border-radius: 8px; background: #ecfeff; color: #0891b2; display: flex; align-items: center; justify-content: center; font-size: 16px;">📍</div>
+                  <div>
+                    <div class="title" style="color: #0f172a; font-size: ${w.fontSize || 14}px; font-weight: 700;">${w.title || 'Location Button'}</div>
+                    <div class="meta" style="color: #64748b; font-size: 10px;">GPS & Switch Geologger</div>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                  <span id="badge-on-${w.id}" style="font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 9999px; background: #dcfce7; color: #15803d; border: 1px solid #86efac; display: ${lastOnLoc ? 'inline-block' : 'none'};">ON ✓</span>
+                  <span id="badge-off-${w.id}" style="font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 9999px; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; display: ${lastOffLoc ? 'inline-block' : 'none'};">OFF ✓</span>
                 </div>
               </div>
-              <div class="live-pill" style="background: rgba(99,102,241,0.25); color: #c7d2fe;">${questionsList.length} QUESTION${questionsList.length === 1 ? '' : 'S'}</div>
-            </div>
 
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 6px;">
-              ${questionsList.length === 0 ? `
-                <div style="background: #090d1e; border-radius: 12px; padding: 14px; border: 1px dashed #1e254d; text-align: center; color: #64748b; font-size: 11px;">
-                  No questions currently published. Questions created on the desktop canvas will appear here.
+              <!-- Section 1: ESP32-S3 DEVICE (HOST) -->
+              <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="width: 7px; height: 7px; border-radius: 50%; background: #2563eb; display: inline-block;"></span>
+                    <span style="font-size: 9px; font-weight: 800; color: #1d4ed8; letter-spacing: 0.5px; text-transform: uppercase;">ESP32-S3 DEVICE (HOST)</span>
+                  </div>
+                  <span id="host-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px;">CALIBRATED</span>
                 </div>
-              ` : questionsList.map((q, idx) => `
-                <div style="background: #090d1e; border-radius: 12px; padding: 12px; border: 1px solid #1e254d;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="font-size: 11px; font-weight: 800; color: #818cf8;">Q${idx + 1}</span>
-                    <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(99,102,241,0.2); color: #a5b4fc; text-transform: uppercase;">${q.type || 'text'}</span>
-                  </div>
-                  <div style="font-size: 13px; font-weight: 600; color: #f8fafc; margin-bottom: 8px;">
-                    ${q.text}
-                  </div>
-                  
-                  ${q.type === 'multiple_choice' && Array.isArray(q.options) && q.options.length > 0 ? `
-                    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;">
-                      ${q.options.map((opt, optIdx) => `
-                        <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; cursor: pointer; background: #131a38; padding: 6px 10px; border-radius: 8px; border: 1px solid #232d5b;">
-                          <input type="radio" name="opt-${w.id}-${q.id}" value="${opt}" ${optIdx === 0 ? 'checked' : ''} onchange="document.getElementById('input-${w.id}-${q.id}').value = this.value">
-                          <span>${opt}</span>
-                        </label>
-                      `).join('')}
-                    </div>
-                    <input type="hidden" id="input-${w.id}-${q.id}" value="${q.options[0] || ''}">
-                  ` : `
-                    <input 
-                      type="text" 
-                      id="input-${w.id}-${q.id}" 
-                      placeholder="Type your answer here..." 
-                      style="width: 100%; background: #131a38; border: 1px solid #232d5b; border-radius: 8px; padding: 10px; font-size: 12px; color: #f8fafc; outline: none; margin-bottom: 8px;"
-                      onkeypress="if(event.key === 'Enter') submitMobileFormAnswer('${w.id}', '${q.id}', '${q.text.replace(/'/g, "\\'")}')"
-                    >
-                  `}
-
-                  <button 
-                    onclick="submitMobileFormAnswer('${w.id}', '${q.id}', '${q.text.replace(/'/g, "\\'")}')"
-                    style="width: 100%; background: #4f46e5; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;"
-                  >
-                    <span>Submit Answer 🚀</span>
+                <div id="host-city-${w.id}" style="font-size: 11px; font-weight: 700; color: #1e3a8a; margin-top: 2px;">
+                  📍 ${esp32Loc?.city || 'Calibrated Location'}${esp32Loc?.country ? ', ' + esp32Loc.country : ', India'}
+                </div>
+                <div id="host-addr-${w.id}" style="font-size: 10px; color: #475569; line-height: 1.3;">
+                  ${esp32Loc?.address || 'Chennai, Tamil Nadu, India'}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                  <span id="host-gps-${w.id}" style="font-size: 9px; color: #2563eb; font-family: monospace; font-weight: 600;">
+                    ${esp32Loc?.lat ? (esp32Loc.lat + '° N, ' + esp32Loc.lng + '° E') : '13.0147° N, 80.2242° E'}
+                  </span>
+                  <span id="host-source-${w.id}" style="font-size: 8px; color: #64748b;">
+                    ${esp32Loc?.source ? '(' + esp32Loc.source.replace('IP Geolocation ', '') + ')' : '(Host Calibrated)'}
+                  </span>
+                </div>
+                <div style="display: flex; gap: 6px; margin-top: 6px;">
+                  <button id="host-gps-btn-${w.id}" onclick="detectLiveGpsLocation('${w.id}')" style="background: #dcfce7; color: #15803d; border: 1px solid #86efac; border-radius: 6px; padding: 4px 8px; font-size: 9px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                    🔄 Detect Live GPS
                   </button>
-                  <div id="status-${w.id}-${q.id}" style="font-size: 10px; color: #4ade80; text-align: center; margin-top: 4px; display: none;">✓ Response sent to desktop UI</div>
+                  <button id="host-refresh-btn-${w.id}" onclick="refreshHostLocation('${w.id}')" style="background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; border-radius: 6px; padding: 4px 8px; font-size: 9px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                    🎯 Calibrate Locality
+                  </button>
                 </div>
-              `).join('')}
-            </div>
+              </div>
 
-            <!-- Submitted Answers Container -->
-            <div id="responses-wrap-${w.id}" style="margin-top: 12px; border-top: 1px solid #1e254d; padding-top: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <span style="font-size: 11px; font-weight: 800; color: #a5b4fc;">💬 Submitted Answers (<span id="resp-count-${w.id}">${responsesList.length}</span>)</span>
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <button onclick="clearMobileFormAnswers('${w.id}')" style="background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; padding: 2px 6px; font-size: 9px; font-weight: 700; cursor: pointer;">
+              <!-- Section 2: SWITCH ON TIMING & LOCATION -->
+              <div id="on-box-${w.id}" style="background: #f0fdf4; border: 1px solid ${lastOnLoc ? '#bbf7d0' : '#e2e8f0'}; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span id="on-dot-${w.id}" style="width: 7px; height: 7px; border-radius: 50%; background: ${lastOnLoc ? '#22c55e' : '#94a3b8'}; display: inline-block;"></span>
+                    <span id="on-label-${w.id}" style="font-size: 9px; font-weight: 800; color: ${lastOnLoc ? '#15803d' : '#64748b'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH ON TIMING & LOCATION</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span id="on-time-badge-${w.id}" style="font-size: 9px; font-weight: 700; background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 4px; font-family: monospace; display: ${lastOnLoc ? 'inline-block' : 'none'};">⏱️ ${lastOnLoc ? formatGeologTime(lastOnLoc) : ''}</span>
+                    <span id="on-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 4px; display: ${lastOnLoc ? 'inline-block' : 'none'};">LATEST</span>
+                  </div>
+                </div>
+                <div id="on-content-${w.id}" style="display: ${lastOnLoc ? 'block' : 'none'};">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                    <span id="on-city-${w.id}" style="font-size: 11px; font-weight: 700; color: #14532d;">
+                      🟢 ${lastOnLoc?.city || 'Logged Location'}
+                    </span>
+                    <span id="on-time-${w.id}" style="font-size: 9px; font-weight: 700; color: #16a34a; font-family: monospace;">
+                      ${lastOnLoc ? formatGeologTime(lastOnLoc) : ''}
+                    </span>
+                  </div>
+                  <div id="on-addr-${w.id}" style="font-size: 10px; color: #475569; line-height: 1.3; margin-top: 1px;">
+                    ${lastOnLoc?.address || ''}
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                    <span id="on-gps-${w.id}" style="font-size: 9px; color: #16a34a; font-family: monospace; font-weight: 600;">
+                      ${lastOnLoc?.lat ? (lastOnLoc.lat + '° N, ' + lastOnLoc.lng + '° E') : ''}
+                    </span>
+                    <span id="on-acc-row-${w.id}" style="font-size: 8px; color: #15803d; font-weight: 700; display: ${lastOnLoc ? 'inline' : 'none'};">
+                      Accuracy: <span id="on-acc-${w.id}">${lastOnLoc?.accuracy != null ? lastOnLoc.accuracy : '12'}</span> m
+                    </span>
+                  </div>
+                  <a id="on-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOnLoc?.lat || ''},${lastOnLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: #dcfce7; color: #15803d; border: 1px solid #86efac; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                    🗺️ View ON Location on Maps
+                  </a>
+                </div>
+                <div id="on-empty-${w.id}" style="display: ${lastOnLoc ? 'none' : 'block'}; font-size: 10px; color: #94a3b8; font-style: italic; margin-top: 2px;">
+                  No switch ON event recorded yet. Toggle the switch to capture location.
+                </div>
+              </div>
+
+              <!-- Section 3: SWITCH OFF TIMING & LOCATION -->
+              <div id="off-box-${w.id}" style="background: #fef2f2; border: 1px solid ${lastOffLoc ? '#fecaca' : '#e2e8f0'}; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 3px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span id="off-dot-${w.id}" style="width: 7px; height: 7px; border-radius: 50%; background: ${lastOffLoc ? '#ef4444' : '#94a3b8'}; display: inline-block;"></span>
+                    <span id="off-label-${w.id}" style="font-size: 9px; font-weight: 800; color: ${lastOffLoc ? '#b91c1c' : '#64748b'}; letter-spacing: 0.5px; text-transform: uppercase;">SWITCH OFF TIMING & LOCATION</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span id="off-time-badge-${w.id}" style="font-size: 9px; font-weight: 700; background: #fee2e2; color: #b91c1c; padding: 2px 6px; border-radius: 4px; font-family: monospace; display: ${lastOffLoc ? 'inline-block' : 'none'};">⏱️ ${lastOffLoc ? formatGeologTime(lastOffLoc) : ''}</span>
+                    <span id="off-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: #fee2e2; color: #b91c1c; padding: 2px 6px; border-radius: 4px; display: ${lastOffLoc ? 'inline-block' : 'none'};">LATEST</span>
+                  </div>
+                </div>
+                <div id="off-content-${w.id}" style="display: ${lastOffLoc ? 'block' : 'none'};">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                    <span id="off-city-${w.id}" style="font-size: 11px; font-weight: 700; color: #7f1d1d;">
+                      🔴 ${lastOffLoc?.city || 'Logged Location'}
+                    </span>
+                    <span id="off-time-${w.id}" style="font-size: 9px; font-weight: 700; color: #dc2626; font-family: monospace;">
+                      ${lastOffLoc ? formatGeologTime(lastOffLoc) : ''}
+                    </span>
+                  </div>
+                  <div id="off-addr-${w.id}" style="font-size: 10px; color: #475569; line-height: 1.3; margin-top: 1px;">
+                    ${lastOffLoc?.address || ''}
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                    <span id="off-gps-${w.id}" style="font-size: 9px; color: #dc2626; font-family: monospace; font-weight: 600;">
+                      ${lastOffLoc?.lat ? (lastOffLoc.lat + '° N, ' + lastOffLoc.lng + '° E') : ''}
+                    </span>
+                    <span id="off-acc-row-${w.id}" style="font-size: 8px; color: #b91c1c; font-weight: 700; display: ${lastOffLoc ? 'inline' : 'none'};">
+                      Accuracy: <span id="off-acc-${w.id}">${lastOffLoc?.accuracy != null ? lastOffLoc.accuracy : '10'}</span> m
+                    </span>
+                  </div>
+                  <a id="off-maps-btn-${w.id}" href="https://www.google.com/maps?q=${lastOffLoc?.lat || ''},${lastOffLoc?.lng || ''}" target="_blank" style="margin-top: 6px; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 6px; padding: 5px 10px; font-size: 9px; font-weight: 700; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                    🗺️ View OFF Location on Maps
+                  </a>
+                </div>
+                <div id="off-empty-${w.id}" style="display: ${lastOffLoc ? 'none' : 'block'}; font-size: 10px; color: #94a3b8; font-style: italic; margin-top: 2px;">
+                  No switch OFF event recorded yet. Toggle the switch to capture location.
+                </div>
+              </div>
+
+              <!-- Section 4: SWITCH GEOLOG HISTORY -->
+              <div style="margin-top: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <div style="font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">
+                    SWITCH GEOLOG HISTORY (<span id="hist-count-${w.id}">${hist.length}</span>)
+                  </div>
+                  <button onclick="clearMobileGeologs('${w.id}')" style="background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 4px; padding: 2px 6px; font-size: 9px; font-weight: 700; cursor: pointer;">
                     Clear
                   </button>
-                  <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 700;">● Live Stream</span>
+                </div>
+                <div id="hist-list-${w.id}" style="display: flex; flex-direction: column; gap: 5px; max-height: 130px; overflow-y: auto;">
+                  ${hist.length === 0 ? `
+                    <div id="hist-empty-${w.id}" style="font-size: 10px; color: #64748b; text-align: center; padding: 8px; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
+                      No location history yet. Toggle switches to record geologs.
+                    </div>
+                  ` : hist.slice(0, 10).map(item => {
+                    const isON = item.event === 'ON';
+                    const isOFF = item.event === 'OFF';
+                    const itemBg = isON ? '#f0fdf4' : (isOFF ? '#fef2f2' : '#f8fafc');
+                    const itemBorder = isON ? '#bbf7d0' : (isOFF ? '#fecaca' : '#e2e8f0');
+                    const badgeBg = isON ? '#dcfce7' : (isOFF ? '#fee2e2' : '#dbeafe');
+                    const badgeColor = isON ? '#15803d' : (isOFF ? '#b91c1c' : '#1d4ed8');
+                    const latStr = (item.lat && item.lng) 
+                      ? (parseFloat(item.lat).toFixed(3) + '°N, ' + parseFloat(item.lng).toFixed(3) + '°E') 
+                      : (item.lat ? (parseFloat(item.lat).toFixed(3) + '°') : '');
+                    const accStr = item.accuracy != null ? (' • Acc: ' + item.accuracy + 'm') : '';
+                    const timeFormatted = formatGeologTime(item);
+                    return `
+                      <div class="geolog-history-item" onclick="window.open('https://www.google.com/maps?q=${item.lat},${item.lng}', '_blank')" title="View on Google Maps" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: ${itemBg}; border-radius: 8px; padding: 6px 10px; border: 1px solid ${itemBorder}; transition: all 0.2s;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: ${badgeBg}; color: ${badgeColor};">${item.event || 'LOG'}</span>
+                          <div style="display: flex; flex-direction: column;">
+                            <span style="font-size: 11px; font-weight: 600; color: #0f172a;">${item.city || 'Location'}</span>
+                            ${latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + accStr + '</span>' : ''}
+                          </div>
+                        </div>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+                          <span style="font-size: 9px; color: #64748b; font-family: monospace;">${timeFormatted}</span>
+                          <span style="font-size: 9px; color: #2563eb; font-weight: 600;">🗺️ Maps</span>
+                        </div>
+                      </div>`;
+                  }).join('')}
                 </div>
               </div>
-              <div id="responses-list-${w.id}" style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto;">
-                ${responsesList.length === 0 ? `
-                  <div id="resp-empty-${w.id}" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #090d1e; border-radius: 8px;">
-                    No answers submitted yet.
+
+              <button onclick="recordAndSendMobileLocation('${w.id}')" style="width: 100%; margin-top: 4px; background: #f8fafc; color: #0284c7; border: 1px solid #cbd5e1; border-radius: 10px; padding: 8px 12px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                🎯 Share My Mobile GPS Location
+              </button>
+            </div>`;
+        }
+        if (w.type === 'textfield') {
+          const questionsList = (Array.isArray(w.questions) ? w.questions : []).filter(q => !isHardcodedTextFieldQuestion(q));
+          const activeQIds = questionsList.map(q => q.id);
+          const activeQTexts = questionsList.map(q => String(q.text || '').trim().toLowerCase());
+          const responsesList = (Array.isArray(w.responses) ? w.responses : []).filter(r => {
+            if (isHardcodedTextFieldResponse(r)) return false;
+            const rQText = String(r.questionText || r.question || '').trim().toLowerCase();
+            const rQId = String(r.questionId || '');
+            return (rQId && activeQIds.includes(rQId)) || (rQText && activeQTexts.includes(rQText));
+          });
+          return `
+            <div class="card" id="card-${w.id}" style="border: 1px solid #e2e8f0; background: #ffffff; border-radius: ${w.cornerRadius || 16}px;">
+              <div class="row">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <div style="width: 28px; height: 28px; border-radius: 8px; background: #f3e8ff; color: #7c3aed; display: flex; align-items: center; justify-content: center; font-size: 14px;">📝</div>
+                  <div>
+                    <div class="title" style="color: #0f172a; font-size: ${w.fontSize || 14}px;">${w.title || 'Dynamic Form'}</div>
+                    <div class="meta" style="color: #64748b;">Question & Response Survey</div>
                   </div>
-                ` : responsesList.map(r => `
-                  <div class="resp-item" style="background: #131a38; border-radius: 8px; padding: 8px 10px; border: 1px solid #232d5b;">
-                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: #818cf8; margin-bottom: 3px;">
-                      <span style="font-weight: 700;">${r.questionText || r.question || 'Answer'}</span>
-                      <span style="color: #64748b;">${r.timestamp || r.time || ''}</span>
+                </div>
+                <div class="live-pill" style="background: #f3e8ff; color: #7c3aed;">${questionsList.length} QUESTION${questionsList.length === 1 ? '' : 'S'}</div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 6px;">
+                ${questionsList.length === 0 ? `
+                  <div style="background: #f8fafc; border-radius: 12px; padding: 14px; border: 1px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 11px;">
+                    No questions currently published. Questions created on the desktop canvas will appear here.
+                  </div>
+                ` : questionsList.map((q, idx) => `
+                  <div style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #ede9fe;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <span style="font-size: 11px; font-weight: 800; color: #6d28d9;">Q${idx + 1}</span>
+                      <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: #ede9fe; color: #6d28d9; text-transform: uppercase; font-weight: 700;">${q.type || 'text'}</span>
                     </div>
-                    <div style="font-size: 12px; font-weight: 600; color: #4ade80;">💬 ${r.answer}</div>
-                    <div style="font-size: 9px; color: #64748b; margin-top: 2px;">Source: ${r.source || 'Mobile UI'}</div>
+                    <div style="font-size: 13px; font-weight: 600; color: #1e1b4b; margin-bottom: 8px;">
+                      ${q.text}
+                    </div>
+                    
+                    ${q.type === 'multiple_choice' && Array.isArray(q.options) && q.options.length > 0 ? `
+                      <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;">
+                        ${q.options.map((opt, optIdx) => `
+                          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #1e293b; cursor: pointer; background: #ffffff; padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1;">
+                            <input type="radio" name="opt-${w.id}-${q.id}" value="${opt}" ${optIdx === 0 ? 'checked' : ''} onchange="document.getElementById('input-${w.id}-${q.id}').value = this.value">
+                            <span>${opt}</span>
+                          </label>
+                        `).join('')}
+                      </div>
+                      <input type="hidden" id="input-${w.id}-${q.id}" value="${q.options[0] || ''}">
+                    ` : `
+                      <input 
+                        type="text" 
+                        id="input-${w.id}-${q.id}" 
+                        placeholder="Type your answer here..." 
+                        style="width: 100%; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; font-size: 12px; color: #0f172a; outline: none; margin-bottom: 8px;"
+                        onkeypress="if(event.key === 'Enter') submitMobileFormAnswer('${w.id}', '${q.id}', '${q.text.replace(/'/g, "\\'")}')"
+                      >
+                    `}
+
+                    <button 
+                      onclick="submitMobileFormAnswer('${w.id}', '${q.id}', '${q.text.replace(/'/g, "\\'")}')"
+                      style="width: 100%; background: #7c3aed; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;"
+                    >
+                      <span>Submit Answer 🚀</span>
+                    </button>
+                    <div id="status-${w.id}-${q.id}" style="font-size: 10px; color: #16a34a; font-weight: 700; text-align: center; margin-top: 4px; display: none;">✓ Response sent to desktop UI</div>
                   </div>
                 `).join('')}
               </div>
-            </div>
-          </div>`;
-      }
-      if (w.type === 'progress') {
-        return `
-          <div class="card" id="card-${w.id}">
-            <div class="row">
-              <div class="title">${w.title}</div>
-              <div style="font-size: 12px; color: #38bdf8; font-weight: 800;">75%</div>
-            </div>
-            <div class="slider-bar-wrap" style="margin-top: 6px;">
-              <div class="slider-bar-fill" style="width: 75%; background: #38bdf8;"></div>
-            </div>
-          </div>`;
-      }
-      return '';
-    }).join('')}
+
+              <!-- Submitted Answers Container -->
+              <div id="responses-wrap-${w.id}" style="margin-top: 12px; border-top: 1px solid #f1f5f9; padding-top: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 11px; font-weight: 800; color: #6d28d9;">💬 Submitted Answers (<span id="resp-count-${w.id}">${responsesList.length}</span>)</span>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <button onclick="clearMobileFormAnswers('${w.id}')" style="background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 4px; padding: 2px 6px; font-size: 9px; font-weight: 700; cursor: pointer;">
+                      Clear
+                    </button>
+                    <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: #dcfce7; color: #15803d; font-weight: 700;">● Live Stream</span>
+                  </div>
+                </div>
+                <div id="responses-list-${w.id}" style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto;">
+                  ${responsesList.length === 0 ? `
+                    <div id="resp-empty-${w.id}" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
+                      No answers submitted yet.
+                    </div>
+                  ` : responsesList.map(r => `
+                    <div class="resp-item" style="background: #faf5ff; border-radius: 8px; padding: 8px 10px; border: 1px solid #e9d5ff;">
+                      <div style="display: flex; justify-content: space-between; font-size: 10px; color: #6d28d9; margin-bottom: 3px;">
+                        <span style="font-weight: 700;">${r.questionText || r.question || 'Answer'}</span>
+                        <span style="color: #64748b;">${r.timestamp || r.time || ''}</span>
+                      </div>
+                      <div style="font-size: 12px; font-weight: 600; color: #0f172a;">💬 ${r.answer}</div>
+                      <div style="font-size: 9px; color: #64748b; margin-top: 2px;">Source: ${r.source || 'Mobile UI'}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            </div>`;
+        }
+        if (w.type === 'progress') {
+          return `
+            <div class="card" id="card-${w.id}">
+              <div class="row">
+                <div class="title">${w.title}</div>
+                <div style="font-size: 12px; color: #2563eb; font-weight: 800;">75%</div>
+              </div>
+              <div class="slider-bar-wrap" style="margin-top: 6px;">
+                <div class="slider-bar-fill" style="width: 75%; background: #2563eb;"></div>
+              </div>
+            </div>`;
+        }
+        return '';
+      }).join('')}
+      </div>
     </div>
   </div>
 
   <!-- LOCATION GATING & PERMISSION MODAL -->
-  <div id="locationModalOverlay" style="display: none; position: fixed; inset: 0; background: rgba(5, 9, 20, 0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center; padding: 16px;">
-    <div id="locationModalCard" style="background: #0f172a; border: 1.5px solid #1e293b; border-radius: 24px; width: 100%; max-width: 380px; padding: 24px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); display: flex; flex-direction: column; gap: 14px; text-align: center;">
-      <div id="modalIconContainer" style="width: 52px; height: 52px; border-radius: 50%; background: rgba(56, 189, 248, 0.15); display: flex; align-items: center; justify-content: center; font-size: 26px; margin: 0 auto;">📍</div>
+  <div id="locationModalOverlay" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center; padding: 16px;">
+    <div id="locationModalCard" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; width: 100%; max-width: 380px; padding: 24px; box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; gap: 14px; text-align: center;">
+      <div id="modalIconContainer" style="width: 52px; height: 52px; border-radius: 50%; background: #eff6ff; display: flex; align-items: center; justify-content: center; font-size: 26px; margin: 0 auto;">📍</div>
       <div style="display: flex; flex-direction: column; gap: 6px;">
-        <h3 id="modalTitle" style="font-size: 17px; font-weight: 800; color: #f8fafc;">Location Required</h3>
-        <p id="modalDescription" style="font-size: 13px; color: #94a3b8; line-height: 1.5;">Enable location to control this ESP32 switch.</p>
-        <div id="modalSubNote" style="font-size: 11px; color: #94a3b8; line-height: 1.4; margin-top: 4px; padding: 8px 12px; background: #131b2e; border-radius: 8px; border: 1px solid #1e293b; display: none;"></div>
+        <h3 id="modalTitle" style="font-size: 17px; font-weight: 800; color: #0f172a;">Location Required</h3>
+        <p id="modalDescription" style="font-size: 13px; color: #475569; line-height: 1.5;">Enable location to control this ESP32 switch.</p>
+        <div id="modalSubNote" style="font-size: 11px; color: #475569; line-height: 1.4; margin-top: 4px; padding: 8px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; display: none;"></div>
       </div>
       <div id="modalButtonsRow" style="display: flex; gap: 10px; margin-top: 6px;">
-        <button id="modalBtnCancel" onclick="closeLocationModal()" style="flex: 1; background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 12px; padding: 12px; font-weight: 700; font-size: 13px; cursor: pointer;">Cancel</button>
-        <button id="modalBtnPrimary" onclick="handleModalPrimaryAction()" style="flex: 1.2; background: #0284c7; color: #ffffff; border: none; border-radius: 12px; padding: 12px; font-weight: 800; font-size: 13px; cursor: pointer; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);">Enable Location</button>
+        <button id="modalBtnCancel" onclick="closeLocationModal()" style="flex: 1; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; font-weight: 700; font-size: 13px; cursor: pointer;">Cancel</button>
+        <button id="modalBtnPrimary" onclick="handleModalPrimaryAction()" style="flex: 1.2; background: #2563eb; color: #ffffff; border: none; border-radius: 12px; padding: 12px; font-weight: 800; font-size: 13px; cursor: pointer; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);">Enable Location</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOCATION-MISMATCH OTP VERIFICATION MODAL -->
+  <div id="otpVerificationModalOverlay" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); z-index: 10000; align-items: center; justify-content: center; padding: 16px;">
+    <div id="otpModalCard" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; width: 100%; max-width: 410px; padding: 22px; box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 14px; text-align: center;">
+      <!-- Shield Icon & Action Badge -->
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="width: 44px; height: 44px; border-radius: 50%; background: #eff6ff; display: flex; align-items: center; justify-content: center; font-size: 22px;">🔐</div>
+        <div id="otpActionBadge" style="font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 9999px; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;">SWITCH OFF</div>
+      </div>
+
+      <!-- Title & Message -->
+      <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
+        <h3 style="font-size: 17px; font-weight: 800; color: #0f172a;">Location Verification Required</h3>
+        <p style="font-size: 12px; color: #475569; line-height: 1.4;">Your current location differs from the last recorded switch location. Verify your identity to continue.</p>
+      </div>
+
+      <!-- Comparison Details Card -->
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; text-align: left;">
+        <!-- Previous Location -->
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Previous Operation Location</div>
+          <div id="otpPrevLocationText" style="font-size: 12px; font-weight: 600; color: #334155;">📍 Little Mount • 13.0147° N, 80.2242° E</div>
+        </div>
+        <!-- Current Location -->
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <div style="font-size: 10px; font-weight: 700; color: #2563eb; text-transform: uppercase;">Current Location (Detected)</div>
+          <div id="otpCurLocationText" style="font-size: 12px; font-weight: 700; color: #0f172a;">📍 Ward 59 • 13.0879° N, 80.2785° E (Acc: 15m)</div>
+        </div>
+        <!-- Distance Alert -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 2px;">
+          <span style="font-size: 11px; color: #64748b;">Distance Difference:</span>
+          <span id="otpDistanceText" style="font-size: 11px; font-weight: 800; color: #b45309;">~8.4 km (Threshold: 100m)</span>
+        </div>
+      </div>
+
+      <!-- Dev / Demo Mode OTP Display (Section 2 Requirement) -->
+      <div id="otpDevDemoBox" style="background: #eff6ff; border: 1.5px dashed #93c5fd; border-radius: 12px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 11px; color: #2563eb; font-weight: 700;">🧪 Demo OTP:</span>
+          <span id="otpDevCode" style="font-family: monospace; font-size: 15px; font-weight: 900; color: #1d4ed8; letter-spacing: 2px;">------</span>
+        </div>
+        <button type="button" onclick="quickFillDemoOtp()" style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 4px 8px; font-size: 10px; font-weight: 800; cursor: pointer;">Auto-Fill</button>
+      </div>
+
+      <!-- OTP Input Field -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <input type="text" id="otpInput" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter 6-digit OTP" style="width: 100%; text-align: center; font-size: 20px; font-weight: 900; letter-spacing: 6px; font-family: monospace; padding: 12px; background: #ffffff; border: 2px solid #cbd5e1; border-radius: 12px; color: #0f172a; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#2563eb'" onblur="this.style.borderColor='#cbd5e1'" onkeypress="if(event.key==='Enter') submitOtpVerification();">
+      </div>
+
+      <!-- Status / Validation Message Banner -->
+      <div id="otpValidationMsg" style="display: none; font-size: 11px; font-weight: 700; padding: 8px 12px; border-radius: 8px; text-align: center;"></div>
+
+      <!-- Timer & Resend Row -->
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+        <span id="otpExpiryTimer" style="color: #64748b; font-family: monospace;">⏱️ Expires in: 04:59</span>
+        <button id="otpResendBtn" type="button" onclick="handleResendOtp()" style="background: transparent; border: none; color: #2563eb; font-size: 11px; font-weight: 700; cursor: pointer;">Resend OTP</button>
+      </div>
+
+      <!-- Buttons Row -->
+      <div style="display: flex; gap: 10px; margin-top: 4px;">
+        <button id="otpBtnCancel" type="button" onclick="cancelOtpModal()" style="flex: 1; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; font-weight: 700; font-size: 13px; cursor: pointer;">Cancel</button>
+        <button id="otpBtnVerify" type="button" onclick="submitOtpVerification()" style="flex: 1.3; background: #2563eb; color: #ffffff; border: none; border-radius: 12px; padding: 12px; font-weight: 800; font-size: 13px; cursor: pointer; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);">Verify & Execute</button>
       </div>
     </div>
   </div>
@@ -825,9 +918,9 @@ export const getStandaloneHtmlContent = ({
 
       if (onLoc && onLoc.lat && !isStaleClientGeolog(onLoc)) {
         document.querySelectorAll('[id^="badge-on-"]').forEach(function(el) { el.style.display = 'inline-block'; });
-        document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#166534'; el.style.background = '#092318'; });
+        document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#bbf7d0'; el.style.background = '#f0fdf4'; });
         document.querySelectorAll('[id^="on-dot-"]').forEach(function(el) { el.style.background = '#22c55e'; });
-        document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#4ade80'; });
+        document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#15803d'; });
         document.querySelectorAll('[id^="on-time-badge-"]').forEach(function(el) {
           el.innerText = '⏱️ ' + formatClientLogTime(onLoc);
           el.style.display = 'inline-block';
@@ -867,9 +960,9 @@ export const getStandaloneHtmlContent = ({
         });
       } else {
         document.querySelectorAll('[id^="badge-on-"]').forEach(function(el) { el.style.display = 'none'; });
-        document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#1e3a2b'; el.style.background = '#092318'; });
-        document.querySelectorAll('[id^="on-dot-"]').forEach(function(el) { el.style.background = '#475569'; });
-        document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#94a3b8'; });
+        document.querySelectorAll('[id^="on-box-"]').forEach(function(el) { el.style.borderColor = '#e2e8f0'; el.style.background = '#f8fafc'; });
+        document.querySelectorAll('[id^="on-dot-"]').forEach(function(el) { el.style.background = '#94a3b8'; });
+        document.querySelectorAll('[id^="on-label-"]').forEach(function(el) { el.style.color = '#64748b'; });
         document.querySelectorAll('[id^="on-time-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="on-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="on-content-"]').forEach(function(el) { el.style.display = 'none'; });
@@ -879,9 +972,9 @@ export const getStandaloneHtmlContent = ({
 
       if (offLoc && offLoc.lat && !isStaleClientGeolog(offLoc)) {
         document.querySelectorAll('[id^="badge-off-"]').forEach(function(el) { el.style.display = 'inline-block'; });
-        document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#991b1b'; el.style.background = '#261214'; });
+        document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#fecaca'; el.style.background = '#fef2f2'; });
         document.querySelectorAll('[id^="off-dot-"]').forEach(function(el) { el.style.background = '#ef4444'; });
-        document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#f87171'; });
+        document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#b91c1c'; });
         document.querySelectorAll('[id^="off-time-badge-"]').forEach(function(el) {
           el.innerText = '⏱️ ' + formatClientLogTime(offLoc);
           el.style.display = 'inline-block';
@@ -921,9 +1014,9 @@ export const getStandaloneHtmlContent = ({
         });
       } else {
         document.querySelectorAll('[id^="badge-off-"]').forEach(function(el) { el.style.display = 'none'; });
-        document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#3a1e22'; el.style.background = '#261214'; });
-        document.querySelectorAll('[id^="off-dot-"]').forEach(function(el) { el.style.background = '#475569'; });
-        document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#94a3b8'; });
+        document.querySelectorAll('[id^="off-box-"]').forEach(function(el) { el.style.borderColor = '#e2e8f0'; el.style.background = '#f8fafc'; });
+        document.querySelectorAll('[id^="off-dot-"]').forEach(function(el) { el.style.background = '#94a3b8'; });
+        document.querySelectorAll('[id^="off-label-"]').forEach(function(el) { el.style.color = '#64748b'; });
         document.querySelectorAll('[id^="off-time-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="off-badge-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="off-content-"]').forEach(function(el) { el.style.display = 'none'; });
@@ -942,25 +1035,25 @@ export const getStandaloneHtmlContent = ({
           listEl.innerHTML = clientLocationHistory.slice(0, 10).map(function(item) {
             var isON = item.event === 'ON';
             var isOFF = item.event === 'OFF';
-            var badgeBg = isON ? 'rgba(34,197,94,0.2)' : (isOFF ? 'rgba(239,68,68,0.2)' : 'rgba(56,189,248,0.2)');
-            var badgeColor = isON ? '#4ade80' : (isOFF ? '#f87171' : '#38bdf8');
+            var badgeBg = isON ? '#dcfce7' : (isOFF ? '#fee2e2' : '#e0f2fe');
+            var badgeColor = isON ? '#15803d' : (isOFF ? '#b91c1c' : '#0369a1');
             var latStr = (item.lat && item.lng) 
               ? (parseFloat(item.lat).toFixed(3) + '°N, ' + parseFloat(item.lng).toFixed(3) + '°E') 
               : (item.lat ? (parseFloat(item.lat).toFixed(3) + '°') : '');
             var accStr = item.accuracy != null ? (' • Acc: ' + item.accuracy + 'm') : '';
             var timeFormatted = formatClientLogTime(item);
             var mapsUrl = (item.lat && item.lng) ? ('https://www.google.com/maps?q=' + item.lat + ',' + item.lng) : '#';
-            return '<div class="geolog-history-item" onclick="window.open(&quot;' + mapsUrl + '&quot;,&quot;_blank&quot;)" title="View on Google Maps" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: #0b1322; border-radius: 8px; padding: 6px 10px; border: 1px solid #1e293b; transition: all 0.2s;">' +
+            return '<div class="geolog-history-item" onclick="window.open(&quot;' + mapsUrl + '&quot;,&quot;_blank&quot;)" title="View on Google Maps" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: #ffffff; border-radius: 8px; padding: 6px 10px; border: 1px solid #e2e8f0; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">' +
               '<div style="display: flex; align-items: center; gap: 8px;">' +
                 '<span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: ' + badgeBg + '; color: ' + badgeColor + ';">' + (item.event || 'LOG') + '</span>' +
                 '<div style="display: flex; flex-direction: column;">' +
-                  '<span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">' + (item.city || 'Location') + '</span>' +
+                  '<span style="font-size: 11px; font-weight: 600; color: #0f172a;">' + (item.city || 'Location') + '</span>' +
                   (latStr ? '<span style="font-size: 9px; color: #64748b; font-family: monospace;">' + latStr + accStr + '</span>' : '') +
                 '</div>' +
               '</div>' +
               '<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">' +
-                '<span style="font-size: 10px; color: #94a3b8; font-family: monospace;">' + timeFormatted + '</span>' +
-                '<span style="font-size: 9px; color: #38bdf8;">🗺️ Maps</span>' +
+                '<span style="font-size: 10px; color: #64748b; font-family: monospace;">' + timeFormatted + '</span>' +
+                '<span style="font-size: 9px; color: #2563eb; font-weight: 600;">🗺️ Maps</span>' +
               '</div>' +
             '</div>';
           }).join('');
@@ -969,7 +1062,7 @@ export const getStandaloneHtmlContent = ({
         document.querySelectorAll('[id^="hist-list-"]').forEach(function(listEl) {
           var countEl = document.getElementById(listEl.id.replace('hist-list-', 'hist-count-'));
           if (countEl) countEl.innerText = '0';
-          listEl.innerHTML = '<div style="font-size: 10px; color: #64748b; text-align: center; padding: 8px; background: #0b1322; border-radius: 8px;">No location history yet. Toggle switches to record geologs.</div>';
+          listEl.innerHTML = '<div style="font-size: 10px; color: #64748b; text-align: center; padding: 8px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;">No location history yet. Toggle switches to record geologs.</div>';
         });
       }
     }
@@ -989,7 +1082,7 @@ export const getStandaloneHtmlContent = ({
         if (listEl) targetId = listEl.id.replace('responses-list-', '');
       }
       if (listEl) {
-        listEl.innerHTML = '<div id="resp-empty-' + targetId + '" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #090d1e; border-radius: 8px;">No answers submitted yet.</div>';
+        listEl.innerHTML = '<div id="resp-empty-' + targetId + '" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;">No answers submitted yet.</div>';
       }
       var countEl = document.getElementById('resp-count-' + targetId);
       if (countEl) countEl.innerText = '0';
@@ -1187,12 +1280,12 @@ export const getStandaloneHtmlContent = ({
       var item = document.createElement('div');
       item.className = 'resp-item';
       if (existingId) item.setAttribute('data-id', existingId);
-      item.style.cssText = 'background: #131a38; border-radius: 8px; padding: 8px 10px; border: 1px solid #232d5b; margin-bottom: 6px;';
-      item.innerHTML = '<div style="display: flex; justify-content: space-between; font-size: 10px; color: #818cf8; margin-bottom: 3px;">' +
+      item.style.cssText = 'background: #ffffff; border-radius: 8px; padding: 8px 10px; border: 1px solid #e2e8f0; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);';
+      item.innerHTML = '<div style="display: flex; justify-content: space-between; font-size: 10px; color: #6366f1; margin-bottom: 3px;">' +
         '<span style="font-weight: 700;">' + (resp.questionText || resp.question || 'Answer') + '</span>' +
-        '<span style="color: #64748b;">' + (resp.timestamp || resp.time || '') + '</span>' +
+        '<span style="color: #94a3b8;">' + (resp.timestamp || resp.time || '') + '</span>' +
         '</div>' +
-        '<div style="font-size: 12px; font-weight: 600; color: #4ade80;">💬 ' + resp.answer + '</div>' +
+        '<div style="font-size: 12px; font-weight: 600; color: #0f172a;">💬 ' + resp.answer + '</div>' +
         '<div style="font-size: 9px; color: #64748b; margin-top: 2px;">Source: ' + (resp.source || 'Mobile UI') + '</div>';
       
       listEl.insertBefore(item, listEl.firstChild);
@@ -1307,7 +1400,9 @@ export const getStandaloneHtmlContent = ({
       }
     }
 
-    function updateSwitchHint(id, text, type) {
+    var switchHintTimers = {};
+
+    function updateSwitchHint(id, text, type, durationMs) {
       var hintEl = document.getElementById('switch-hint-' + id);
       var textEl = document.getElementById('switch-hint-text-' + id);
       if (hintEl) {
@@ -1316,6 +1411,435 @@ export const getStandaloneHtmlContent = ({
       if (textEl) {
         textEl.innerText = text;
       }
+      if (switchHintTimers[id]) {
+        clearTimeout(switchHintTimers[id]);
+        delete switchHintTimers[id];
+      }
+      if (durationMs && durationMs > 0) {
+        switchHintTimers[id] = setTimeout(function() {
+          updateSwitchHint(id, 'Location required for ON/OFF logging', '');
+        }, durationMs);
+      }
+    }
+
+    // ==========================================
+    // LOCATION-MISMATCH OTP VERIFICATION ENGINE
+    // ==========================================
+    var activeOtpChallenge = null;
+    var otpTimerInterval = null;
+    var otpResendCooldownInterval = null;
+    var onOtpVerifiedCallback = null;
+    var onOtpCancelledCallback = null;
+
+    function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+      if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+      var p1 = Number(lat1);
+      var l1 = Number(lon1);
+      var p2 = Number(lat2);
+      var l2 = Number(lon2);
+      if (isNaN(p1) || isNaN(l1) || isNaN(p2) || isNaN(l2)) return null;
+      if (p1 === p2 && l1 === l2) return 0;
+      var R = 6371000;
+      var dLat = ((p2 - p1) * Math.PI) / 180;
+      var dLon = ((l2 - l1) * Math.PI) / 180;
+      var a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((p1 * Math.PI) / 180) *
+          Math.cos((p2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c);
+    }
+
+    function checkLocationMismatch(prevLoc, curLoc, thresholdMeters) {
+      thresholdMeters = thresholdMeters || 100;
+      if (!prevLoc || (prevLoc.lat == null && prevLoc.latitude == null)) {
+        return { isMismatch: false, distance: 0, reason: 'NO_PREVIOUS_LOCATION' };
+      }
+      if (!curLoc || (curLoc.lat == null && curLoc.latitude == null)) {
+        return { isMismatch: true, distance: null, reason: 'MISSING_CURRENT_LOCATION' };
+      }
+      var pLat = prevLoc.lat != null ? prevLoc.lat : prevLoc.latitude;
+      var pLng = prevLoc.lng != null ? prevLoc.lng : prevLoc.longitude;
+      var cLat = curLoc.lat != null ? curLoc.lat : curLoc.latitude;
+      var cLng = curLoc.lng != null ? curLoc.lng : curLoc.longitude;
+      var rawDist = calculateDistanceMeters(pLat, pLng, cLat, cLng);
+      if (rawDist === null) {
+        return { isMismatch: true, distance: null, reason: 'INVALID_COORDINATES' };
+      }
+      var pAcc = Number(prevLoc.accuracy || 0);
+      var cAcc = Number(curLoc.accuracy || 0);
+      var accuracyBuffer = Math.min(Math.max(pAcc, cAcc), 50);
+      var effectiveThreshold = thresholdMeters + accuracyBuffer;
+      return {
+        isMismatch: rawDist > effectiveThreshold,
+        distance: rawDist,
+        threshold: thresholdMeters,
+        effectiveThreshold: effectiveThreshold
+      };
+    }
+
+    function getLastSuccessfulOperationLocation() {
+      if (Array.isArray(clientLocationHistory) && clientLocationHistory.length > 0) {
+        var found = clientLocationHistory.find(function(h) {
+          return !isStaleClientGeolog(h) && (h.lat != null || h.latitude != null);
+        });
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function quickFillDemoOtp() {
+      var codeEl = document.getElementById('otpDevCode');
+      var inputEl = document.getElementById('otpInput');
+      if (codeEl && inputEl && codeEl.innerText && codeEl.innerText !== '------') {
+        inputEl.value = codeEl.innerText.trim();
+        inputEl.focus();
+        showOtpStatusMessage('', '');
+      }
+    }
+
+    function showOtpStatusMessage(msg, type) {
+      var banner = document.getElementById('otpValidationMsg');
+      if (!banner) return;
+      if (!msg) {
+        banner.style.display = 'none';
+        return;
+      }
+      banner.style.display = 'block';
+      banner.innerText = msg;
+      if (type === 'success') {
+        banner.style.background = 'rgba(34, 197, 94, 0.15)';
+        banner.style.color = '#4ade80';
+        banner.style.border = '1px solid rgba(34, 197, 94, 0.3)';
+      } else if (type === 'error') {
+        banner.style.background = 'rgba(239, 68, 68, 0.15)';
+        banner.style.color = '#f87171';
+        banner.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+      } else {
+        banner.style.background = 'rgba(56, 189, 248, 0.15)';
+        banner.style.color = '#38bdf8';
+        banner.style.border = '1px solid rgba(56, 189, 248, 0.3)';
+      }
+    }
+
+    function openOtpModal(challengeData, onVerified, onCancelled) {
+      activeOtpChallenge = challengeData;
+      onOtpVerifiedCallback = onVerified;
+      onOtpCancelledCallback = onCancelled;
+
+      var overlay = document.getElementById('otpVerificationModalOverlay');
+      if (!overlay) return;
+
+      var actionBadge = document.getElementById('otpActionBadge');
+      var prevLocEl = document.getElementById('otpPrevLocationText');
+      var curLocEl = document.getElementById('otpCurLocationText');
+      var distEl = document.getElementById('otpDistanceText');
+      var devBox = document.getElementById('otpDevDemoBox');
+      var devCode = document.getElementById('otpDevCode');
+      var inputEl = document.getElementById('otpInput');
+
+      var action = challengeData.action || 'OFF';
+      if (actionBadge) {
+        actionBadge.innerText = 'SWITCH ' + action;
+        if (action === 'ON') {
+          actionBadge.style.background = 'rgba(34, 197, 94, 0.15)';
+          actionBadge.style.color = '#4ade80';
+          actionBadge.style.border = '1px solid rgba(34, 197, 94, 0.3)';
+        } else {
+          actionBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+          actionBadge.style.color = '#f87171';
+          actionBadge.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        }
+      }
+
+      if (prevLocEl) {
+        var p = challengeData.previousLocation;
+        var pText = p ? ('📍 ' + (p.city || p.locality || 'Previous Location') + ' • ' + (p.lat ? (parseFloat(p.lat).toFixed(4) + '° N, ' + parseFloat(p.lng).toFixed(4) + '° E') : '')) : '📍 No previous location recorded';
+        prevLocEl.innerText = pText;
+      }
+
+      if (curLocEl) {
+        var c = challengeData.currentLocation;
+        var cText = c ? ('📍 ' + (c.city || c.locality || 'Current Location') + ' • ' + (c.lat ? (parseFloat(c.lat).toFixed(4) + '° N, ' + parseFloat(c.lng).toFixed(4) + '° E') : '') + ' (Acc: ' + (c.accuracy || 15) + 'm)') : '📍 Unknown';
+        curLocEl.innerText = cText;
+      }
+
+      if (distEl) {
+        var dist = challengeData.distance != null ? challengeData.distance : 0;
+        var distFormatted = dist < 1000 ? (dist + ' m') : ((dist / 1000).toFixed(1) + ' km');
+        distEl.innerText = '~' + distFormatted + ' (Threshold: ' + (challengeData.threshold || 100) + 'm)';
+      }
+
+      if (devBox) {
+        if (challengeData.devDemoMode && challengeData.devOtp) {
+          devBox.style.display = 'flex';
+          if (devCode) devCode.innerText = challengeData.devOtp;
+        } else {
+          devBox.style.display = 'none';
+        }
+      }
+
+      if (inputEl) {
+        inputEl.value = '';
+        setTimeout(function() { inputEl.focus(); }, 150);
+      }
+
+      showOtpStatusMessage('', '');
+
+      // Expiration countdown
+      clearInterval(otpTimerInterval);
+      var remainingSeconds = challengeData.expiresInSeconds || 300;
+      function updateTimerDisplay() {
+        var mins = Math.floor(remainingSeconds / 60);
+        var secs = remainingSeconds % 60;
+        var formatted = (mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs;
+        var timerEl = document.getElementById('otpExpiryTimer');
+        if (timerEl) timerEl.innerText = '⏱️ Expires in: ' + formatted;
+        if (remainingSeconds <= 0) {
+          clearInterval(otpTimerInterval);
+          showOtpStatusMessage('OTP expired. Request a new OTP.', 'error');
+        }
+        remainingSeconds--;
+      }
+      updateTimerDisplay();
+      otpTimerInterval = setInterval(updateTimerDisplay, 1000);
+
+      // Resend cooldown timer
+      startResendCooldown(challengeData.resendCooldownSeconds || 30);
+
+      overlay.style.display = 'flex';
+    }
+
+    function startResendCooldown(seconds) {
+      clearInterval(otpResendCooldownInterval);
+      var resendBtn = document.getElementById('otpResendBtn');
+      if (!resendBtn) return;
+      var cd = seconds || 30;
+      resendBtn.disabled = true;
+      resendBtn.style.opacity = '0.5';
+      resendBtn.innerText = 'Resend in ' + cd + 's';
+
+      otpResendCooldownInterval = setInterval(function() {
+        cd--;
+        if (cd <= 0) {
+          clearInterval(otpResendCooldownInterval);
+          resendBtn.disabled = false;
+          resendBtn.style.opacity = '1';
+          resendBtn.innerText = 'Resend OTP';
+        } else {
+          resendBtn.innerText = 'Resend in ' + cd + 's';
+        }
+      }, 1000);
+    }
+
+    function getCompanionApiUrl(path) {
+      var hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : '';
+      var companionIp = '${companionServerInfo?.ip || resolvedHostIp}';
+      var primary = hostOrigin ? (hostOrigin + path) : ('http://' + companionIp + ':5055' + path);
+      var fallback = 'http://' + companionIp + ':5055' + path;
+      return { primary: primary, fallback: fallback };
+    }
+
+    async function fetchCompanionSafeJson(path, options) {
+      var endpoints = getCompanionApiUrl(path);
+      var opts = Object.assign({
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        mode: 'cors'
+      }, options || {});
+
+      var parseSafe = async function(response) {
+        var text = await response.text();
+        var trimmed = text.trim();
+        if (!trimmed || trimmed.startsWith('<') || trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html>')) {
+          throw new Error('SERVER_RETURNED_HTML');
+        }
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          throw new Error('INVALID_JSON: ' + text.substring(0, 30));
+        }
+      };
+
+      try {
+        var res1 = await fetch(endpoints.primary, opts);
+        return await parseSafe(res1);
+      } catch (err1) {
+        if (endpoints.fallback && endpoints.fallback !== endpoints.primary) {
+          try {
+            var res2 = await fetch(endpoints.fallback, opts);
+            return await parseSafe(res2);
+          } catch (err2) {
+            throw err2;
+          }
+        }
+        throw err1;
+      }
+    }
+
+    async function handleResendOtp() {
+      if (!activeOtpChallenge || !activeOtpChallenge.challengeId) return;
+      var resendBtn = document.getElementById('otpResendBtn');
+      if (resendBtn && resendBtn.disabled) return;
+
+      showOtpStatusMessage('Sending new OTP...', 'info');
+
+      var isLocalChallenge = Boolean(activeOtpChallenge.challengeId && activeOtpChallenge.challengeId.startsWith('local-'));
+      var res = null;
+
+      if (!isLocalChallenge) {
+        try {
+          res = await fetchCompanionSafeJson('/api/otp/resend', {
+            method: 'POST',
+            body: JSON.stringify({ challengeId: activeOtpChallenge.challengeId })
+          });
+        } catch (e) {
+          console.warn('[Companion] Backend resend failed or returned HTML, falling back to local OTP:', e.message);
+        }
+      }
+
+      if (res && res.success) {
+        activeOtpChallenge.devOtp = res.devOtp;
+        var devCode = document.getElementById('otpDevCode');
+        if (devCode && res.devOtp) devCode.innerText = res.devOtp;
+        showOtpStatusMessage('New OTP sent successfully.', 'success');
+        startResendCooldown(res.resendCooldownSeconds || 30);
+        var inputEl = document.getElementById('otpInput');
+        if (inputEl) inputEl.value = '';
+        return;
+      }
+
+      // Local fallback resend:
+      var newOtp = String(Math.floor(100000 + Math.random() * 900000));
+      activeOtpChallenge.devOtp = newOtp;
+      var devCodeEl = document.getElementById('otpDevCode');
+      if (devCodeEl) devCodeEl.innerText = newOtp;
+      showOtpStatusMessage('New OTP generated: ' + newOtp, 'success');
+      startResendCooldown(30);
+      var inp = document.getElementById('otpInput');
+      if (inp) inp.value = '';
+    }
+
+    function cancelOtpModal() {
+      clearInterval(otpTimerInterval);
+      clearInterval(otpResendCooldownInterval);
+      var overlay = document.getElementById('otpVerificationModalOverlay');
+      if (overlay) overlay.style.display = 'none';
+
+      if (activeOtpChallenge && activeOtpChallenge.challengeId && !activeOtpChallenge.challengeId.startsWith('local-')) {
+        fetchCompanionSafeJson('/api/otp/cancel', {
+          method: 'POST',
+          body: JSON.stringify({ challengeId: activeOtpChallenge.challengeId })
+        }).catch(function() {});
+      }
+
+      var cb = onOtpCancelledCallback;
+      activeOtpChallenge = null;
+      onOtpVerifiedCallback = null;
+      onOtpCancelledCallback = null;
+
+      if (typeof cb === 'function') cb();
+    }
+
+    async function submitOtpVerification() {
+      if (!activeOtpChallenge) return;
+      var inputEl = document.getElementById('otpInput');
+      var otpVal = inputEl ? inputEl.value.trim() : '';
+
+      if (!otpVal) {
+        showOtpStatusMessage('Please enter the OTP.', 'error');
+        return;
+      }
+
+      var verifyBtn = document.getElementById('otpBtnVerify');
+      if (verifyBtn) {
+        verifyBtn.disabled = true;
+        verifyBtn.innerText = 'Verifying...';
+      }
+
+      showOtpStatusMessage('Verifying OTP...', 'info');
+
+      function finishVerification(token) {
+        if (verifyBtn) {
+          verifyBtn.disabled = false;
+          verifyBtn.innerText = 'Verify & Execute';
+        }
+        showOtpStatusMessage('Location verified. Executing switch operation.', 'success');
+        clearInterval(otpTimerInterval);
+        clearInterval(otpResendCooldownInterval);
+
+        setTimeout(function() {
+          var overlay = document.getElementById('otpVerificationModalOverlay');
+          if (overlay) overlay.style.display = 'none';
+
+          var cb = onOtpVerifiedCallback;
+          activeOtpChallenge = null;
+          onOtpVerifiedCallback = null;
+          onOtpCancelledCallback = null;
+
+          if (typeof cb === 'function') cb(token);
+        }, 600);
+      }
+
+      var isLocalChallenge = Boolean(activeOtpChallenge.challengeId && activeOtpChallenge.challengeId.startsWith('local-'));
+      var res = null;
+
+      if (!isLocalChallenge) {
+        try {
+          res = await fetchCompanionSafeJson('/api/otp/verify', {
+            method: 'POST',
+            body: JSON.stringify({
+              challengeId: activeOtpChallenge.challengeId,
+              otp: otpVal,
+              widgetId: activeOtpChallenge.widgetId,
+              action: activeOtpChallenge.action
+            })
+          });
+        } catch (verErr) {
+          console.warn('[Companion] Backend verify failed or returned HTML, checking devOtp locally:', verErr.message);
+        }
+      }
+
+      // If backend verification succeeded with a token, finish
+      if (res && res.success && res.verificationToken) {
+        finishVerification(res.verificationToken);
+        return;
+      }
+
+      // If backend explicitly rejected the OTP (e.g. invalid OTP entered), and was not a 404/html
+      if (res && res.success === false && res.code && res.code !== 'CHALLENGE_NOT_FOUND') {
+        if (verifyBtn) {
+          verifyBtn.disabled = false;
+          verifyBtn.innerText = 'Verify & Execute';
+        }
+        showOtpStatusMessage(res.error || 'Invalid OTP. Please try again.', 'error');
+        return;
+      }
+
+      // Fallback: Check entered OTP against activeOtpChallenge.devOtp
+      if (activeOtpChallenge.devOtp) {
+        if (otpVal === String(activeOtpChallenge.devOtp).trim()) {
+          var localToken = 'vt-local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
+          finishVerification(localToken);
+          return;
+        } else {
+          if (verifyBtn) {
+            verifyBtn.disabled = false;
+            verifyBtn.innerText = 'Verify & Execute';
+          }
+          showOtpStatusMessage('Invalid OTP. Please try again.', 'error');
+          return;
+        }
+      }
+
+      if (verifyBtn) {
+        verifyBtn.disabled = false;
+        verifyBtn.innerText = 'Verify & Execute';
+      }
+      showOtpStatusMessage((res && res.error) || 'Invalid OTP. Please try again.', 'error');
     }
 
     function sendHardwareActionAsync(payload, extra) {
@@ -1725,6 +2249,92 @@ export const getStandaloneHtmlContent = ({
         esp32Confirmed: false
       };
 
+      // 6b. Location-Mismatch Verification Check
+      // Retrieve the last successfully executed operation location
+      var prevOperationLoc = getLastSuccessfulOperationLocation();
+      var mismatch = checkLocationMismatch(prevOperationLoc, geoEvent, 100);
+
+      var verificationToken = null;
+
+      if (mismatch.isMismatch) {
+        // Close the spinner modal
+        var spinnerOverlay = document.getElementById('locationModalOverlay');
+        if (spinnerOverlay) spinnerOverlay.style.display = 'none';
+
+        // Keep switch visually in prior state while OTP verification is pending
+        if (switchEl) switchEl.checked = !checked;
+        updateSwitchHint(id, 'Location mismatch detected (' + mismatch.distance + 'm) — OTP required', 'pending');
+
+        // Request OTP challenge from backend or fallback to local challenge
+        var challengeData = null;
+        try {
+          challengeData = await fetchCompanionSafeJson('/api/otp/request', {
+            method: 'POST',
+            body: JSON.stringify({
+              widgetId: id,
+              switchTitle: title,
+              action: targetAction,
+              deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
+              currentLocation: geoEvent,
+              previousLocation: prevOperationLoc
+            })
+          });
+        } catch(fetchErr) {
+          console.warn('[Companion] Backend OTP request failed, creating local fallback challenge:', fetchErr.message);
+        }
+
+        // If backend returned HTML, 404, or failed, create local challenge
+        if (!challengeData || !challengeData.success) {
+          var fallbackOtp = String(Math.floor(100000 + Math.random() * 900000));
+          challengeData = {
+            success: true,
+            challengeId: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+            widgetId: id,
+            switchTitle: title,
+            action: targetAction,
+            deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
+            currentLocation: geoEvent,
+            previousLocation: prevOperationLoc,
+            distance: mismatch.distance,
+            threshold: mismatch.threshold || 100,
+            expiresInSeconds: 300,
+            resendCooldownSeconds: 30,
+            devDemoMode: true,
+            devOtp: fallbackOtp
+          };
+        }
+
+        try {
+          // Await OTP verification modal resolution
+          verificationToken = await new Promise(function(resolveVerify) {
+            openOtpModal(
+              challengeData,
+              function(token) { resolveVerify(token); },
+              function() { resolveVerify(null); }
+            );
+          });
+
+          if (!verificationToken) {
+            revertSwitchUI();
+            updateSwitchHint(id, 'Location verification cancelled — Switch not changed', 'error');
+            return;
+          }
+        } catch(otpErr) {
+          revertSwitchUI();
+          updateSwitchHint(id, 'Verification error: ' + otpErr.message, 'error');
+          return;
+        }
+
+        // Show executing spinner
+        showLocationModal({
+          title: 'Executing Switch ' + targetAction + '...',
+          description: 'Location verified.<br>Transmitting ' + targetAction + ' command to ESP32...',
+          isSpinner: true,
+          hideCancel: true,
+          hidePrimary: true
+        });
+      }
+
       // 7. Send command to ESP32
       var cmd = checked ? 'LED:1' : 'LED:0';
       var res = await sendHardwareActionAsync(cmd, {
@@ -1732,7 +2342,8 @@ export const getStandaloneHtmlContent = ({
         widgetType: 'switch',
         value: checked,
         switchTitle: title,
-        location: geoEvent
+        location: geoEvent,
+        verificationToken: verificationToken
       });
 
       // 8. Confirm ESP32 response (Important Failure Handling)
@@ -1757,10 +2368,8 @@ export const getStandaloneHtmlContent = ({
         else card.classList.remove('glow-blue');
       }
 
-      updateSwitchHint(id, 'Switch ' + targetAction + ' at ' + geoEvent.city + ' (Accuracy: ' + geoEvent.accuracy + 'm)', 'success');
-      setTimeout(function() {
-        updateSwitchHint(id, 'Location required for ON/OFF logging', '');
-      }, 5000);
+      // Keep switch location & status confirmation visible for 5 minutes (300,000 ms)
+      updateSwitchHint(id, 'Switch ' + targetAction + ' at ' + geoEvent.city + ' (Accuracy: ' + geoEvent.accuracy + 'm)', 'success', 5 * 60 * 1000);
 
       // Update location cards & history with fresh accuracy
       updateMobileLocationCards(geoEvent);
@@ -1895,17 +2504,17 @@ export const getStandaloneHtmlContent = ({
               formCard.innerHTML = '';
               formCard.appendChild(emptyEl);
             } else {
-              formCard.innerHTML = '<div id="resp-empty-' + wid + '" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #090d1e; border-radius: 8px;">No answers submitted yet.</div>';
+              formCard.innerHTML = '<div id="resp-empty-' + wid + '" style="font-size: 11px; color: #64748b; text-align: center; padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;">No answers submitted yet.</div>';
             }
           } else {
             if (emptyEl) emptyEl.style.display = 'none';
             formCard.innerHTML = cleanResponses.map(function(r) {
-              return '<div class="resp-item" style="background: #131a38; border-radius: 8px; padding: 8px 10px; border: 1px solid #232d5b; margin-bottom: 6px;">' +
-                '<div style="display: flex; justify-content: space-between; font-size: 10px; color: #818cf8; margin-bottom: 3px;">' +
+              return '<div class="resp-item" style="background: #ffffff; border-radius: 8px; padding: 8px 10px; border: 1px solid #e2e8f0; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">' +
+                '<div style="display: flex; justify-content: space-between; font-size: 10px; color: #6366f1; margin-bottom: 3px;">' +
                 '<span style="font-weight: 700;">' + (r.questionText || r.question || 'Answer') + '</span>' +
-                '<span style="color: #64748b;">' + (r.timestamp || r.time || '') + '</span>' +
+                '<span style="color: #94a3b8;">' + (r.timestamp || r.time || '') + '</span>' +
                 '</div>' +
-                '<div style="font-size: 12px; font-weight: 600; color: #4ade80;">💬 ' + r.answer + '</div>' +
+                '<div style="font-size: 12px; font-weight: 600; color: #0f172a;">💬 ' + r.answer + '</div>' +
                 '<div style="font-size: 9px; color: #64748b; margin-top: 2px;">Source: ' + (r.source || 'Mobile UI') + '</div>' +
                 '</div>';
             }).join('');

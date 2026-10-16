@@ -100,6 +100,14 @@ const electronAPI = {
       ipcRenderer.on('flash:event', listener);
       return () => ipcRenderer.removeListener('flash:event', listener);
     }
+  },
+
+  otp: {
+    request: (params) => ipcRenderer.invoke('otp:request', params),
+    verify: (params) => ipcRenderer.invoke('otp:verify', params),
+    resend: (params) => ipcRenderer.invoke('otp:resend', params),
+    cancel: (params) => ipcRenderer.invoke('otp:cancel', params),
+    getLastLocation: () => ipcRenderer.invoke('otp:get-last-location')
   }
 };
 

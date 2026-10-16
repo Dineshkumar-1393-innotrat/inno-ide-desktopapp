@@ -2127,7 +2127,7 @@ function DiagramEditor() {
   // --- Project-Scoped Tab Lifecycle & Switching ---
   useEffect(() => {
     let isCancelled = false;
-    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId") || 'default';
     if (!effectiveProjectId) {
       isSwitchingProjectRef.current = false;
       if (!tabsRef.current || tabsRef.current.length === 0) {
@@ -2194,6 +2194,17 @@ function DiagramEditor() {
             if (parsed?.tabs && Array.isArray(parsed.tabs) && hasValidDiagramNodes(parsed.tabs)) {
               loadedTabs = parsed.tabs;
               loadedActiveId = parsed.activeTabId || parsed.tabs[0]?.id;
+            }
+          }
+          if (!loadedTabs) {
+            const defaultStored = localStorage.getItem(`innoide:block_diagram_tabs:${userId || 'default'}:default`)
+              || localStorage.getItem(`innoide:block_diagram_tabs:default`);
+            if (defaultStored) {
+              const parsed = JSON.parse(defaultStored);
+              if (parsed?.tabs && Array.isArray(parsed.tabs) && hasValidDiagramNodes(parsed.tabs)) {
+                loadedTabs = parsed.tabs;
+                loadedActiveId = parsed.activeTabId || parsed.tabs[0]?.id;
+              }
             }
           }
         } catch (e) {
@@ -2349,8 +2360,8 @@ function DiagramEditor() {
 
   // Persist current project tabs on modification
   useEffect(() => {
-    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
-    if (!effectiveProjectId || !tabs || tabs.length === 0 || isSwitchingProjectRef.current) return;
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId") || 'default';
+    if (!tabs || tabs.length === 0 || isSwitchingProjectRef.current) return;
 
     // Guard: Prevent empty tabs from overwriting a previously saved populated diagram in localStorage
     try {
@@ -2379,6 +2390,46 @@ function DiagramEditor() {
       }
     } catch (e) {}
   }, [tabs, activeTabId, activeProjectId, activeProjectName, userId]);
+
+  // Handle emergency and force canvas saves before unload or logout
+  useEffect(() => {
+    const handleForceSave = () => {
+      const effProjId = activeProjectId || localStorage.getItem("activeProjectId") || 'default';
+      const curNodes = nodesRef.current;
+      const curEdges = edgesRef.current;
+      const curTabs = tabsRef.current;
+      const curTabId = activeTabIdRef.current;
+      if (curNodes && curNodes.length > 0 && curTabId && curTabs && curTabs.length > 0) {
+        commitToRedux(curNodes, curEdges);
+        const updatedTabs = curTabs.map(t =>
+          t.id === curTabId
+            ? { ...t, state: { ...t.state, nodes: curNodes, edges: curEdges } }
+            : t
+        );
+        const payload = {
+          tabs: updatedTabs,
+          activeTabId: curTabId,
+          projectId: effProjId,
+          projectName: activeProjectName,
+          savedAt: new Date().toISOString()
+        };
+        try {
+          localStorage.setItem(`innoide:block_diagram_tabs:${userId || 'default'}:${effProjId}`, JSON.stringify(payload));
+          localStorage.setItem(`innoide:block_diagram_tabs:${effProjId}`, JSON.stringify(payload));
+          if (activeProjectName) {
+            localStorage.setItem(`innoide:block_diagram_tabs:${activeProjectName}`, JSON.stringify(payload));
+          }
+        } catch (e) {}
+      }
+    };
+
+    window.addEventListener('beforeunload', handleForceSave);
+    window.addEventListener('innoide:force-canvas-save', handleForceSave);
+    return () => {
+      window.removeEventListener('beforeunload', handleForceSave);
+      window.removeEventListener('innoide:force-canvas-save', handleForceSave);
+    };
+  }, [activeProjectId, activeProjectName, userId, commitToRedux]);
 
   // Fallback: If tabs are closed to 0, recreate a fresh tab for the current project
   useEffect(() => {

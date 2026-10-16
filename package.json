@@ -18,7 +18,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "clear-cache": "node -e \"localStorage.clear(); sessionStorage.clear();\" 2>/dev/null || echo 'Run in browser console: localStorage.clear(); sessionStorage.clear();'",
-    "test:validation": "node src/validation/__tests__/runTests.js"
+    "test:validation": "node src/validation/__tests__/runTests.js",
+    "test:otp": "node src/validation/__tests__/locationOtpVerification.test.js"
   },
   "dependencies": {
     "@auth0/auth0-react": "^2.2.4",

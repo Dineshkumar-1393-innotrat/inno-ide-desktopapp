@@ -57,6 +57,8 @@ const ShareModal = ({ open, onClose }) => {
   // GitHub state
   const [isFirstTime, setIsFirstTime] = useState(true);
   const [repoId, setRepoId] = useState('');
+  const [githubToken, setGithubToken] = useState(() => localStorage.getItem('githubToken') || '');
+  const [githubOwner, setGithubOwner] = useState(() => localStorage.getItem('githubOwner') || '');
   const [repos, setRepos] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState(null);
   const [branch, setBranch] = useState('main');
@@ -159,7 +161,20 @@ const ShareModal = ({ open, onClose }) => {
     setLoading(true);
     setError('');
     try {
-      await createGithubRepo(repoId, branch);
+      if (githubToken) {
+        localStorage.setItem('githubToken', githubToken);
+      }
+      if (githubOwner) {
+        localStorage.setItem('githubOwner', githubOwner);
+      }
+
+      await createGithubRepo(
+        repoId,
+        branch,
+        undefined,
+        githubToken || undefined,
+        githubOwner || undefined
+      );
       const newRepo = { id: Date.now().toString(), name: repoId };
       setRepos([...repos, newRepo]);
       setSelectedRepo(newRepo);
@@ -167,8 +182,8 @@ const ShareModal = ({ open, onClose }) => {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
     } catch (err) {
-      console.error(err);
-      setError('Failed to link repository.');
+      console.error('handleSaveRepo error:', err);
+      setError(err.message || 'Failed to link repository.');
     } finally {
       setLoading(false);
     }
@@ -183,7 +198,7 @@ const ShareModal = ({ open, onClose }) => {
     try {
       const files = [
         {
-          Path: "Testproject/Testfile.js",
+          path: "Testproject/Testfile.js",
           content: "Test content testing"
         }
       ];
@@ -191,8 +206,8 @@ const ShareModal = ({ open, onClose }) => {
       setSuccess(true);
       setCommitMessage('');
     } catch (err) {
-      console.error(err);
-      setError('Push failed. Please check your connection.');
+      console.error('handlePush error:', err);
+      setError(err.message || 'Push failed. Please check your connection.');
     } finally {
       setLoading(false);
     }
@@ -298,6 +313,10 @@ const ShareModal = ({ open, onClose }) => {
                     isFirstTime={isFirstTime}
                     repoId={repoId}
                     onRepoIdChange={setRepoId}
+                    githubToken={githubToken}
+                    onGithubTokenChange={setGithubToken}
+                    githubOwner={githubOwner}
+                    onGithubOwnerChange={setGithubOwner}
                     onSaveRepo={handleSaveRepo}
                     repos={repos}
                     selectedRepo={selectedRepo}

@@ -466,6 +466,16 @@ class AutoSaveManager {
   getCurrentUserId() {
     // Try to get from various sources
     const sources = [
+      () => {
+        try {
+          const raw = window.localStorage.getItem('userData') || window.sessionStorage.getItem('userData');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            return parsed.userId || parsed._id || parsed.id;
+          }
+        } catch (e) {}
+        return null;
+      },
       () => window.localStorage.getItem('userId'),
       () => window.sessionStorage.getItem('userId'),
       () => window.localStorage.getItem('currentUserIdentity') && JSON.parse(window.localStorage.getItem('currentUserIdentity'))?.id,
@@ -475,7 +485,7 @@ class AutoSaveManager {
     for (const source of sources) {
       try {
         const userId = source();
-        if (userId) return userId;
+        if (userId) return String(userId);
       } catch (e) {
         continue;
       }
@@ -493,6 +503,11 @@ class AutoSaveManager {
       const activeProjectId = window.localStorage.getItem('activeProjectId');
       if (activeProjectId) {
         return activeProjectId;
+      }
+      const userId = this.getCurrentUserId();
+      if (userId && userId !== 'anonymous') {
+        const lastProjId = window.localStorage.getItem(`innoide:last_project_id:${userId}`);
+        if (lastProjId) return lastProjId;
       }
     } catch (e) {
       // Ignore

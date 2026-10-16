@@ -49,6 +49,15 @@ export function useRouteRestoration() {
         ROUTE_KEY,
         JSON.stringify({ path, ts: Date.now() })
       );
+      const rawUser = localStorage.getItem("userData");
+      if (rawUser) {
+        try {
+          const uid = JSON.parse(rawUser)?.userId;
+          if (uid) {
+            localStorage.setItem(`innoide:last_active_route:${uid}`, path);
+          }
+        } catch (e) {}
+      }
     } catch {
       // localStorage might be full or unavailable; fail silently
     }
@@ -71,37 +80,44 @@ export function useRouteRestoration() {
       localStorage.getItem("userData") || sessionStorage.getItem("userData");
 
     if (!token && !userData) {
-      try {
-        localStorage.removeItem(ROUTE_KEY);
-      } catch {
-        /* ignore */
-      }
       return;
     }
 
     try {
-      const raw = localStorage.getItem(ROUTE_KEY);
-      if (!raw) return;
+      let targetPath = null;
+      let targetAge = 0;
 
-      const parsed = JSON.parse(raw);
-      const { path, ts } = parsed;
-      const age = Date.now() - (ts || 0);
-
-      // If stored route is excluded or expired, remove it and stay on root
-      if (!path || typeof path !== "string" || EXCLUDED_ROUTES.has(path) || path === "/" || age >= ROUTE_TTL_MS) {
-        localStorage.removeItem(ROUTE_KEY);
-        return;
+      if (userData) {
+        try {
+          const uid = JSON.parse(userData)?.userId;
+          if (uid) {
+            const userRoute = localStorage.getItem(`innoide:last_active_route:${uid}`);
+            if (userRoute && !EXCLUDED_ROUTES.has(userRoute) && userRoute !== "/") {
+              targetPath = userRoute;
+            }
+          }
+        } catch (e) {}
       }
 
-      console.log(`[RouteRestoration] Restoring route: ${path} (age: ${Math.round(age / 1000)}s)`);
-      navigate(path, { replace: true });
+      if (!targetPath) {
+        const raw = localStorage.getItem(ROUTE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const { path, ts } = parsed;
+          const age = Date.now() - (ts || 0);
+          if (path && typeof path === "string" && !EXCLUDED_ROUTES.has(path) && path !== "/" && age < ROUTE_TTL_MS) {
+            targetPath = path;
+            targetAge = age;
+          }
+        }
+      }
+
+      if (targetPath) {
+        console.log(`[RouteRestoration] Restoring route: ${targetPath}`);
+        navigate(targetPath, { replace: true });
+      }
     } catch {
-      // Corrupt data — clear it
-      try {
-        localStorage.removeItem(ROUTE_KEY);
-      } catch {
-        /* ignore */
-      }
+      /* ignore */
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

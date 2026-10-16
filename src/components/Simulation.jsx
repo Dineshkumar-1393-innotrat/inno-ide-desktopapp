@@ -1382,10 +1382,14 @@ const BlockDiagram = () => {
           connections: connections
         }));
       }
-    } else if (activeProjectId) {
+    } else {
+      const effectiveProjId = activeProjectId || localStorage.getItem('activeProjectId') || 'default';
+      const uid = user?.userId || 'default';
       try {
-        const stored = localStorage.getItem(`innoide:simulation_tabs:${user?.userId || 'default'}:${activeProjectId}`) ||
-                       localStorage.getItem(`innoide:simulation_tabs:${activeProjectId}`);
+        const stored = localStorage.getItem(`innoide:simulation_tabs:${uid}:${effectiveProjId}`) ||
+                       localStorage.getItem(`innoide:simulation_tabs:${effectiveProjId}`) ||
+                       localStorage.getItem(`innoide:simulation_tabs:${uid}:default`) ||
+                       localStorage.getItem(`innoide:simulation_tabs:default`);
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed?.tabs) && parsed.tabs.length > 0) {
@@ -1395,9 +1399,82 @@ const BlockDiagram = () => {
             }
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn("[Simulation] Failed to parse stored tabs:", e);
+      }
     }
   }, [diagramData?.simulation?.data, dispatch, activeTabId, activeProjectId, user?.userId]);
+
+  // Auto-persist simulation tabs and live canvas state to localStorage
+  useEffect(() => {
+    if (!tabs || tabs.length === 0) return;
+    const effectiveProjId = activeProjectId || localStorage.getItem('activeProjectId') || 'default';
+    const timer = setTimeout(() => {
+      try {
+        const currentTabsWithLiveState = tabs.map(t =>
+          t.id === activeTabId
+            ? { ...t, symbols: droppedItems, connections: connections || [] }
+            : t
+        );
+        const storagePayload = {
+          tabs: currentTabsWithLiveState,
+          activeTabId,
+          projectId: effectiveProjId,
+          projectName: activeProjectName,
+          savedAt: new Date().toISOString(),
+        };
+        const uId = user?.userId || 'default';
+        localStorage.setItem(`innoide:simulation_tabs:${uId}:${effectiveProjId}`, JSON.stringify(storagePayload));
+        localStorage.setItem(`innoide:simulation_tabs:${effectiveProjId}`, JSON.stringify(storagePayload));
+        if (activeProjectName) {
+          localStorage.setItem(`innoide:simulation_tabs:${activeProjectName}`, JSON.stringify(storagePayload));
+        }
+      } catch (e) {
+        console.warn("[Simulation] Failed to auto-persist tabs to localStorage:", e);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [tabs, droppedItems, connections, activeTabId, activeProjectId, activeProjectName, user?.userId]);
+
+  // Handle immediate canvas flush on forced save (e.g., logout or tab close)
+  useEffect(() => {
+    const flushSimulationState = () => {
+      try {
+        if (typeof saveSimulationNow === 'function') {
+          saveSimulationNow();
+        }
+        const effectiveProjId = activeProjectId || localStorage.getItem('activeProjectId') || 'default';
+        if (tabs && tabs.length > 0) {
+          const currentTabsWithLiveState = tabs.map(t =>
+            t.id === activeTabId
+              ? { ...t, symbols: droppedItems, connections: connections || [] }
+              : t
+          );
+          const storagePayload = {
+            tabs: currentTabsWithLiveState,
+            activeTabId,
+            projectId: effectiveProjId,
+            projectName: activeProjectName,
+            savedAt: new Date().toISOString(),
+          };
+          const uId = user?.userId || 'default';
+          localStorage.setItem(`innoide:simulation_tabs:${uId}:${effectiveProjId}`, JSON.stringify(storagePayload));
+          localStorage.setItem(`innoide:simulation_tabs:${effectiveProjId}`, JSON.stringify(storagePayload));
+        }
+      } catch (e) {
+        console.warn("[Simulation] Error flushing state on force save:", e);
+      }
+    };
+
+    window.addEventListener("innoide:force-canvas-save", flushSimulationState);
+    window.addEventListener("beforeunload", flushSimulationState);
+
+    return () => {
+      window.removeEventListener("innoide:force-canvas-save", flushSimulationState);
+      window.removeEventListener("beforeunload", flushSimulationState);
+    };
+  }, [tabs, droppedItems, connections, activeTabId, activeProjectId, activeProjectName, user?.userId, saveSimulationNow]);
 
   useEffect(() => {
     try {
@@ -1496,7 +1573,7 @@ const BlockDiagram = () => {
     };
 
     const effectiveProductId = activeProductId || localStorage.getItem('activeProductId') || '';
-    const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || '';
+    const effectiveProjectId = activeProjectId || localStorage.getItem('activeProjectId') || 'default';
     const effectiveProductName = activeProductName || localStorage.getItem('activeProductName') || activeProjectName || 'Product';
     const effectiveProjectName = activeProjectName || localStorage.getItem('activeProjectName') || 'Project';
 
@@ -1541,7 +1618,7 @@ const BlockDiagram = () => {
     const payload = {
       symbols: droppedItems || [],
       connections: Array.isArray(connections) ? connections : [],
-      projectId: activeProjectId,
+      projectId: effectiveProjectId,
       projectName: activeProjectName || effectiveTab?.name || 'Simulation',
       productId: activeProductId,
       productName: activeProductName || 'Product',
@@ -2028,7 +2105,7 @@ const BlockDiagram = () => {
 
   const getSimulationStorageKey = () => {
     const uid = user?.userId || user?._id || user?.id || "anon";
-    const pid = activeProjectId || "default";
+    const pid = activeProjectId || localStorage.getItem('activeProjectId') || "default";
     return `innoide:simulation:savedDesign:${uid}:${pid}`;
   };
 

@@ -76,13 +76,24 @@ const AuthButton = () => {
 
     setIsLoggingOut(true);
     try {
+      window.dispatchEvent(new CustomEvent('innoide:force-canvas-save'));
+      const userDataStr = localStorage.getItem("userData");
+      let uId = null;
+      if (userDataStr) {
+        try { uId = JSON.parse(userDataStr)?.userId; } catch (e) {}
+      }
+      const currentPath = window.location.pathname;
+      if (uId && currentPath && currentPath !== "/" && currentPath !== "/logout") {
+        localStorage.setItem(`innoide:last_active_route:${uId}`, currentPath);
+        localStorage.setItem("innoide:last_active_route", currentPath);
+      }
+
       await axios.post(`${API.MAIN}/api/v1/auth/logout`, { token });
 
       // On successful logout, clear session and local storage and navigate
       sessionStorage.removeItem("token");
       localStorage.removeItem("token");
       localStorage.removeItem("userData");
-      localStorage.removeItem("innoide:last_active_route");
       setToken(null);
 
       toast({

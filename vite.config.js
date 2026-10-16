@@ -69,6 +69,27 @@ export default defineConfig({
       "Content-Security-Policy": "",
     },
     proxy: {
+      // ─── Companion Server (ESP32 Mobile Web App & OTP Endpoints) ────────
+      '/api/otp': {
+        target: 'http://localhost:5055',
+        changeOrigin: true,
+        secure: false,
+        configure: (proxy) => {
+          proxy.on('error', () => {
+            // Silently ignore if port 5055 is spinning up
+          });
+        }
+      },
+      '/api/action': {
+        target: 'http://localhost:5055',
+        changeOrigin: true,
+        secure: false
+      },
+      '/api/state': {
+        target: 'http://localhost:5055',
+        changeOrigin: true,
+        secure: false
+      },
       // ─── Drag and Drop Agent API ──────────────────────────────────────────
       '/api/agent': {
         target: 'https://drag-and-drop-agent-1.onrender.com',

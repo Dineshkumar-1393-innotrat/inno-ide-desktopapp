@@ -290,7 +290,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   // Dynamic Project Isolation: Switch tabs per project
   useEffect(() => {
-    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId") || 'default';
     if (!effectiveProjectId) return;
 
     const prevProjectId = currentProjectIdRef.current;
@@ -299,8 +299,9 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     // 1. Save tabs of previous project if they exist
     if (prevProjectId && tabsRef.current && tabsRef.current.length > 0) {
       try {
+        const uId = userId || 'default';
         localStorage.setItem(
-          `innoide:code_editor_tabs:${userId}:${prevProjectId}`,
+          `innoide:code_editor_tabs:${uId}:${prevProjectId}`,
           JSON.stringify({
             tabs: tabsRef.current,
             activeTabId: activeTabIdRef.current,
@@ -319,7 +320,11 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     let loadedActiveId = null;
 
     try {
-      const stored = localStorage.getItem(`innoide:code_editor_tabs:${userId}:${effectiveProjectId}`);
+      const uId = userId || 'default';
+      const stored = localStorage.getItem(`innoide:code_editor_tabs:${uId}:${effectiveProjectId}`) ||
+                     localStorage.getItem(`innoide:code_editor_tabs:${effectiveProjectId}`) ||
+                     localStorage.getItem(`innoide:code_editor_tabs:${uId}:default`) ||
+                     localStorage.getItem(`innoide:code_editor_tabs:default`);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed?.tabs && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
@@ -366,21 +371,48 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   // Persist current project tabs on edit
   useEffect(() => {
-    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId") || 'default';
     if (!effectiveProjectId || !tabs || tabs.length === 0 || isSwitchingProjectRef.current) return;
 
     try {
-      localStorage.setItem(
-        `innoide:code_editor_tabs:${userId}:${effectiveProjectId}`,
-        JSON.stringify({
-          tabs,
-          activeTabId,
-        })
-      );
+      const uId = userId || 'default';
+      const payload = JSON.stringify({
+        tabs,
+        activeTabId,
+      });
+      localStorage.setItem(`innoide:code_editor_tabs:${uId}:${effectiveProjectId}`, payload);
+      localStorage.setItem(`innoide:code_editor_tabs:${effectiveProjectId}`, payload);
     } catch (e) {
       console.warn("[CodeEditor] Failed to persist tabs:", e);
     }
   }, [tabs, activeTabId, activeProjectId, userId]);
+
+  // Synchronously flush tabs on logout / window unload
+  useEffect(() => {
+    const flushCodeEditorTabs = () => {
+      try {
+        const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId") || 'default';
+        if (tabsRef.current && tabsRef.current.length > 0) {
+          const uId = userId || 'default';
+          const payload = JSON.stringify({
+            tabs: tabsRef.current,
+            activeTabId: activeTabIdRef.current,
+          });
+          localStorage.setItem(`innoide:code_editor_tabs:${uId}:${effectiveProjectId}`, payload);
+          localStorage.setItem(`innoide:code_editor_tabs:${effectiveProjectId}`, payload);
+        }
+      } catch (e) {
+        console.warn("[CodeEditor] Failed to flush tabs on save/logout:", e);
+      }
+    };
+
+    window.addEventListener("innoide:force-canvas-save", flushCodeEditorTabs);
+    window.addEventListener("beforeunload", flushCodeEditorTabs);
+    return () => {
+      window.removeEventListener("innoide:force-canvas-save", flushCodeEditorTabs);
+      window.removeEventListener("beforeunload", flushCodeEditorTabs);
+    };
+  }, [activeProjectId, userId]);
 
   // Handle opening files from FileExplorer navigation
   useEffect(() => {

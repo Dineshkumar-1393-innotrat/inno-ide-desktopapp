@@ -5,6 +5,7 @@ import { useToast, useColorModeValue, useDisclosure } from "@chakra-ui/react";
 import { sanitizeWidgets } from "./esp32/geologHelpers.js";
 import FlasherWizardModal from "./esp32/FlasherWizardModal.jsx";
 import AppBuilderStudio from "./esp32/AppBuilderStudio.jsx";
+import LocationOtpVerificationModal from "./esp32/LocationOtpVerificationModal.jsx";
 
 // Custom Feature Hooks
 import useDeviceScanner from "./esp32/useDeviceScanner.js";
@@ -340,7 +341,11 @@ export default function ESP32Flasher({
     handleToggleHardwareLed,
     handleTestHardwareSignal,
     handleExecuteRule,
-    evaluateRulesForWidget
+    evaluateRulesForWidget,
+    activeOtpChallenge,
+    isOtpModalOpen,
+    handleOtpVerified,
+    handleOtpCancelled
   } = useHardwareActuation({
     selectedDevice,
     activePort,
@@ -589,8 +594,9 @@ export default function ESP32Flasher({
   // ==========================================
   if (wizardStep === "app_builder") {
     return (
-      <AppBuilderStudio
-        projectName={projectName}
+      <>
+        <AppBuilderStudio
+          projectName={projectName}
         bgCard={bgCard}
         borderColor={borderColor}
         bgPurpleCard={bgPurpleCard}
@@ -725,6 +731,14 @@ export default function ESP32Flasher({
         onLocationQrModalClose={onLocationQrModalClose}
         locationQrModalData={locationQrModalData}
       />
+      <LocationOtpVerificationModal
+        isOpen={isOtpModalOpen}
+        challengeData={activeOtpChallenge}
+        onVerified={handleOtpVerified}
+        onCancel={handleOtpCancelled}
+        onClose={handleOtpCancelled}
+      />
+    </>
     );
   }
 
