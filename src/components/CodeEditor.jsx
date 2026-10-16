@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import axios from "axios";
 import { API } from '@/config';
+import { saveProjectFile, ensureProjectFolder } from "../utils/workspaceStorage";
 import {
   Box,
   Button,
@@ -47,6 +49,7 @@ import {
   closeTab,
   renameTab,
   updateTabContent as updateReduxTabContent,
+  markTabClean,
 } from "../store/slices/editorSlice";
 import { useProject } from "../ProjectContext";
 
@@ -232,6 +235,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
   const outputRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const { activeProjectId, activeProjectName, user } = useProject?.() ?? {};
   const currentProjectIdRef = useRef(null);
@@ -247,13 +251,125 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
+  const activeTabRef = useRef(activeTab);
 
   useEffect(() => {
     tabsRef.current = tabs;
     activeTabIdRef.current = activeTabId;
-  }, [tabs, activeTabId]);
+    activeTabRef.current = activeTab;
+  }, [tabs, activeTabId, activeTab]);
 
   const userId = user?.userId || user?._id || user?.id || localStorage.getItem("userId") || "anonymous";
+
+  const [isSavingToBackend, setIsSavingToBackend] = useState(false);
+  const [lastBackendSaveTime, setLastBackendSaveTime] = useState(null);
+
+  const saveCodeToBackend = useCallback(async (tabToSave, isAutoSave = false) => {
+    const targetTab = tabToSave || activeTabRef.current;
+    if (!targetTab) return false;
+
+    const effectiveProjectId = activeProjectId || localStorage.getItem("activeProjectId");
+    const uId = user?.userId || user?._id || user?.id || localStorage.getItem("userId");
+
+    if (!uId) {
+      console.warn("[CodeEditor] Cannot save to backend: missing userId");
+      return false;
+    }
+
+    if (!effectiveProjectId) {
+      console.warn("[CodeEditor] Cannot save to backend: missing projectId");
+      return false;
+    }
+
+    try {
+      setIsSavingToBackend(true);
+      const fileName = targetTab.name || "file.c";
+      const content = targetTab.content ?? "";
+      const existingFileId = targetTab.fileId;
+      let targetParentId = targetTab.parentId || effectiveProjectId;
+
+      // Ensure directory if file has a relative path with folders
+      if (targetTab.filePath && targetTab.filePath.includes("/")) {
+        const parts = targetTab.filePath.split("/");
+        parts.pop();
+        const folderPath = parts.join("/");
+        if (folderPath) {
+          try {
+            targetParentId = await ensureProjectFolder({
+              userId: uId,
+              projectId: effectiveProjectId,
+              folderName: folderPath,
+            });
+          } catch (folderErr) {
+            console.warn("[CodeEditor] Could not resolve subfolder on backend:", folderErr);
+          }
+        }
+      }
+
+      console.log(`[CodeEditor] Saving ${fileName} to backend (autoSave=${isAutoSave})...`, {
+        existingFileId,
+        targetParentId,
+        uId,
+      });
+
+      let savedFileId = existingFileId;
+
+      if (existingFileId) {
+        await axios.put(`${API.MAIN}/api/v1/updateFileAndFolder`, {
+          fileId: existingFileId,
+          newName: fileName,
+          newContent: content,
+        });
+      } else {
+        savedFileId = await saveProjectFile({
+          userId: uId,
+          projectId: targetParentId,
+          fileName,
+          content,
+          existingFileId: null,
+        });
+      }
+
+      if (savedFileId) {
+        targetTab.fileId = savedFileId;
+      }
+
+      // Mark tab clean in Redux (clears dirty indicator)
+      dispatch(markTabClean(targetTab.id));
+      setLastBackendSaveTime(Date.now());
+
+      // Notify file system to refresh
+      window.dispatchEvent(new CustomEvent("file-system-refresh"));
+
+      if (!isAutoSave) {
+        toast({
+          title: "Code Saved",
+          description: `"${fileName}" saved successfully to server and workspace.`,
+          status: "success",
+          duration: 2500,
+          isClosable: true,
+          position: "top-right",
+        });
+      }
+
+      return true;
+    } catch (err) {
+      console.error("[CodeEditor] Backend save error:", err);
+      if (!isAutoSave) {
+        toast({
+          title: "Save Failed",
+          description: err.response?.data?.message || err.message || "Failed to save file to server.",
+          status: "error",
+          duration: 3500,
+          isClosable: true,
+          position: "top-right",
+        });
+      }
+      return false;
+    } finally {
+      setIsSavingToBackend(false);
+    }
+  }, [activeProjectId, user, dispatch, toast]);
 
   const addNewTab = useCallback(() => {
     const newId = Date.now();
@@ -416,22 +532,29 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   // Handle opening files from FileExplorer navigation
   useEffect(() => {
-    if (location.state?.filePath) {
-      const filePath = location.state.filePath;
+    if (location.state?.filePath || location.state?.fileId || location.state?.fileName) {
+      const filePath = location.state.filePath || "";
       const fileContent = location.state.fileContent ?? "";
-      const fileName = filePath.split("/").pop() || "file.c";
+      const fileName = location.state.fileName || filePath.split("/").pop() || "file.c";
+      const fileId = location.state.fileId;
+      const parentId = location.state.parentId;
 
       const existingTab = tabs.find(
-        (t) => t.filePath === filePath || t.name === fileName
+        (t) => (fileId && t.fileId === fileId) || (filePath && t.filePath === filePath) || t.name === fileName
       );
 
       if (existingTab) {
+        if (fileId && !existingTab.fileId) {
+          existingTab.fileId = fileId;
+        }
         dispatch(setActiveTab(existingTab.id));
       } else {
         const newTab = {
           id: Date.now(),
           name: fileName,
           filePath,
+          fileId,
+          parentId,
           content: fileContent,
           dirty: false,
         };
@@ -449,7 +572,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     }
   }, [tabs.length, addNewTab]);
 
-  // Enhanced auto-save for code editor state
+  // Enhanced auto-save for code editor state (local + backend)
   const {
     isSaving: isAutoSaving,
     lastSaveTime: lastAutoSaveTime,
@@ -464,8 +587,12 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       activeTab: activeTabId,
       autoSaveDelay: 2000,
       priority: 2,
-      onSave: (data) => {
-        console.log("[CodeEditor] Auto-saved editor state:", data);
+      onSave: async (data) => {
+        console.log("[CodeEditor] Auto-saved editor state locally:", data);
+        const currentActive = tabsRef.current?.find((t) => String(t.id) === String(activeTabIdRef.current));
+        if (currentActive && currentActive.dirty) {
+          await saveCodeToBackend(currentActive, true);
+        }
       },
       onLoad: (loadedData) => {
         console.log("[CodeEditor] Loading saved editor state:", loadedData);
@@ -530,7 +657,6 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
   const [debugVariables, setDebugVariables] = useState([]);
   const [debugBreakpoints, setDebugBreakpoints] = useState([]);
   const { colorMode } = useColorMode();
-  const toast = useToast();
   const identityFromLocation = location.state?.identity;
 
   const computeIdentity = useCallback(() => {
@@ -570,11 +696,17 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
   useEffect(() => {
     const handleBeforeUnload = () => {
       saveEditorNow();
+      if (activeTabRef.current && activeTabRef.current.dirty) {
+        saveCodeToBackend(activeTabRef.current, true);
+      }
     };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
         saveEditorNow();
+        if (activeTabRef.current && activeTabRef.current.dirty) {
+          saveCodeToBackend(activeTabRef.current, true);
+        }
       }
     };
 
@@ -586,21 +718,48 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       // Save when unmounting (navigating away)
       saveEditorNow();
+      if (activeTabRef.current && activeTabRef.current.dirty) {
+        saveCodeToBackend(activeTabRef.current, true);
+      }
     };
-  }, [saveEditorNow]);
+  }, [saveEditorNow, saveCodeToBackend]);
+
+  // Global keyboard shortcut for Ctrl+S / Cmd+S
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        saveEditorNow();
+        if (activeTabRef.current) {
+          saveCodeToBackend(activeTabRef.current, false);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [saveEditorNow, saveCodeToBackend]);
 
   // Register code editor save strategy with auto-save manager
   useEffect(() => {
-    const saveFunction = () => ({
-      tabs: tabs.map((t) => ({
-        id: t.id,
-        name: t.name,
-        content: t.content,
-        dirty: t.dirty,
-      })),
-      activeTab,
-      timestamp: Date.now(),
-    });
+    const saveFunction = async () => {
+      const currentActive = tabsRef.current?.find((t) => String(t.id) === String(activeTabIdRef.current));
+      if (currentActive && currentActive.dirty) {
+        await saveCodeToBackend(currentActive, true);
+      }
+      return {
+        tabs: (tabsRef.current || []).map((t) => ({
+          id: t.id,
+          name: t.name,
+          content: t.content,
+          fileId: t.fileId,
+          filePath: t.filePath,
+          dirty: t.dirty,
+        })),
+        activeTab: activeTabRef.current,
+        timestamp: Date.now(),
+      };
+    };
 
     autoSaveManager.registerSaveStrategy("codeeditor:tabs", saveFunction, {
       priority: 2,
@@ -610,7 +769,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     return () => {
       autoSaveManager.unregisterSaveStrategy("codeeditor:tabs");
     };
-  }, [tabs, activeTab]);
+  }, [saveCodeToBackend]);
 
   // Tab Renaming State
   const [editingTabId, setEditingTabId] = useState(null);
@@ -636,9 +795,22 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     }
   };
 
-  const finishRenaming = () => {
+  const finishRenaming = async () => {
     if (editingTabId && tempName.trim()) {
-      dispatch(renameTab({ tabId: editingTabId, name: tempName.trim() }));
+      const newName = tempName.trim();
+      dispatch(renameTab({ tabId: editingTabId, name: newName }));
+      const targetTab = tabs.find((t) => t.id === editingTabId);
+      if (targetTab?.fileId) {
+        try {
+          await axios.put(`${API.MAIN}/api/v1/updateFileAndFolder`, {
+            fileId: targetTab.fileId,
+            newName,
+          });
+          window.dispatchEvent(new CustomEvent("file-system-refresh"));
+        } catch (err) {
+          console.warn("[CodeEditor] Failed to rename file on backend:", err);
+        }
+      }
     }
     setEditingTabId(null);
     setTempName("");
@@ -1000,9 +1172,15 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
     if (typeof window !== "undefined") {
       window.monaco = monaco;
     }
+    // Bind Ctrl+S / Cmd+S in Monaco Editor to save to backend
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      saveEditorNow();
+      if (activeTabRef.current) {
+        saveCodeToBackend(activeTabRef.current, false);
+      }
+    });
     editor.focus();
   };
-
 
   const goToFlowchart = () => {
     navigate("/flowchart");
@@ -1013,6 +1191,9 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       // Save current editor state before navigating
       try {
         await saveEditorNow();
+        if (activeTabRef.current && activeTabRef.current.dirty) {
+          await saveCodeToBackend(activeTabRef.current, true);
+        }
         await saveAllScreens();
         console.log("[CodeEditor] Saved state before tab change to:", tab);
       } catch (error) {
@@ -1031,7 +1212,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
         navigate(next);
       }
     },
-    [navigate],
+    [navigate, saveEditorNow, saveCodeToBackend, saveAllScreens],
   );
 
   const editorTheme = colorMode === "dark" ? "vs-dark" : "vs-light";
@@ -1345,32 +1526,28 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
                     }
                     _hover={{ bg: "rgba(56,189,248,0.2)" }}
                   />
-                  <IconButton
-                    icon={<Save size={14} />}
-                    size="xs"
-                    onClick={() => {
-                      saveEditorNow();
-                      toast({
-                        title: "Code Saved",
-                        description: "Your code has been saved successfully.",
-                        status: "success",
-                        duration: 2000,
-                        isClosable: true,
-                        position: "top-right"
-                      });
-                    }}
-                    aria-label="Save code"
-                    variant="outline"
-                    borderColor={
-                      colorMode === "dark"
-                        ? "rgba(148,163,184,0.4)"
-                        : "rgba(15,23,42,0.15)"
-                    }
-                    color={
-                      colorMode === "dark" ? "rgba(226,232,240,0.9)" : "#0f172a"
-                    }
-                    _hover={{ bg: "rgba(56,189,248,0.2)" }}
-                  />
+                  <Tooltip label="Save" hasArrow placement="bottom">
+                    <IconButton
+                      icon={<Save size={14} />}
+                      size="xs"
+                      isLoading={isSavingToBackend}
+                      onClick={async () => {
+                        saveEditorNow();
+                        await saveCodeToBackend(activeTab, false);
+                      }}
+                      aria-label="Save"
+                      variant="outline"
+                      borderColor={
+                        colorMode === "dark"
+                          ? "rgba(148,163,184,0.4)"
+                          : "rgba(15,23,42,0.15)"
+                      }
+                      color={
+                        colorMode === "dark" ? "rgba(226,232,240,0.9)" : "#0f172a"
+                      }
+                      _hover={{ bg: "rgba(56,189,248,0.2)" }}
+                    />
+                  </Tooltip>
                 </HStack>
 
                 <Flex align="center" gap={3}>

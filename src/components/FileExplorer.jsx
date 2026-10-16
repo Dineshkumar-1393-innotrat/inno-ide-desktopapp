@@ -434,7 +434,15 @@ const FileExplorer = ({ variant }) => {
     } else if (isBlockProgramming) {
       navigate("/blockprogramming", { state: { filePath, fileContent: file.content } });
     } else {
-      navigate("/editor", { state: { filePath, fileContent: file.content } });
+      navigate("/editor", {
+        state: {
+          filePath,
+          fileContent: file.content,
+          fileId: file._id,
+          fileName: file.name,
+          parentId: file.parentId
+        }
+      });
     }
   };
 

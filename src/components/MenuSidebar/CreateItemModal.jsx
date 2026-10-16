@@ -111,7 +111,10 @@ const CreateItemModal = ({
                 const navigationState = { 
                     state: { 
                         filePath: data.file?.path || finalName, 
-                        fileContent: data.file?.content || (type === "file" ? "" : null)
+                        fileContent: data.file?.content || (type === "file" ? "" : null),
+                        fileId: data.file?._id,
+                        fileName: data.file?.name || finalName,
+                        parentId: data.file?.parentId
                     } 
                 };
 
