@@ -49,6 +49,13 @@ const mathEditorSlice = createSlice({
                 tab.dirty = false;
             }
         },
+        updateTab: (state, action) => {
+            const { tabId, updates } = action.payload || {};
+            const tab = state.tabs.find((t) => t.id === tabId);
+            if (tab && updates) {
+                Object.assign(tab, updates);
+            }
+        },
     },
   extraReducers: (builder) => {
     builder.addCase(RESET_WORKSPACE, () => ({ ...initialState }));
@@ -63,6 +70,7 @@ export const {
     updateTabContent,
     renameTab,
     markTabClean,
+    updateTab,
 } = mathEditorSlice.actions;
 
 export default mathEditorSlice.reducer;

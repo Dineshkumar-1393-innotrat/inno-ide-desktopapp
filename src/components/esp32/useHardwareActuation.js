@@ -98,18 +98,32 @@ export default function useHardwareActuation({
     }
 
     const mismatch = isLocationMismatch(prevLoc, switchLoc, 100);
+    const isSwitchOff = !nextVal;
+    const requiresOtp = isSwitchOff && mismatch.isMismatch;
     let verificationToken = null;
 
-    if (mismatch.isMismatch) {
-      // Create OTP challenge
+    if (requiresOtp) {
+      // Create OTP challenge synchronized with active QR validation session
+      let activeQrSession = null;
+      if (window.electronAPI?.qr?.getSession) {
+        try {
+          activeQrSession = await window.electronAPI.qr.getSession();
+        } catch {}
+      }
+
       let challenge = null;
+      const effectiveQrExp = activeQrSession?.expiresAt || (Date.now() + 1200 * 1000);
+      const effectiveQrGen = activeQrSession?.generatedAt || Date.now();
+
       if (window.electronAPI?.otp?.request) {
         challenge = await window.electronAPI.otp.request({
           widgetId: "w-led",
           switchTitle: "Switch",
-          action: nextVal ? "ON" : "OFF",
+          action: "OFF",
           currentLocation: switchLoc,
-          previousLocation: prevLoc
+          previousLocation: prevLoc,
+          qrSession: effectiveQrGen,
+          qrExpiresAt: effectiveQrExp
         });
       } else {
         try {
@@ -119,9 +133,11 @@ export default function useHardwareActuation({
             body: JSON.stringify({
               widgetId: "w-led",
               switchTitle: "Switch",
-              action: nextVal ? "ON" : "OFF",
+              action: "OFF",
               currentLocation: switchLoc,
-              previousLocation: prevLoc
+              previousLocation: prevLoc,
+              qrSession: effectiveQrGen,
+              qrExpiresAt: effectiveQrExp
             })
           });
           const text = await cr.text();
@@ -131,17 +147,20 @@ export default function useHardwareActuation({
           challenge = JSON.parse(text);
         } catch (fetchErr) {
           const fallbackOtp = String(Math.floor(100000 + Math.random() * 900000));
+          const remainingSecs = Math.max(0, Math.floor((effectiveQrExp - Date.now()) / 1000));
           challenge = {
             success: true,
             challengeId: `local-${Date.now()}`,
             widgetId: "w-led",
             switchTitle: "Switch",
-            action: nextVal ? "ON" : "OFF",
+            action: "OFF",
             currentLocation: switchLoc,
             previousLocation: prevLoc,
             distance: mismatch.distance,
             threshold: mismatch.threshold || 100,
-            expiresInSeconds: 300,
+            expiresInSeconds: remainingSecs || 1200,
+            qrExpiresAt: effectiveQrExp,
+            qrSession: effectiveQrGen,
             resendCooldownSeconds: 30,
             devDemoMode: true,
             devOtp: fallbackOtp

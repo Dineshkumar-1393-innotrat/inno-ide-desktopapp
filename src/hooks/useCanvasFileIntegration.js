@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import projectFileManager from '../utils/projectFileManager';
 import { saveProjectFile, ensureProjectFolder } from '../utils/workspaceStorage';
+import { saveToLocalDrive } from '../utils/localDiskService';
 import { getUserInfo } from '../utilities';
 
 export const useCanvasFileIntegration = (canvasType = 'Flowchart') => {
@@ -109,6 +110,27 @@ export const useCanvasFileIntegration = (canvasType = 'Flowchart') => {
         }
       } catch (apiError) {
         console.warn('Could not sync canvas content to backend:', apiError);
+      }
+
+      // Persist to local drive inside project folder
+      try {
+        let subFolder = '';
+        let actualFileName = filePath;
+        if (filePath.includes('/')) {
+          const parts = filePath.split('/');
+          actualFileName = parts.pop();
+          subFolder = parts.join('/');
+        }
+        const effectiveProjectName = localStorage.getItem('activeProjectName') || 'Untitled_Project';
+        await saveToLocalDrive({
+          projectName: effectiveProjectName,
+          subFolder,
+          fileName: actualFileName,
+          data: content
+        });
+        console.log('[useCanvasFileIntegration] Canvas saved to local drive:', `${subFolder}/${actualFileName}`);
+      } catch (localDriveErr) {
+        console.warn('Could not save canvas content to local drive:', localDriveErr);
       }
 
       // Trigger file system refresh so sidebar and other components update

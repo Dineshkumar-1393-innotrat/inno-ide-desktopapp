@@ -106,6 +106,7 @@ import {
   sanitizeSegment,
   ensureProjectFolder,
 } from "../utils/workspaceStorage";
+import { saveToLocalDrive } from "../utils/localDiskService";
 import { saveAssetToScreenFolder } from "../utils/screenFileManager";
 import CreateProductButton from "./shared/CreateProductButton";
 import projectFileManager from "../utils/projectFileManager";
@@ -6738,11 +6739,29 @@ function DiagramEditor() {
         saveDiagramData(latestTabs, 'flowchart').catch(err => console.warn("[Flowchart] Background diagramData save warning:", err));
       }
 
+      // 6. Persist to local drive in project folder
+      let localSavePath = null;
+      try {
+        const localRes = await saveToLocalDrive({
+          projectName: activeProjectName || effectiveTab?.name || 'Flowchart_Project',
+          subFolder: 'Flowchart',
+          fileName,
+          data: payloadContent
+        });
+        if (localRes?.path) {
+          localSavePath = localRes.path;
+        }
+      } catch (localErr) {
+        console.warn("[Flowchart] Local drive save warning:", localErr);
+      }
+
       toast({
         title: "Tab Saved",
-        description: `"${tabName}" has been saved successfully.`,
+        description: localSavePath
+          ? `"${tabName}" saved to backend and local drive (${localSavePath}).`
+          : `"${tabName}" has been saved successfully.`,
         status: "success",
-        duration: 2500,
+        duration: 3000,
         isClosable: true,
         position: "top-right",
       });
@@ -6816,16 +6835,29 @@ function DiagramEditor() {
       document.body.removeChild(dlAnchor);
       setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 
-      // If running inside Electron, also persist locally to disk via filesystem bridge
-      if (window.electronAPI?.filesystem?.writeFile) {
-        window.electronAPI.filesystem.writeFile(fileName, jsonStr, "utf8").catch(() => {});
+      // Persist locally to disk inside project folder via localDiskService
+      let localDiskPath = null;
+      try {
+        const localRes = await saveToLocalDrive({
+          projectName: activeProjectName || effectiveTab?.name || 'Flowchart_Project',
+          subFolder: 'Flowchart',
+          fileName,
+          data: payloadContent
+        });
+        if (localRes?.path) {
+          localDiskPath = localRes.path;
+        }
+      } catch (localErr) {
+        console.warn("[Flowchart] Local drive save warning in saveDiagram:", localErr);
       }
 
       toast({
         title: "JSON Saved Successfully",
-        description: `"${tabName}" flowchart and project/product details exported as ${fileName}.`,
+        description: localDiskPath
+          ? `"${tabName}" saved to backend and local drive (${localDiskPath}).`
+          : `"${tabName}" flowchart and project/product details exported as ${fileName}.`,
         status: "success",
-        duration: 3000,
+        duration: 3500,
         isClosable: true,
         position: "top-right",
       });

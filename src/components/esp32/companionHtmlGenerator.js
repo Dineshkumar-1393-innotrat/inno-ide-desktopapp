@@ -117,6 +117,29 @@ export const getStandaloneHtmlContent = ({
         <button onclick="document.getElementById('scannerNotice').style.display='none'" style="background:transparent; border:none; color:#64748b; font-size:16px; cursor:pointer; padding:0 4px; line-height:1;">&times;</button>
       </div>
 
+      <!-- QR & OTP VALIDATION SESSION BANNER -->
+      <div id="qrSessionBanner" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:7px 12px; font-size:11px; color:#15803d; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>⏱️</span>
+          <span id="qrSessionText">QR Validation: 20:00 (OTP synchronized)</span>
+        </div>
+        <span id="qrSessionBadge" style="font-size:9px; font-weight:800; background:#dcfce7; color:#166534; padding:2px 6px; border-radius:4px;">SYNCED</span>
+      </div>
+
+      <!-- QR EXPIRED FULL-SCREEN OVERLAY -->
+      <div id="qrExpiredOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.85); backdrop-filter:blur(6px); z-index:9999; flex-direction:column; align-items:center; justify-content:center; padding:24px; text-align:center;">
+        <div style="background:#ffffff; border-radius:20px; padding:24px; max-width:320px; box-shadow:0 20px 40px rgba(0,0,0,0.3); border:1px solid #fecaca;">
+          <div style="font-size:36px; margin-bottom:8px;">⌛</div>
+          <div style="font-size:15px; font-weight:800; color:#991b1b; margin-bottom:6px;">QR &amp; OTP Session Expired</div>
+          <div style="font-size:11px; color:#64748b; line-height:1.5; margin-bottom:16px;">
+            The 20-minute QR validation and OTP session has expired. To continue controlling your ESP32 device, please re-scan or regenerate the QR code from InnoIDE.
+          </div>
+          <button onclick="window.location.reload()" style="background:#2563eb; color:#ffffff; border:none; border-radius:10px; padding:10px 18px; font-size:12px; font-weight:700; cursor:pointer;">
+            Check Status / Reload
+          </button>
+        </div>
+      </div>
+
       <!-- UI CONTROLS ONLY -->
       <div id="tab-controls" class="controls-list">
         ${widgets.filter(w => w.visible !== false).length === 0 ? `
@@ -636,7 +659,7 @@ export const getStandaloneHtmlContent = ({
 
       <!-- Timer & Resend Row -->
       <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
-        <span id="otpExpiryTimer" style="color: #64748b; font-family: monospace;">⏱️ Expires in: 04:59</span>
+        <span id="otpExpiryTimer" style="color: #64748b; font-family: monospace;">⏱️ Expires (with QR validation): 19:59</span>
         <button id="otpResendBtn" type="button" onclick="handleResendOtp()" style="background: transparent; border: none; color: #2563eb; font-size: 11px; font-weight: 700; cursor: pointer;">Resend OTP</button>
       </div>
 
@@ -652,6 +675,10 @@ export const getStandaloneHtmlContent = ({
     const rules = ${logicBlocksJson};
     const widgetValues = {};
     const execCounts = {};
+
+    var urlParams = new URLSearchParams(window.location.search);
+    var qrSessionTimestamp = parseInt(urlParams.get('qr_session') || '', 10) || 0;
+    var qrExpiresAtTimestamp = parseInt(urlParams.get('qr_exp') || '', 10) || 0;
 
     function setTab(tab) {}
 
@@ -671,11 +698,21 @@ export const getStandaloneHtmlContent = ({
         const cleanPayload = String(payload || '').trim();
         const isOff = cleanPayload === 'LED:0' || cleanPayload.includes(':0') || cleanPayload.toLowerCase().includes('off');
         const switchStatus = isOff ? 0 : 1;
+
+        if (qrExpiresAtTimestamp && Date.now() > qrExpiresAtTimestamp) {
+          var expOverlay = document.getElementById('qrExpiredOverlay');
+          if (expOverlay) expOverlay.style.display = 'flex';
+          addLog('⏳ [QR Expired] QR validation session expired. Switch action blocked.');
+          return;
+        }
+
         const bodyObj = Object.assign({
           payload: cleanPayload || (isOff ? 'LED:0' : 'LED:1'),
           SwitchStatus: switchStatus,
           value: switchStatus === 1,
-          port: COMPANION_PORT || 'COM9'
+          port: COMPANION_PORT || 'COM9',
+          qrSession: qrSessionTimestamp || undefined,
+          qrExpiresAt: qrExpiresAtTimestamp || undefined
         }, extra || {});
         const bodyStr = JSON.stringify(bodyObj);
 
@@ -691,6 +728,8 @@ export const getStandaloneHtmlContent = ({
           '&SwitchStatus=' + switchStatus +
           '&value=' + (switchStatus === 1) +
           '&port=' + encodeURIComponent(bodyObj.port || 'COM9') +
+          (qrSessionTimestamp ? ('&qr_session=' + qrSessionTimestamp) : '') +
+          (qrExpiresAtTimestamp ? ('&qr_exp=' + qrExpiresAtTimestamp) : '') +
           '&_t=' + Date.now();
 
         var dispatched = false;
@@ -1588,20 +1627,35 @@ export const getStandaloneHtmlContent = ({
 
       showOtpStatusMessage('', '');
 
-      // Expiration countdown
+      // Expiration countdown - synchronized along with QR validation
       clearInterval(otpTimerInterval);
-      var remainingSeconds = challengeData.expiresInSeconds || 300;
+      var effectiveQrExp = challengeData.qrExpiresAt ? Number(challengeData.qrExpiresAt) : (qrExpiresAtTimestamp || 0);
+      var remainingSeconds = effectiveQrExp
+        ? Math.max(0, Math.round((effectiveQrExp - Date.now()) / 1000))
+        : (challengeData.expiresInSeconds || 1200);
+
       function updateTimerDisplay() {
+        var now = Date.now();
+        if (effectiveQrExp) {
+          remainingSeconds = Math.max(0, Math.round((effectiveQrExp - now) / 1000));
+        }
         var mins = Math.floor(remainingSeconds / 60);
         var secs = remainingSeconds % 60;
         var formatted = (mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs;
         var timerEl = document.getElementById('otpExpiryTimer');
-        if (timerEl) timerEl.innerText = '⏱️ Expires in: ' + formatted;
-        if (remainingSeconds <= 0) {
+        if (timerEl) timerEl.innerText = '⏱️ Expires (with QR validation): ' + formatted;
+
+        if (remainingSeconds <= 0 || (effectiveQrExp && now >= effectiveQrExp)) {
           clearInterval(otpTimerInterval);
-          showOtpStatusMessage('OTP expired. Request a new OTP.', 'error');
+          showOtpStatusMessage('OTP expired along with QR code validation session. Please re-scan QR code.', 'error');
+          var verifyBtn = document.getElementById('otpBtnVerify');
+          if (verifyBtn) verifyBtn.disabled = true;
+          var resendBtn = document.getElementById('otpResendBtn');
+          if (resendBtn) resendBtn.disabled = true;
+          var overlayExp = document.getElementById('qrExpiredOverlay');
+          if (overlayExp) overlayExp.style.display = 'flex';
         }
-        remainingSeconds--;
+        if (!effectiveQrExp) remainingSeconds--;
       }
       updateTimerDisplay();
       otpTimerInterval = setInterval(updateTimerDisplay, 1000);
@@ -1682,6 +1736,17 @@ export const getStandaloneHtmlContent = ({
 
     async function handleResendOtp() {
       if (!activeOtpChallenge || !activeOtpChallenge.challengeId) return;
+      var now = Date.now();
+      var effectiveQrExp = (activeOtpChallenge && activeOtpChallenge.qrExpiresAt) ? Number(activeOtpChallenge.qrExpiresAt) : (qrExpiresAtTimestamp || 0);
+      if (effectiveQrExp && now >= effectiveQrExp) {
+        showOtpStatusMessage('QR validation session has expired. Please re-scan QR code.', 'error');
+        var resendBtn = document.getElementById('otpResendBtn');
+        if (resendBtn) resendBtn.disabled = true;
+        var overlayExp = document.getElementById('qrExpiredOverlay');
+        if (overlayExp) overlayExp.style.display = 'flex';
+        return;
+      }
+
       var resendBtn = document.getElementById('otpResendBtn');
       if (resendBtn && resendBtn.disabled) return;
 
@@ -1694,7 +1759,11 @@ export const getStandaloneHtmlContent = ({
         try {
           res = await fetchCompanionSafeJson('/api/otp/resend', {
             method: 'POST',
-            body: JSON.stringify({ challengeId: activeOtpChallenge.challengeId })
+            body: JSON.stringify({
+              challengeId: activeOtpChallenge.challengeId,
+              qrSession: qrSessionTimestamp || undefined,
+              qrExpiresAt: effectiveQrExp || undefined
+            })
           });
         } catch (e) {
           console.warn('[Companion] Backend resend failed or returned HTML, falling back to local OTP:', e.message);
@@ -1703,6 +1772,7 @@ export const getStandaloneHtmlContent = ({
 
       if (res && res.success) {
         activeOtpChallenge.devOtp = res.devOtp;
+        if (res.qrExpiresAt) activeOtpChallenge.qrExpiresAt = res.qrExpiresAt;
         var devCode = document.getElementById('otpDevCode');
         if (devCode && res.devOtp) devCode.innerText = res.devOtp;
         showOtpStatusMessage('New OTP sent successfully.', 'success');
@@ -1715,6 +1785,7 @@ export const getStandaloneHtmlContent = ({
       // Local fallback resend:
       var newOtp = String(Math.floor(100000 + Math.random() * 900000));
       activeOtpChallenge.devOtp = newOtp;
+      activeOtpChallenge.qrExpiresAt = effectiveQrExp || (Date.now() + 1200000);
       var devCodeEl = document.getElementById('otpDevCode');
       if (devCodeEl) devCodeEl.innerText = newOtp;
       showOtpStatusMessage('New OTP generated: ' + newOtp, 'success');
@@ -1848,11 +1919,20 @@ export const getStandaloneHtmlContent = ({
           var cleanPayload = String(payload || '').trim();
           var isOff = cleanPayload === 'LED:0' || cleanPayload.includes(':0') || cleanPayload.toLowerCase().includes('off');
           var switchStatus = isOff ? 0 : 1;
+
+          if (qrExpiresAtTimestamp && Date.now() > qrExpiresAtTimestamp) {
+            var expOverlay = document.getElementById('qrExpiredOverlay');
+            if (expOverlay) expOverlay.style.display = 'flex';
+            return resolve({ success: false, error: 'QR & OTP session expired. Please re-scan QR code.' });
+          }
+
           var bodyObj = Object.assign({
             payload: cleanPayload || (isOff ? 'LED:0' : 'LED:1'),
             SwitchStatus: switchStatus,
             value: switchStatus === 1,
-            port: COMPANION_PORT || 'COM9'
+            port: COMPANION_PORT || 'COM9',
+            qrSession: qrSessionTimestamp || undefined,
+            qrExpiresAt: qrExpiresAtTimestamp || undefined
           }, extra || {});
           var bodyStr = JSON.stringify(bodyObj);
 
@@ -2042,6 +2122,15 @@ export const getStandaloneHtmlContent = ({
     async function handleSwitch(id, checked, title) {
       var switchEl = document.getElementById('input-' + id);
       var card = document.getElementById('card-' + id);
+
+      var now = Date.now();
+      if (qrExpiresAtTimestamp && now >= qrExpiresAtTimestamp) {
+        if (switchEl) switchEl.checked = !checked;
+        updateSwitchHint(id, 'QR session expired — Switch control disabled', 'error');
+        var expOverlay = document.getElementById('qrExpiredOverlay');
+        if (expOverlay) expOverlay.style.display = 'flex';
+        return;
+      }
 
       // Operation lock - prevent duplicate triggers while location or switch is in progress
       if (isSwitchOperationInProgress) {
@@ -2254,16 +2343,18 @@ export const getStandaloneHtmlContent = ({
       var prevOperationLoc = getLastSuccessfulOperationLocation();
       var mismatch = checkLocationMismatch(prevOperationLoc, geoEvent, 100);
 
+      var isSwitchOff = !checked;
+      var requiresOtp = isSwitchOff && mismatch.isMismatch;
       var verificationToken = null;
 
-      if (mismatch.isMismatch) {
+      if (requiresOtp) {
         // Close the spinner modal
         var spinnerOverlay = document.getElementById('locationModalOverlay');
         if (spinnerOverlay) spinnerOverlay.style.display = 'none';
 
         // Keep switch visually in prior state while OTP verification is pending
         if (switchEl) switchEl.checked = !checked;
-        updateSwitchHint(id, 'Location mismatch detected (' + mismatch.distance + 'm) — OTP required', 'pending');
+        updateSwitchHint(id, 'Location mismatch detected (' + mismatch.distance + 'm) — OTP required for Switch OFF', 'pending');
 
         // Request OTP challenge from backend or fallback to local challenge
         var challengeData = null;
@@ -2273,10 +2364,12 @@ export const getStandaloneHtmlContent = ({
             body: JSON.stringify({
               widgetId: id,
               switchTitle: title,
-              action: targetAction,
+              action: 'OFF',
               deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
               currentLocation: geoEvent,
-              previousLocation: prevOperationLoc
+              previousLocation: prevOperationLoc,
+              qrSession: qrSessionTimestamp || undefined,
+              qrExpiresAt: qrExpiresAtTimestamp || undefined
             })
           });
         } catch(fetchErr) {
@@ -2286,18 +2379,21 @@ export const getStandaloneHtmlContent = ({
         // If backend returned HTML, 404, or failed, create local challenge
         if (!challengeData || !challengeData.success) {
           var fallbackOtp = String(Math.floor(100000 + Math.random() * 900000));
+          var fallbackRemaining = qrExpiresAtTimestamp ? Math.max(0, Math.round((qrExpiresAtTimestamp - Date.now()) / 1000)) : 1200;
           challengeData = {
             success: true,
             challengeId: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
             widgetId: id,
             switchTitle: title,
-            action: targetAction,
+            action: 'OFF',
             deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
             currentLocation: geoEvent,
             previousLocation: prevOperationLoc,
             distance: mismatch.distance,
             threshold: mismatch.threshold || 100,
-            expiresInSeconds: 300,
+            qrSession: qrSessionTimestamp || undefined,
+            qrExpiresAt: qrExpiresAtTimestamp || (Date.now() + 1200000),
+            expiresInSeconds: fallbackRemaining,
             resendCooldownSeconds: 30,
             devDemoMode: true,
             devOtp: fallbackOtp
@@ -2601,9 +2697,68 @@ export const getStandaloneHtmlContent = ({
         });
     }
 
+    function initQrSessionTracker() {
+      if (!qrExpiresAtTimestamp) {
+        var hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : ('http://${companionServerInfo?.ip || resolvedHostIp}:5055');
+        fetch(hostOrigin + '/api/qr/session')
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data && data.expiresAt) {
+              qrSessionTimestamp = data.generatedAt || 0;
+              qrExpiresAtTimestamp = data.expiresAt;
+              startQrSessionCountdown();
+            }
+          }).catch(function() {});
+        return;
+      }
+      startQrSessionCountdown();
+    }
+
+    function startQrSessionCountdown() {
+      var banner = document.getElementById('qrSessionBanner');
+      var textEl = document.getElementById('qrSessionText');
+      var overlay = document.getElementById('qrExpiredOverlay');
+      if (banner) banner.style.display = 'flex';
+
+      function tick() {
+        var now = Date.now();
+        var remaining = Math.max(0, Math.round((qrExpiresAtTimestamp - now) / 1000));
+        var mins = Math.floor(remaining / 60);
+        var secs = remaining % 60;
+        var formatted = (mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs;
+
+        if (textEl) {
+          if (remaining > 0) {
+            textEl.innerText = 'QR Validation: ' + formatted + ' (OTP synchronized)';
+          } else {
+            textEl.innerText = 'QR & OTP Session Expired (20 min)';
+            if (banner) {
+              banner.style.background = '#fef2f2';
+              banner.style.borderColor = '#fecaca';
+              banner.style.color = '#991b1b';
+            }
+          }
+        }
+
+        if (remaining <= 0) {
+          if (overlay) overlay.style.display = 'flex';
+          var resendBtn = document.getElementById('otpResendBtn');
+          if (resendBtn) resendBtn.disabled = true;
+          var verifyBtn = document.getElementById('otpBtnVerify');
+          if (verifyBtn) verifyBtn.disabled = true;
+        }
+      }
+
+      tick();
+      setInterval(tick, 1000);
+    }
+
     window.addEventListener('load', function() {
       pingCompanionServer();
       initRealtimeStateSync();
+      initQrSessionTracker();
       var ua = navigator.userAgent || '';
       var isInApp = /MicroMessenger|Line|FB_IAB|Instagram|Twitter|WebView|SamsungBrowser|MiuiBrowser|GSA/i.test(ua) || (window.self !== window.top);
       var notice = document.getElementById('scannerNotice');

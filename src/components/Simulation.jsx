@@ -266,6 +266,7 @@ import {
 } from "../store/slices/simulationSlice";
 import { useResizableSidebar } from '../hooks/useResizableSidebar';
 import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
+import { saveToLocalDrive } from '../utils/localDiskService';
 
 // In-memory dragged symbol fallback for cross-platform Electron/browser DnD
 let globalDraggedSymbol = null;
@@ -1687,16 +1688,34 @@ const BlockDiagram = () => {
         ).catch((err) => console.warn("[Simulation] Background diagramData save warning:", err));
       }
 
-      // 6. Sync auto-save manager
+      // 6. Persist to local drive in project folder
+      let localSavePath = null;
+      try {
+        const localRes = await saveToLocalDrive({
+          projectName: activeProjectName || effectiveTab?.name || 'Simulation_Project',
+          subFolder: 'Simulation',
+          fileName,
+          data: payload
+        });
+        if (localRes?.path) {
+          localSavePath = localRes.path;
+        }
+      } catch (localErr) {
+        console.warn("[Simulation] Local drive save warning:", localErr);
+      }
+
+      // 7. Sync auto-save manager
       if (saveSimulationNow) {
         saveSimulationNow();
       }
 
       toast({
         title: "Tab Saved",
-        description: `"${tabName}" has been saved successfully.`,
+        description: localSavePath
+          ? `"${tabName}" saved to backend and local drive (${localSavePath}).`
+          : `"${tabName}" has been saved successfully.`,
         status: "success",
-        duration: 2500,
+        duration: 3000,
         isClosable: true,
         position: "top-right",
       });
@@ -2316,7 +2335,7 @@ const BlockDiagram = () => {
 
   return (
     <div className="flowchart-container" style={{ backgroundColor: "#ffffff" }}>
-        <EditorNavbar activeTab="Simulation" onTabChange={handleTabChange} />
+        <EditorNavbar activeTab="Simulation" onTabChange={handleTabChange} onSaveJSON={() => saveTab(activeTabId)} />
         <div
           className="top-controls"
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { API } from '@/config';
 import { saveProjectFile, ensureProjectFolder } from "../utils/workspaceStorage";
+import { saveToLocalDrive } from "../utils/localDiskService";
 import {
   Box,
   Button,
@@ -50,6 +51,7 @@ import {
   renameTab,
   updateTabContent as updateReduxTabContent,
   markTabClean,
+  updateTab,
 } from "../store/slices/editorSlice";
 import { useProject } from "../ProjectContext";
 
@@ -331,12 +333,41 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       }
 
       if (savedFileId) {
-        targetTab.fileId = savedFileId;
+        dispatch(updateTab({ tabId: targetTab.id, updates: { fileId: savedFileId } }));
+        if (activeTabRef.current && String(activeTabRef.current.id) === String(targetTab.id)) {
+          activeTabRef.current = { ...activeTabRef.current, fileId: savedFileId };
+        }
       }
 
       // Mark tab clean in Redux (clears dirty indicator)
       dispatch(markTabClean(targetTab.id));
       setLastBackendSaveTime(Date.now());
+
+      // Persist to local drive inside project folder
+      let localSavePath = null;
+      try {
+        const jsonFileName = fileName.toLowerCase().endsWith('.json') ? fileName : `${fileName}.json`;
+        const localRes = await saveToLocalDrive({
+          projectName: activeProjectName || 'Code_Project',
+          subFolder: 'Code',
+          fileName: jsonFileName,
+          data: {
+            fileName,
+            content,
+            language: targetTab.language || 'c',
+            projectId: effectiveProjectId,
+            projectName: activeProjectName,
+            updatedAt: new Date().toISOString()
+          },
+          rawFileName: fileName,
+          rawContent: content
+        });
+        if (localRes?.path) {
+          localSavePath = localRes.path;
+        }
+      } catch (localErr) {
+        console.warn("[CodeEditor] Local drive save warning:", localErr);
+      }
 
       // Notify file system to refresh
       window.dispatchEvent(new CustomEvent("file-system-refresh"));
@@ -344,9 +375,11 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       if (!isAutoSave) {
         toast({
           title: "Code Saved",
-          description: `"${fileName}" saved successfully to server and workspace.`,
+          description: localSavePath
+            ? `"${fileName}" saved to server and local drive (${localSavePath}).`
+            : `"${fileName}" saved successfully to server and workspace.`,
           status: "success",
-          duration: 2500,
+          duration: 3000,
           isClosable: true,
           position: "top-right",
         });
@@ -545,7 +578,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
       if (existingTab) {
         if (fileId && !existingTab.fileId) {
-          existingTab.fileId = fileId;
+          dispatch(updateTab({ tabId: existingTab.id, updates: { fileId } }));
         }
         dispatch(setActiveTab(existingTab.id));
       } else {
@@ -1142,7 +1175,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   const handleInsertLibraryCode = useCallback(
     (code) => {
-      const activeTabData = tabs.find((tab) => tab.id === activeTab);
+      const activeTabData = tabs.find((tab) => String(tab.id) === String(activeTabId));
       if (!activeTabData) return;
 
       // Insert code at the beginning of the file (for includes) or at cursor position
@@ -1151,10 +1184,8 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
         ? code + "\n\n" + currentContent // Add includes at the top
         : currentContent + "\n" + code; // Add other code at the bottom
 
-      setTabs(
-        tabs.map((tab) =>
-          tab.id === activeTab ? { ...tab, content: newContent } : tab,
-        ),
+      dispatch(
+        updateReduxTabContent({ tabId: activeTabData.id, content: newContent })
       );
 
       // Update editor if it exists
@@ -1162,7 +1193,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
         editorRef.current.setValue(newContent);
       }
     },
-    [tabs, activeTab],
+    [tabs, activeTabId, dispatch],
   );
 
   const [hasProduct, setHasProduct] = useState(() => !!localStorage.getItem("activeProjectIds"));
@@ -1235,6 +1266,7 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
       <EditorNavbar
         activeTab="Code Editor"
         onTabChange={handleTabChange}
+        onSaveJSON={() => saveCodeToBackend(activeTabRef.current, false)}
         onLibrariesClick={handleLibrariesClick}
         user={userIdentity}
       />

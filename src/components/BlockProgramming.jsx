@@ -2508,6 +2508,7 @@ import DiagramTabs from './DiagramTabs';
 import CreateProductButton from './shared/CreateProductButton';
 import projectFileManager from '../utils/projectFileManager';
 import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
+import { saveToLocalDrive } from '../utils/localDiskService';
 import ProjectFileExplorer from './ProjectFileExplorer';
 import { useResizableSidebar } from '../hooks/useResizableSidebar';
 import { buildDiagramExportPayload } from '../utils/projectProductExportHelper';
@@ -3453,6 +3454,16 @@ function BlockProgrammingCanvas() {
         activeProjectId
       ).catch(err => console.warn("[BlockProgramming] Background file save warning:", err));
     }
+    try {
+      await saveToLocalDrive({
+        projectName: activeProjectName || 'BlockProgramming_Project',
+        subFolder: 'BlockProgramming',
+        fileName: `${activeProjectName || 'tab'}.json`,
+        data: snapshot
+      });
+    } catch (e) {
+      console.warn("[BlockProgramming] Local drive save warning:", e);
+    }
   }, [rf, dispatch, activeProjectId, activeProjectName, activeProductId, activeProductName]);
 
   const saveDiagram = useCallback(async () => {
@@ -3468,11 +3479,21 @@ function BlockProgrammingCanvas() {
     if (activeTabIdRef.current) {
       dispatch(markTabClean(activeTabIdRef.current));
     }
+    try {
+      await saveToLocalDrive({
+        projectName: activeProjectName || 'BlockProgramming_Project',
+        subFolder: 'BlockProgramming',
+        fileName: `${activeProjectName || 'block-programming'}.json`,
+        data: snapshot
+      });
+    } catch (e) {
+      console.warn("[BlockProgramming] Local drive save warning in saveDiagram:", e);
+    }
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'block-programming.json';
+    link.download = `${activeProjectName || 'block-programming'}.json`;
     link.click();
     URL.revokeObjectURL(url);
   }, [rf, dispatch, activeProjectId, activeProjectName, activeProductId, activeProductName]);

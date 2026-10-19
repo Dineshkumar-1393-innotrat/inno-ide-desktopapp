@@ -6,7 +6,7 @@
  */
 
 export const DEFAULT_DISTANCE_THRESHOLD_METERS = 100;
-export const DEFAULT_OTP_EXPIRY_SECONDS = 300; // 5 minutes
+export const DEFAULT_OTP_EXPIRY_SECONDS = 1200; // 20 minutes
 export const DEFAULT_MAX_ATTEMPTS = 3;
 export const DEFAULT_RESEND_COOLDOWN_SECONDS = 30;
 
@@ -189,6 +189,7 @@ export class LocationOtpService {
 
   /**
    * Creates a new OTP verification challenge for a pending switch operation.
+   * Synchronizes OTP expiration lifetime directly with the QR validation session.
    */
   createChallenge({
     widgetId = 'w-led',
@@ -197,7 +198,9 @@ export class LocationOtpService {
     deviceId = 'ESP32-S3 (COM9)',
     currentLocation = null,
     previousLocation = null,
-    devDemoMode = null
+    devDemoMode = null,
+    qrSession = null,
+    qrExpiresAt = null
   } = {}) {
     this.cleanExpired();
 
@@ -207,6 +210,18 @@ export class LocationOtpService {
     const challengeId = `otp-${Date.now()}-${generateVerificationToken().substring(0, 8)}`;
     const now = Date.now();
     const isDemo = devDemoMode !== null ? devDemoMode : this.devDemoMode;
+
+    // Calculate expiration synchronized with QR validation session
+    let targetExpiresAt = now + (this.otpExpirySeconds * 1000);
+    let resolvedQrExp = null;
+    if (qrExpiresAt) {
+      const numExp = Number(qrExpiresAt);
+      if (!isNaN(numExp) && numExp > 0) {
+        resolvedQrExp = numExp;
+        targetExpiresAt = Math.min(targetExpiresAt, numExp);
+      }
+    }
+    const expiresInSeconds = Math.max(0, Math.round((targetExpiresAt - now) / 1000));
 
     const challenge = {
       challengeId,
@@ -220,7 +235,9 @@ export class LocationOtpService {
       distance: mismatchResult.distance,
       threshold: this.distanceThresholdMeters,
       createdAt: now,
-      expiresAt: now + (this.otpExpirySeconds * 1000),
+      expiresAt: targetExpiresAt,
+      qrSession: qrSession ? Number(qrSession) : null,
+      qrExpiresAt: resolvedQrExp,
       lastRequestedAt: now,
       attempts: 0,
       maxAttempts: this.maxAttempts,
@@ -235,7 +252,9 @@ export class LocationOtpService {
       widgetId,
       action: normalizedAction,
       deviceId,
-      distance: mismatchResult.distance
+      distance: mismatchResult.distance,
+      expiresInSeconds,
+      qrExpiresAt: resolvedQrExp
     });
 
     return {
@@ -245,7 +264,9 @@ export class LocationOtpService {
       switchTitle,
       distance: mismatchResult.distance,
       threshold: this.distanceThresholdMeters,
-      expiresInSeconds: this.otpExpirySeconds,
+      expiresInSeconds,
+      qrExpiresAt: resolvedQrExp,
+      qrSession: challenge.qrSession,
       resendCooldownSeconds: this.resendCooldownSeconds,
       devDemoMode: isDemo,
       // Section 2 Requirement: Display generated OTP in popup for development/demo implementation behind flag
@@ -269,6 +290,17 @@ export class LocationOtpService {
 
     const challenge = this.challenges.get(challengeId);
     const now = Date.now();
+
+    // Check QR validation session expiration along with OTP expiration
+    if (challenge.qrExpiresAt && now > challenge.qrExpiresAt) {
+      challenge.status = 'EXPIRED';
+      this.logEvent('OTP_QR_SESSION_EXPIRED', { challengeId, widgetId: challenge.widgetId, qrExpiresAt: challenge.qrExpiresAt });
+      return {
+        success: false,
+        error: 'OTP expired along with QR code validation session. Please re-scan or regenerate QR code.',
+        code: 'QR_SESSION_EXPIRED'
+      };
+    }
 
     // Check expiration
     if (now > challenge.expiresAt || challenge.status === 'EXPIRED') {
@@ -360,7 +392,7 @@ export class LocationOtpService {
     challenge.status = 'VERIFIED';
     const token = generateVerificationToken();
 
-    // Issue single-use token valid for 60 seconds to complete the hardware switch
+    // Issue single-use token valid within the remaining QR validation session
     const tokenRecord = {
       token,
       challengeId,
@@ -369,7 +401,8 @@ export class LocationOtpService {
       deviceId: challenge.deviceId,
       location: challenge.currentLocation,
       issuedAt: now,
-      expiresAt: now + 300000, // 5 minutes validity
+      expiresAt: challenge.qrExpiresAt ? Math.min(now + 1200000, challenge.qrExpiresAt) : now + 1200000,
+      qrExpiresAt: challenge.qrExpiresAt || null,
       consumed: false
     };
 
@@ -391,7 +424,7 @@ export class LocationOtpService {
   }
 
   /**
-   * Resends a new OTP for an active challenge, respecting cooldown.
+   * Resends a new OTP for an active challenge, respecting cooldown and QR validation session.
    */
   resendOtp({ challengeId, devDemoMode = null }) {
     if (!challengeId || !this.challenges.has(challengeId)) {
@@ -404,6 +437,17 @@ export class LocationOtpService {
 
     const challenge = this.challenges.get(challengeId);
     const now = Date.now();
+
+    // Check if QR session has already expired before anything else
+    if (challenge.qrExpiresAt && now >= challenge.qrExpiresAt) {
+      challenge.status = 'EXPIRED';
+      return {
+        success: false,
+        error: 'QR validation session has expired. Please re-scan or regenerate QR code.',
+        code: 'QR_SESSION_EXPIRED'
+      };
+    }
+
     const elapsedSeconds = Math.floor((now - challenge.lastRequestedAt) / 1000);
 
     if (elapsedSeconds < this.resendCooldownSeconds) {
@@ -422,7 +466,22 @@ export class LocationOtpService {
     challenge.attempts = 0;
     challenge.status = 'PENDING';
     challenge.lastRequestedAt = now;
-    challenge.expiresAt = now + (this.otpExpirySeconds * 1000);
+
+    // Recalculate expiration respecting QR session validity
+    let newExpiresAt = now + (this.otpExpirySeconds * 1000);
+    if (challenge.qrExpiresAt) {
+      newExpiresAt = Math.min(newExpiresAt, challenge.qrExpiresAt);
+    }
+    const remSeconds = Math.max(0, Math.round((newExpiresAt - now) / 1000));
+    if (remSeconds <= 0) {
+      challenge.status = 'EXPIRED';
+      return {
+        success: false,
+        error: 'QR validation session has expired. Please re-scan or regenerate QR code.',
+        code: 'QR_SESSION_EXPIRED'
+      };
+    }
+    challenge.expiresAt = newExpiresAt;
     challenge.resendCount += 1;
 
     const isDemo = devDemoMode !== null ? devDemoMode : this.devDemoMode;
@@ -430,14 +489,16 @@ export class LocationOtpService {
     this.logEvent('OTP_RESENT', {
       challengeId,
       widgetId: challenge.widgetId,
-      resendCount: challenge.resendCount
+      resendCount: challenge.resendCount,
+      expiresInSeconds: remSeconds
     });
 
     return {
       success: true,
       challengeId,
       action: challenge.action,
-      expiresInSeconds: this.otpExpirySeconds,
+      expiresInSeconds: remSeconds,
+      qrExpiresAt: challenge.qrExpiresAt,
       resendCooldownSeconds: this.resendCooldownSeconds,
       devDemoMode: isDemo,
       devOtp: isDemo ? newOtp : undefined
@@ -497,6 +558,16 @@ export class LocationOtpService {
         valid: false,
         error: 'Verification token has already been used.',
         code: 'TOKEN_ALREADY_USED'
+      };
+    }
+
+    // Check QR validation session expiration along with token lifetime
+    if (rec.qrExpiresAt && now > rec.qrExpiresAt) {
+      this.verifiedTokens.delete(token);
+      return {
+        valid: false,
+        error: 'QR validation session expired. Please verify again.',
+        code: 'QR_SESSION_EXPIRED'
       };
     }
 

@@ -39,10 +39,17 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
     }).catch(() => { });
   }, []);
 
+  const [locationPermissionStatus, setLocationPermissionStatus] = useState(() => {
+    return localStorage.getItem("innoide:location_permission_granted") === "true"
+      ? "granted"
+      : (localStorage.getItem("innoide:location_permission_granted") === "false" ? "denied" : "prompt");
+  });
+
   const [deviceDetectedLocation, setDeviceDetectedLocation] = useState(() => {
     try {
+      const isGranted = localStorage.getItem("innoide:location_permission_granted") === "true";
       const raw = localStorage.getItem("innoide:calibrated_device_location");
-      if (raw) {
+      if (isGranted && raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.lat && parsed.city !== "Ambattur" && parsed.city !== "Chennai") {
           return parsed;
@@ -50,12 +57,13 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
       }
     } catch { }
     return {
-      lat: 13.0147,
-      lng: 80.2242,
-      city: "Little Mount",
-      address: "Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India",
-      country: "India",
-      source: "Calibrated Location (Little Mount)",
+      lat: null,
+      lng: null,
+      city: "Permission Required",
+      address: "Grant location access permission to detect location",
+      country: "",
+      source: "Pending Permission",
+      permissionRequired: true,
       timestamp: new Date().toLocaleTimeString()
     };
   });
@@ -64,35 +72,7 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
   const fetchCurrentDeviceLocation = useCallback(async (forcedQuery = null) => {
     setIsDetectingLocation(true);
     try {
-      // 0. Priority 0: Calibrated Location from localStorage or explicit query
-      let calibrated = null;
-      try {
-        const raw = localStorage.getItem("innoide:calibrated_device_location");
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && parsed.lat && parsed.city !== "Ambattur" && parsed.city !== "Chennai") {
-            calibrated = parsed;
-          }
-        }
-      } catch { }
-
-      if (calibrated && calibrated.lat && !forcedQuery) {
-        setDeviceDetectedLocation((prev) => {
-          if (
-            prev &&
-            prev.lat === calibrated.lat &&
-            prev.lng === calibrated.lng &&
-            prev.city === calibrated.city &&
-            prev.address === calibrated.address
-          ) {
-            return prev;
-          }
-          return calibrated;
-        });
-        syncHostLocationWithCompanion(calibrated);
-        return calibrated;
-      }
-
+      // 0. Manual explicit calibration search by user query
       if (forcedQuery) {
         const q = String(forcedQuery).trim();
         try {
@@ -130,7 +110,38 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
         } catch { }
       }
 
-      // 1. Try browser navigator.geolocation (GPS — most accurate if available)
+      // Check browser permission status if query API is supported
+      let permState = "prompt";
+      if (typeof navigator !== "undefined" && navigator.permissions?.query) {
+        try {
+          const p = await navigator.permissions.query({ name: "geolocation" });
+          permState = p.state;
+          setLocationPermissionStatus(p.state);
+        } catch (e) {}
+      } else {
+        permState = localStorage.getItem("innoide:location_permission_granted") === "true" ? "granted" : "prompt";
+      }
+
+      // If user previously denied permission, do not detect location without user enabling it
+      if (permState === "denied") {
+        setLocationPermissionStatus("denied");
+        localStorage.setItem("innoide:location_permission_granted", "false");
+        console.warn("[DeviceLocation] Geolocation permission is denied in browser/system settings.");
+        const deniedLoc = {
+          lat: null,
+          lng: null,
+          city: "Permission Denied",
+          address: "Location access denied. Please enable location permissions in browser settings.",
+          country: "",
+          source: "Permission Denied",
+          permissionRequired: true,
+          timestamp: new Date().toLocaleTimeString()
+        };
+        setDeviceDetectedLocation(deniedLoc);
+        return null;
+      }
+
+      // 1. Try browser navigator.geolocation (GPS — strictly requested and detected after access permission)
       const tryNavigatorGeolocation = () => {
         return new Promise((resolve) => {
           if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -138,9 +149,11 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
           }
           navigator.geolocation.getCurrentPosition(
             async (pos) => {
+              setLocationPermissionStatus("granted");
+              localStorage.setItem("innoide:location_permission_granted", "true");
               const lat = parseFloat(pos.coords.latitude.toFixed(5));
               const lng = parseFloat(pos.coords.longitude.toFixed(5));
-              let city = "Little Mount";
+              let city = "Local Area";
               let address = `${lat}°N, ${lng}°E`;
               let country = "India";
               try {
@@ -160,7 +173,7 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
                     d.address?.suburb ||
                     (d.display_name ? d.display_name.split(",")[0].trim() : "") ||
                     d.address?.city ||
-                    "Little Mount";
+                    "Local Area";
                   country = d.address?.country || "India";
                   address = d.display_name?.split(",").slice(0, 4).join(",").trim() || address;
                 }
@@ -172,12 +185,19 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
                 address,
                 country,
                 accuracy: Math.round(pos.coords.accuracy || 10),
-                source: "GPS (navigator.geolocation)",
+                source: "GPS (after access permission)",
                 timestamp: new Date().toLocaleTimeString()
               });
             },
-            () => resolve(null),
-            { timeout: 5000, maximumAge: 30000, enableHighAccuracy: true }
+            (err) => {
+              if (err.code === 1) { // PERMISSION_DENIED
+                setLocationPermissionStatus("denied");
+                localStorage.setItem("innoide:location_permission_granted", "false");
+                console.warn("[DeviceLocation] User denied location access permission.");
+              }
+              resolve(null);
+            },
+            { timeout: 8000, maximumAge: 30000, enableHighAccuracy: true }
           );
         });
       };
@@ -190,20 +210,37 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
         return navLoc;
       }
 
-      // 2. Default to Little Mount (user's accurate calibrated location)
-      const littleMount = {
-        lat: 13.0147,
-        lng: 80.2242,
-        city: "Little Mount",
-        address: "Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India",
-        country: "India",
-        source: "Calibrated Location (Little Mount)",
-        timestamp: new Date().toLocaleTimeString()
-      };
-      localStorage.setItem("innoide:calibrated_device_location", JSON.stringify(littleMount));
-      setDeviceDetectedLocation(littleMount);
-      syncHostLocationWithCompanion(littleMount);
-      return littleMount;
+      // If permission was denied or not granted, do not set false coordinates
+      const currentPerm = localStorage.getItem("innoide:location_permission_granted");
+      if (currentPerm === "false") {
+        const deniedLoc = {
+          lat: null,
+          lng: null,
+          city: "Permission Denied",
+          address: "Location access denied. Please enable location permissions in browser settings.",
+          country: "",
+          source: "Permission Denied",
+          permissionRequired: true,
+          timestamp: new Date().toLocaleTimeString()
+        };
+        setDeviceDetectedLocation(deniedLoc);
+        return null;
+      }
+
+      // Priority fallback: only use calibrated location if explicitly saved
+      try {
+        const raw = localStorage.getItem("innoide:calibrated_device_location");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.lat) {
+            setDeviceDetectedLocation(parsed);
+            syncHostLocationWithCompanion(parsed);
+            return parsed;
+          }
+        }
+      } catch {}
+
+      return null;
     } finally {
       setIsDetectingLocation(false);
     }
@@ -302,11 +339,17 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
     [setWidgets, syncHostLocationWithCompanion]
   );
 
-  // Automatically detect device location ONCE on mount and refresh location widgets
+  // Automatically detect device location ONCE on mount and refresh location widgets ONLY if permission was already granted
   const hasMountedRef = useRef(false);
   useEffect(() => {
     if (hasMountedRef.current) return;
     hasMountedRef.current = true;
+
+    // Requirement: location should be detected strictly after access permission
+    const isGranted = localStorage.getItem("innoide:location_permission_granted") === "true";
+    if (!isGranted) {
+      return;
+    }
 
     fetchCurrentDeviceLocation().then((loc) => {
       if (loc && loc.city && loc.city !== "Location Detecting...") {
@@ -408,11 +451,13 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
     return new Promise((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
+          setLocationPermissionStatus("granted");
+          localStorage.setItem("innoide:location_permission_granted", "true");
           const rawAcc = pos?.coords?.accuracy;
           const acc = (typeof rawAcc === "number" && !isNaN(rawAcc)) ? Math.round(rawAcc) : 15;
           const lat = parseFloat(pos.coords.latitude.toFixed(5));
           const lng = parseFloat(pos.coords.longitude.toFixed(5));
-          let city = "Little Mount";
+          let city = "Local Area";
           let address = `${lat}° N, ${lng}° E`;
 
           try {
@@ -432,7 +477,7 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
                 d.address?.suburb ||
                 (d.display_name ? d.display_name.split(",")[0].trim() : "") ||
                 d.address?.city ||
-                "Little Mount";
+                "Local Area";
               address = d.display_name?.split(",").slice(0, 4).join(",").trim() || address;
             }
           } catch (e) {
@@ -451,6 +496,8 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
         },
         async (err) => {
           if (err.code === 1) {
+            setLocationPermissionStatus("denied");
+            localStorage.setItem("innoide:location_permission_granted", "false");
             const e = new Error("Location permission denied by user.");
             e.errorType = "PERMISSION_DENIED";
             return reject(e);
@@ -466,8 +513,8 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
                   lat: parseFloat(Number(ipData.latitude).toFixed(5)),
                   lng: parseFloat(Number(ipData.longitude).toFixed(5)),
                   accuracy: 100,
-                  city: ipData.city || "Chennai",
-                  address: `${ipData.city || "Chennai"}, ${ipData.region || "Tamil Nadu"}, ${ipData.country_name || "India"}`,
+                  city: ipData.city || "Local Area",
+                  address: `${ipData.city || ""}, ${ipData.region || ""}, ${ipData.country_name || ""}`.replace(/^, |, $/g, '') || "Local Area",
                   source: "Network",
                   timestamp: new Date().toLocaleTimeString()
                 });

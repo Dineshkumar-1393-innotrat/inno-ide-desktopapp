@@ -44,6 +44,11 @@ let companionState = {
     source: 'Calibrated Location (Little Mount)',
     timestamp: new Date().toLocaleTimeString()
   },
+  qrSession: {
+    generatedAt: Date.now(),
+    expiresAt: Date.now() + 1200000,
+    expirySeconds: 1200
+  },
   formQuestions: [],
   formResponses: []
 };
@@ -581,13 +586,34 @@ export function registerAllIPCHandlers(getMainWindow) {
     }
   });
 
-  // Location-Mismatch OTP IPC Handlers for Desktop Simulator & In-App Preview
+  // Location-Mismatch OTP & QR Validation IPC Handlers for Desktop Simulator & In-App Preview
+  ipcMain.handle('qr:set-session', async (_event, session) => {
+    try {
+      const now = Date.now();
+      const generatedAt = Number(session?.generatedAt) || now;
+      const expirySeconds = Number(session?.expirySeconds) || 1200;
+      const expiresAt = Number(session?.expiresAt) || (generatedAt + expirySeconds * 1000);
+      companionState.qrSession = { generatedAt, expiresAt, expirySeconds };
+      return { success: true, qrSession: companionState.qrSession };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('qr:get-session', async () => {
+    return companionState.qrSession;
+  });
+
   ipcMain.handle('otp:request', async (_event, params) => {
     try {
       const prev = params?.previousLocation || companionState.lastLocation;
+      const effectiveQrExpiresAt = params?.qrExpiresAt || companionState.qrSession?.expiresAt;
+      const effectiveQrSession = params?.qrSession || companionState.qrSession?.generatedAt;
       return defaultLocationOtpService.createChallenge({
         ...params,
-        previousLocation: prev
+        previousLocation: prev,
+        qrSession: effectiveQrSession,
+        qrExpiresAt: effectiveQrExpiresAt
       });
     } catch (e) {
       return { success: false, error: e.message };
@@ -683,6 +709,33 @@ export function registerAllIPCHandlers(getMainWindow) {
         return;
       }
 
+      // QR Validation Session Endpoint (20-minute window synchronized with OTP)
+      if (pathname === '/api/qr/session' || pathname === '/api/qr-session') {
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', () => {
+            try {
+              let data = body ? JSON.parse(body) : {};
+              const now = Date.now();
+              const generatedAt = Number(data.generatedAt) || now;
+              const expirySeconds = Number(data.expirySeconds) || 1200;
+              const expiresAt = Number(data.expiresAt) || (generatedAt + expirySeconds * 1000);
+              companionState.qrSession = { generatedAt, expiresAt, expirySeconds };
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              return res.end(JSON.stringify({ success: true, qrSession: companionState.qrSession }));
+            } catch (err) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              return res.end(JSON.stringify({ success: false, error: err.message }));
+            }
+          });
+          return;
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, qrSession: companionState.qrSession }));
+        }
+      }
+
       // Location-Mismatch OTP Verification Endpoints
       if (pathname.startsWith('/api/otp/')) {
         let body = '';
@@ -709,13 +762,19 @@ export function registerAllIPCHandlers(getMainWindow) {
               }
             }
 
+            // Synchronize OTP challenge expiration directly with the QR validation session
+            const effectiveQrExpiresAt = data.qrExpiresAt || companionState.qrSession?.expiresAt;
+            const effectiveQrSession = data.qrSession || companionState.qrSession?.generatedAt;
+
             const result = defaultLocationOtpService.createChallenge({
               widgetId: data.widgetId || 'w-led',
               switchTitle: data.switchTitle || 'Switch',
               action: data.action || (data.value ? 'ON' : 'OFF'),
               deviceId: data.deviceId || `ESP32 (${companionState.activePort || 'COM9'})`,
               currentLocation: data.currentLocation || data.location,
-              previousLocation: prevLoc
+              previousLocation: prevLoc,
+              qrSession: effectiveQrSession,
+              qrExpiresAt: effectiveQrExpiresAt
             });
             res.writeHead(200);
             return res.end(JSON.stringify(result));
@@ -828,6 +887,19 @@ export function registerAllIPCHandlers(getMainWindow) {
             // Location Mismatch OTP Enforcement for Switch Operations
             const isSwitchCommand = isExplicitOn || isExplicitOff;
             if (isSwitchCommand && !data.syncOnly && !data.initSync) {
+              // QR Session Validation Check: If QR validation session has expired, reject command
+              const reqQrExpiresAt = data.qrExpiresAt ? Number(data.qrExpiresAt) : null;
+              const effectiveQrExpiresAt = reqQrExpiresAt || companionState.qrSession?.expiresAt;
+              if (effectiveQrExpiresAt && Date.now() > effectiveQrExpiresAt) {
+                console.warn('[CompanionServer] Switch command rejected: QR validation session has expired.');
+                res.writeHead(403, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({
+                  success: false,
+                  error: 'QR validation session has expired (20 min limit). Please scan a fresh QR code.',
+                  code: 'QR_SESSION_EXPIRED'
+                }));
+              }
+
               if (!data.location) {
                 console.warn('[CompanionServer] Switch command rejected: missing location data.');
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -847,8 +919,11 @@ export function registerAllIPCHandlers(getMainWindow) {
               }
 
               const mismatch = isLocationMismatch(prevLocation, data.location, defaultLocationOtpService.distanceThresholdMeters);
-              if (mismatch.isMismatch) {
-                const targetAction = isExplicitOn ? 'ON' : 'OFF';
+              const isSwitchOff = !isExplicitOn;
+              const requiresOtp = isSwitchOff && mismatch.isMismatch;
+
+              if (requiresOtp) {
+                const targetAction = 'OFF';
                 let tokenCheck = defaultLocationOtpService.validateToken({
                   token: data.verificationToken,
                   widgetId: data.widgetId,
@@ -865,7 +940,7 @@ export function registerAllIPCHandlers(getMainWindow) {
                   res.writeHead(403, { 'Content-Type': 'application/json' });
                   return res.end(JSON.stringify({
                     success: false,
-                    error: 'Location mismatch detected: OTP verification required before switch operation.',
+                    error: 'Location mismatch detected: OTP verification required before switch off operation.',
                     requiresOtp: true,
                     code: tokenCheck.code || 'OTP_REQUIRED',
                     distance: mismatch.distance,

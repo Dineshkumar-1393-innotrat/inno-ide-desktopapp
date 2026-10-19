@@ -49,6 +49,13 @@ const editorSlice = createSlice({
                 tab.dirty = false;
             }
         },
+        updateTab: (state, action) => {
+            const { tabId, updates } = action.payload || {};
+            const tab = state.tabs.find((t) => String(t.id) === String(tabId));
+            if (tab && updates) {
+                Object.assign(tab, updates);
+            }
+        },
     },
   extraReducers: (builder) => {
     builder.addCase(RESET_WORKSPACE, () => ({ ...initialState }));
@@ -63,6 +70,7 @@ export const {
     updateTabContent,
     renameTab,
     markTabClean,
+    updateTab,
 } = editorSlice.actions;
 
 export default editorSlice.reducer;

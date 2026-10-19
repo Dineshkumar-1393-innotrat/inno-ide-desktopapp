@@ -54,6 +54,7 @@ import hexBg from '../assets/hex_bg.png';
 import { useProject } from '../ProjectContext';
 import PropertiesPanel from './PropertiesPanel';
 import { saveProjectFile, sanitizeSegment, ensureProjectFolder } from '../utils/workspaceStorage';
+import { saveToLocalDrive } from '../utils/localDiskService';
 import { projectManager } from '../utils/projectManager';
 import projectFileManager from '../utils/projectFileManager';
 import { useCanvasFileIntegration } from '../hooks/useCanvasFileIntegration';
@@ -3207,11 +3208,29 @@ function DiagramEditor() {
         saveDiagramData(latestTabs, 'blockDiagram').catch(err => console.warn("[BlockDiagram] Background diagramData save warning:", err));
       }
 
+      // 6. Persist to local drive in project folder
+      let localSavePath = null;
+      try {
+        const localRes = await saveToLocalDrive({
+          projectName: activeProjectName || effectiveTab?.name || 'BlockDiagram_Project',
+          subFolder: 'BlockDiagram',
+          fileName,
+          data: payload
+        });
+        if (localRes?.path) {
+          localSavePath = localRes.path;
+        }
+      } catch (localErr) {
+        console.warn("[BlockDiagram] Local drive save warning:", localErr);
+      }
+
       toast({
         title: "Tab Saved",
-        description: `"${tabName}" has been saved successfully.`,
+        description: localSavePath
+          ? `"${tabName}" saved to backend and local drive (${localSavePath}).`
+          : `"${tabName}" has been saved successfully.`,
         status: "success",
-        duration: 2500,
+        duration: 3000,
         isClosable: true,
         position: "top-right",
       });
@@ -3323,16 +3342,29 @@ function DiagramEditor() {
       document.body.removeChild(dlAnchor);
       setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 
-      // If running inside Electron, also persist locally to disk via filesystem bridge
-      if (window.electronAPI?.filesystem?.writeFile) {
-        window.electronAPI.filesystem.writeFile(fileName, jsonStr, "utf8").catch(() => {});
+      // Persist locally to disk inside project folder via localDiskService
+      let localDiskPath = null;
+      try {
+        const localRes = await saveToLocalDrive({
+          projectName: activeProjectName || effectiveTab?.name || 'BlockDiagram_Project',
+          subFolder: 'BlockDiagram',
+          fileName,
+          data: payload
+        });
+        if (localRes?.path) {
+          localDiskPath = localRes.path;
+        }
+      } catch (localErr) {
+        console.warn("[BlockDiagram] Local drive save warning in saveDiagram:", localErr);
       }
 
       toast({
         title: "JSON Saved Successfully",
-        description: `"${tabName}" diagram and project/product details exported as ${fileName}.`,
+        description: localDiskPath
+          ? `"${tabName}" saved to backend and local drive (${localDiskPath}).`
+          : `"${tabName}" diagram and project/product details exported as ${fileName}.`,
         status: "success",
-        duration: 3000,
+        duration: 3500,
         isClosable: true,
         position: "top-right",
       });

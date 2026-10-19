@@ -46,16 +46,26 @@ export default function LocationOtpVerificationModal({
     if (isOpen && challengeData) {
       setEnteredOtp("");
       setStatusMessage(null);
-      setRemainingSeconds(challengeData.expiresInSeconds || 300);
+      const qrExp = challengeData.qrExpiresAt ? Number(challengeData.qrExpiresAt) : null;
+      const initialRemaining = qrExp 
+        ? Math.max(0, Math.min(challengeData.expiresInSeconds || 1200, Math.floor((qrExp - Date.now()) / 1000)))
+        : (challengeData.expiresInSeconds || 1200);
+      setRemainingSeconds(initialRemaining);
       setResendCooldown(challengeData.resendCooldownSeconds || 30);
 
-      // Expiration countdown
+      // Expiration countdown synchronized with QR validation session
       clearInterval(timerRef.current);
       timerRef.current = setInterval(() => {
+        if (qrExp && Date.now() >= qrExp) {
+          clearInterval(timerRef.current);
+          setRemainingSeconds(0);
+          setStatusMessage({ text: "QR validation session expired (20 min). OTP is no longer valid.", type: "error" });
+          return;
+        }
         setRemainingSeconds((prev) => {
           if (prev <= 1) {
             clearInterval(timerRef.current);
-            setStatusMessage({ text: "OTP expired. Request a new OTP.", type: "error" });
+            setStatusMessage({ text: "OTP expired along with QR validation session. Request a new OTP.", type: "error" });
             return 0;
           }
           return prev - 1;
@@ -193,7 +203,7 @@ export default function LocationOtpVerificationModal({
             success: true,
             devOtp: newOtp,
             resendCooldownSeconds: 30,
-            expiresInSeconds: 300
+            expiresInSeconds: 1200
           };
         }
       }
@@ -205,7 +215,7 @@ export default function LocationOtpVerificationModal({
         setEnteredOtp("");
         setStatusMessage({ text: "New OTP sent successfully.", type: "success" });
         setResendCooldown(res.resendCooldownSeconds || 30);
-        setRemainingSeconds(res.expiresInSeconds || 300);
+        setRemainingSeconds(res.expiresInSeconds || 1200);
 
         // Restart cooldown
         clearInterval(cooldownRef.current);
@@ -382,7 +392,7 @@ export default function LocationOtpVerificationModal({
             <HStack justify="space-between" fontSize="11px">
               <HStack spacing={1} color="#94a3b8" fontFamily="monospace">
                 <FaClock size={11} />
-                <Text>Expires in: {formatTimer(remainingSeconds)}</Text>
+                <Text>Expires (with QR validation): {formatTimer(remainingSeconds)}</Text>
               </HStack>
               <Button
                 variant="link"

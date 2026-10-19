@@ -40,10 +40,16 @@ export default function DeviceSwitchLocationQrModal({
 }) {
   const toast = useToast();
 
-  const qrUrl =
+  const baseUrl =
     companionNetworkMode === "cloud" && remoteTunnelState?.url
-      ? `${remoteTunnelState.url}#location`
-      : localCompanionUrl || `http://${companionServerInfo?.ip || "localhost"}:5055`;
+      ? remoteTunnelState.url
+      : (localCompanionUrl || `http://${companionServerInfo?.ip || "localhost"}:5055`);
+
+  const qrSession = React.useMemo(() => Date.now(), [isOpen]);
+  const qrExpiresAt = qrSession + 1200 * 1000;
+  const cleanBase = baseUrl ? baseUrl.replace(/[?&]qr_session=\d+/g, "").replace(/[?&]qr_exp=\d+/g, "") : "";
+  const joinChar = cleanBase.includes("?") ? "&" : "?";
+  const qrUrl = cleanBase ? `${cleanBase}${joinChar}qr_session=${qrSession}&qr_exp=${qrExpiresAt}#location` : "";
 
   const mapLat = locationQrModalData?.lat || deviceDetectedLocation?.lat || "";
   const mapLng = locationQrModalData?.lng || deviceDetectedLocation?.lng || "";

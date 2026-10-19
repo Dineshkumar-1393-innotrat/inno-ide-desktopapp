@@ -37,4 +37,12 @@ export function registerFilesystemIPC(getMainWindow) {
   ipcMain.handle('fs:list-directory', async (event, dirPath) => {
     return await filesystemService.listDirectory(dirPath);
   });
+
+  ipcMain.handle('fs:save-project-file-local', async (event, params) => {
+    return await filesystemService.saveProjectFileLocal(params);
+  });
+
+  ipcMain.handle('fs:get-projects-root', async () => {
+    return filesystemService.getProjectsRootDir();
+  });
 }

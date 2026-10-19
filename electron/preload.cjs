@@ -42,7 +42,9 @@ const electronAPI = {
     createDirectory: (path) => ipcRenderer.invoke('fs:create-directory', path),
     delete: (path) => ipcRenderer.invoke('fs:delete', path),
     rename: (oldPath, newPath) => ipcRenderer.invoke('fs:rename', { oldPath, newPath }),
-    listDirectory: (path) => ipcRenderer.invoke('fs:list-directory', path)
+    listDirectory: (path) => ipcRenderer.invoke('fs:list-directory', path),
+    saveProjectFileLocal: (params) => ipcRenderer.invoke('fs:save-project-file-local', params),
+    getProjectsRoot: () => ipcRenderer.invoke('fs:get-projects-root')
   },
 
   device: {
@@ -102,12 +104,19 @@ const electronAPI = {
     }
   },
 
+  qr: {
+    setSession: (session) => ipcRenderer.invoke('qr:set-session', session),
+    getSession: () => ipcRenderer.invoke('qr:get-session')
+  },
+
   otp: {
     request: (params) => ipcRenderer.invoke('otp:request', params),
     verify: (params) => ipcRenderer.invoke('otp:verify', params),
     resend: (params) => ipcRenderer.invoke('otp:resend', params),
     cancel: (params) => ipcRenderer.invoke('otp:cancel', params),
-    getLastLocation: () => ipcRenderer.invoke('otp:get-last-location')
+    getLastLocation: () => ipcRenderer.invoke('otp:get-last-location'),
+    setQrSession: (session) => ipcRenderer.invoke('qr:set-session', session),
+    getQrSession: () => ipcRenderer.invoke('qr:get-session')
   }
 };
 

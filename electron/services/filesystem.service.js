@@ -1,7 +1,7 @@
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
-import { dialog } from 'electron';
+import { dialog, app } from 'electron';
 import { logger } from '../utils/logger.js';
 
 export class FilesystemService {
@@ -128,6 +128,111 @@ export class FilesystemService {
       return tree;
     } catch (error) {
       logger.error(`Error listing directory ${dirPath}:`, error.message);
+      throw error;
+    }
+  }
+
+  getProjectsRootDir() {
+    try {
+      if (process.platform === 'win32') {
+        if (fs.existsSync('D:\\')) {
+          const dDir = 'D:\\InnoIDE_Projects';
+          if (!fs.existsSync(dDir)) {
+            fs.mkdirSync(dDir, { recursive: true });
+          }
+          return dDir;
+        }
+      }
+    } catch (e) {
+      logger.warn('[FilesystemService] Could not access D drive root, falling back to documents:', e.message);
+    }
+
+    try {
+      const docDir = path.join(app.getPath('documents'), 'InnoIDE_Projects');
+      if (!fs.existsSync(docDir)) {
+        fs.mkdirSync(docDir, { recursive: true });
+      }
+      return docDir;
+    } catch {
+      const fallback = path.join(process.cwd(), 'InnoIDE_Projects');
+      if (!fs.existsSync(fallback)) {
+        fs.mkdirSync(fallback, { recursive: true });
+      }
+      return fallback;
+    }
+  }
+
+  async saveProjectFileLocal({ projectName, subFolder, fileName, content, rawFileName, rawContent }) {
+    try {
+      const rootDir = this.getProjectsRootDir();
+      const safeProject = (projectName || 'Untitled_Project')
+        .toString()
+        .trim()
+        .replace(/[<>:"/\\|?*]/g, '_');
+      const safeSub = subFolder
+        ? subFolder.toString().trim().replace(/[<>:"/\\|?*]/g, '_')
+        : '';
+      let safeFile = (fileName || 'diagram.json')
+        .toString()
+        .trim()
+        .replace(/[<>:"/\\|?*]/g, '_');
+
+      if (!safeFile.toLowerCase().endsWith('.json') && !rawFileName) {
+        safeFile = `${safeFile}.json`;
+      }
+
+      const projectDir = path.join(rootDir, safeProject);
+      const targetDir = safeSub ? path.join(projectDir, safeSub) : projectDir;
+
+      await fsPromises.mkdir(targetDir, { recursive: true });
+
+      // Maintain project manifest
+      const manifestPath = path.join(projectDir, 'project.json');
+      let manifest = {
+        name: safeProject,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        files: []
+      };
+
+      try {
+        const existingData = await fsPromises.readFile(manifestPath, 'utf8');
+        manifest = { ...manifest, ...JSON.parse(existingData), updatedAt: new Date().toISOString() };
+      } catch {
+        // Manifest does not exist yet
+      }
+
+      const relPath = safeSub ? `${safeSub}/${safeFile}` : safeFile;
+      if (!manifest.files) manifest.files = [];
+      if (!manifest.files.includes(relPath)) {
+        manifest.files.push(relPath);
+      }
+      await fsPromises.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+
+      // Write target JSON file
+      const filePath = path.join(targetDir, safeFile);
+      const fileData = typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content);
+      await fsPromises.writeFile(filePath, fileData, 'utf8');
+
+      // If raw file content also provided (e.g. main.c for Code Editor)
+      let rawFilePath = null;
+      if (rawFileName && rawContent !== undefined) {
+        const safeRaw = rawFileName.toString().trim().replace(/[<>:"/\\|?*]/g, '_');
+        rawFilePath = path.join(targetDir, safeRaw);
+        await fsPromises.writeFile(rawFilePath, String(rawContent), 'utf8');
+      }
+
+      logger.info(`[FilesystemService] Project file saved to local drive: ${filePath}`);
+      return {
+        success: true,
+        path: filePath,
+        rawPath: rawFilePath,
+        projectDir,
+        targetDir,
+        fileName: safeFile
+      };
+    } catch (error) {
+      logger.error('[FilesystemService] Error saving project file locally:', error.message);
       throw error;
     }
   }

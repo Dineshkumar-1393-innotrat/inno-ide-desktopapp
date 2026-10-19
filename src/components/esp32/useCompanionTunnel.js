@@ -74,7 +74,7 @@ export default function useCompanionTunnel({
           );
           if (content) {
             const data = JSON.parse(content);
-            const isFresh = data?.timestamp && Date.now() - data.timestamp < 1000 * 60 * 15;
+            const isFresh = data?.timestamp && Date.now() - data.timestamp < 1000 * 60 * 20;
             if (data?.active && data?.url && isFresh) {
               setRemoteTunnelState((prev) => {
                 if (prev.url !== data.url || !prev.active) {

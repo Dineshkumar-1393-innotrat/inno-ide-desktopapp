@@ -14,7 +14,9 @@ export default function useQrPayloadGenerator({
   remoteTunnelState,
   localCompanionUrl,
   resolvedHostIp,
-  resolvedHostPort
+  resolvedHostPort,
+  qrGeneratedAt,
+  qrExpiresAt
 }) {
   const [selectedDeviceType, setSelectedDeviceType] = useState("");
   const [customDeviceTypeInput, setCustomDeviceTypeInput] = useState("");
@@ -145,11 +147,18 @@ export default function useQrPayloadGenerator({
 
   const isCloudActive = Boolean(companionNetworkMode === "cloud" && remoteTunnelState?.active && remoteTunnelState?.url);
 
+  const effectiveSessionTs = qrGeneratedAt || Date.now();
+  const effectiveExpiresAtTs = qrExpiresAt || (effectiveSessionTs + 1200 * 1000);
+
   const webAppQrPayload = useMemo(() => {
-    return isCloudActive
+    const baseUrl = isCloudActive
       ? remoteTunnelState.url
       : (localCompanionUrl || `http://${resolvedHostIp}:${resolvedHostPort}`);
-  }, [isCloudActive, remoteTunnelState?.url, localCompanionUrl, resolvedHostIp, resolvedHostPort]);
+    if (!baseUrl) return "";
+    const cleanUrl = baseUrl.replace(/[?&]qr_session=\d+/g, "").replace(/[?&]qr_exp=\d+/g, "");
+    const joinChar = cleanUrl.includes("?") ? "&" : "?";
+    return `${cleanUrl}${joinChar}qr_session=${effectiveSessionTs}&qr_exp=${effectiveExpiresAtTs}`;
+  }, [isCloudActive, remoteTunnelState?.url, localCompanionUrl, resolvedHostIp, resolvedHostPort, effectiveSessionTs, effectiveExpiresAtTs]);
 
   // Mode 1: Compact Device Pairing QR
   const companionDevicePayload = useMemo(() => {
@@ -163,9 +172,11 @@ export default function useQrPayloadGenerator({
       serverUrl: bridgeBaseUrl,
       bridgeUrl: `${bridgeBaseUrl}/api/action`,
       backendUrl: `http://${resolvedHostIp}:5004`,
-      port: activePort || "COM9"
+      port: activePort || "COM9",
+      qrSession: effectiveSessionTs,
+      qrExpiresAt: effectiveExpiresAtTs
     });
-  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, isCloudActive, remoteTunnelState?.url]);
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, isCloudActive, remoteTunnelState?.url, effectiveSessionTs, effectiveExpiresAtTs]);
 
   // Mode 2: Full Project Bundle QR
   const bundleQrPayload = useMemo(() => {
@@ -210,10 +221,12 @@ export default function useQrPayloadGenerator({
       serverUrl: bridgeBaseUrl,
       bridgeUrl: `${bridgeBaseUrl}/api/action`,
       port: activePort || "COM9",
+      qrSession: effectiveSessionTs,
+      qrExpiresAt: effectiveExpiresAtTs,
       widgets: compactWidgets,
       rules: compactRules
     });
-  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, cleanUiList, cleanLogicsList, isCloudActive, remoteTunnelState?.url]);
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, cleanUiList, cleanLogicsList, isCloudActive, remoteTunnelState?.url, effectiveSessionTs, effectiveExpiresAtTs]);
 
   // Active QR payload based on selected QR mode
   const activeQrPayload = useMemo(() => {
