@@ -2698,19 +2698,8 @@ export const getStandaloneHtmlContent = ({
     }
 
     function initQrSessionTracker() {
+      // Only track QR validation session and countdown if qr_exp was explicitly provided in the web app URL query parameters
       if (!qrExpiresAtTimestamp) {
-        var hostOrigin = (window.location && window.location.origin && window.location.origin.startsWith('http'))
-          ? window.location.origin
-          : ('http://${companionServerInfo?.ip || resolvedHostIp}:5055');
-        fetch(hostOrigin + '/api/qr/session')
-          .then(function(r) { return r.json(); })
-          .then(function(data) {
-            if (data && data.expiresAt) {
-              qrSessionTimestamp = data.generatedAt || 0;
-              qrExpiresAtTimestamp = data.expiresAt;
-              startQrSessionCountdown();
-            }
-          }).catch(function() {});
         return;
       }
       startQrSessionCountdown();

@@ -164,13 +164,13 @@ export default function PublishCompanionModal({
     }
     try {
       const obj = JSON.parse(activeQrPayload);
-      obj.qrSession = qrGeneratedAt;
-      obj.qrExpiresAt = qrExpiresAt;
+      delete obj.qrSession;
+      delete obj.qrExpiresAt;
       return JSON.stringify(obj);
     } catch {
       return activeQrPayload;
     }
-  }, [qrPayloadMode, effectiveWebAppPayload, activeQrPayload, qrGeneratedAt, qrExpiresAt]);
+  }, [qrPayloadMode, effectiveWebAppPayload, activeQrPayload]);
 
   const handleRegenerateQr = useCallback(() => {
     const now = Date.now();
@@ -529,53 +529,55 @@ export default function PublishCompanionModal({
                     </Box>
                   )}
 
-                  {/* QR & OTP 20-Minute Expiration Banner */}
-                  <Box px={4} pb={2}>
-                    <HStack
-                      bg={isQrExpired ? "rgba(239,68,68,0.15)" : (qrRemainingSeconds <= 120 ? "rgba(245,158,11,0.15)" : "rgba(139,92,246,0.12)")}
-                      p={2.5}
-                      borderRadius="xl"
-                      border="1px solid"
-                      borderColor={isQrExpired ? "rgba(239,68,68,0.4)" : (qrRemainingSeconds <= 120 ? "rgba(245,158,11,0.4)" : "rgba(139,92,246,0.3)")}
-                      justify="space-between"
-                      align="center"
-                    >
-                      <HStack spacing={2} overflow="hidden">
-                        <Text fontSize="14px">{isQrExpired ? "⚠️" : "⏱️"}</Text>
-                        <VStack align="start" spacing={0}>
-                          <HStack spacing={1.5}>
-                            <Text fontSize="11px" fontWeight="700" color={isQrExpired ? "red.300" : (qrRemainingSeconds <= 120 ? "orange.300" : "#C084FC")}>
-                              {isQrExpired ? "QR & OTP Session Expired" : `Expires in: ${formatTimer(qrRemainingSeconds)}`}
-                            </Text>
-                            <Badge
-                              colorScheme={isQrExpired ? "red" : (qrRemainingSeconds <= 120 ? "orange" : "purple")}
-                              fontSize="8px"
-                              px={1.5}
-                              py={0.2}
-                              borderRadius="sm"
-                            >
-                              {isQrExpired ? "EXPIRED" : "QR & OTP SYNCED"}
-                            </Badge>
-                          </HStack>
-                          <Text fontSize="9px" color="gray.400" noOfLines={1}>
-                            {isQrExpired ? "20-minute session ended. Tap Regenerate to start a fresh QR & OTP session." : "OTP challenge expiration is synchronized directly with this QR code's 20-minute validity"}
-                          </Text>
-                        </VStack>
-                      </HStack>
-                      <Button
-                        size="xs"
-                        height="24px"
-                        fontSize="10px"
-                        px={2.5}
-                        colorScheme={isQrExpired ? "red" : "purple"}
-                        variant={isQrExpired ? "solid" : "outline"}
-                        leftIcon={<FaSync size={9} />}
-                        onClick={handleRegenerateQr}
+                  {/* QR & OTP 20-Minute Expiration Banner (Web App URL mode only) */}
+                  {qrPayloadMode === "webapp" && (
+                    <Box px={4} pb={2}>
+                      <HStack
+                        bg={isQrExpired ? "rgba(239,68,68,0.15)" : (qrRemainingSeconds <= 120 ? "rgba(245,158,11,0.15)" : "rgba(139,92,246,0.12)")}
+                        p={2.5}
+                        borderRadius="xl"
+                        border="1px solid"
+                        borderColor={isQrExpired ? "rgba(239,68,68,0.4)" : (qrRemainingSeconds <= 120 ? "rgba(245,158,11,0.4)" : "rgba(139,92,246,0.3)")}
+                        justify="space-between"
+                        align="center"
                       >
-                        {isQrExpired ? "Regenerate" : "Refresh"}
-                      </Button>
-                    </HStack>
-                  </Box>
+                        <HStack spacing={2} overflow="hidden">
+                          <Text fontSize="14px">{isQrExpired ? "⚠️" : "⏱️"}</Text>
+                          <VStack align="start" spacing={0}>
+                            <HStack spacing={1.5}>
+                              <Text fontSize="11px" fontWeight="700" color={isQrExpired ? "red.300" : (qrRemainingSeconds <= 120 ? "orange.300" : "#C084FC")}>
+                                {isQrExpired ? "QR & OTP Session Expired" : `Expires in: ${formatTimer(qrRemainingSeconds)}`}
+                              </Text>
+                              <Badge
+                                colorScheme={isQrExpired ? "red" : (qrRemainingSeconds <= 120 ? "orange" : "purple")}
+                                fontSize="8px"
+                                px={1.5}
+                                py={0.2}
+                                borderRadius="sm"
+                              >
+                                {isQrExpired ? "EXPIRED" : "QR & OTP SYNCED"}
+                              </Badge>
+                            </HStack>
+                            <Text fontSize="9px" color="gray.400" noOfLines={1}>
+                              {isQrExpired ? "20-minute session ended. Tap Regenerate to start a fresh QR & OTP session." : "OTP challenge expiration is synchronized directly with this QR code's 20-minute validity"}
+                            </Text>
+                          </VStack>
+                        </HStack>
+                        <Button
+                          size="xs"
+                          height="24px"
+                          fontSize="10px"
+                          px={2.5}
+                          colorScheme={isQrExpired ? "red" : "purple"}
+                          variant={isQrExpired ? "solid" : "outline"}
+                          leftIcon={<FaSync size={9} />}
+                          onClick={handleRegenerateQr}
+                        >
+                          {isQrExpired ? "Regenerate" : "Refresh"}
+                        </Button>
+                      </HStack>
+                    </Box>
+                  )}
 
                   {/* QR Code Scanner Frame */}
                   <Box display="flex" justifyContent="center" alignItems="center" pb={3} px={4}>
@@ -603,13 +605,13 @@ export default function PublishCompanionModal({
                             fgColor="#000000"
                             style={{
                               display: "block",
-                              filter: isQrExpired ? "blur(6px) grayscale(100%)" : "none",
-                              opacity: isQrExpired ? 0.15 : 1,
+                              filter: (isQrExpired && qrPayloadMode === "webapp") ? "blur(6px) grayscale(100%)" : "none",
+                              opacity: (isQrExpired && qrPayloadMode === "webapp") ? 0.15 : 1,
                               transition: "all 0.3s ease"
                             }}
                           />
 
-                          {isQrExpired && (
+                          {(isQrExpired && qrPayloadMode === "webapp") && (
                             <Box
                               position="absolute"
                               top={0}

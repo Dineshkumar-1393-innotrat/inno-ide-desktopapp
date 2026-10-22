@@ -25,6 +25,8 @@ export const ESP32_GPIO_OPTIONS = [
 
 export const RULE_ACTION_TYPES = [
   { value: "Send Serial Command", label: "Send Serial Command", defaultPayload: "LED:{state}", desc: "Transmit formatted text or command string over UART/Serial port" },
+  { value: "Send Serial Command (Location Verified)", label: "Send Serial Command (Location Verified & OTP Guard)", defaultPayload: "LED:{state}", desc: "Actuate hardware only after verifying GPS location and passing OTP challenge on location mismatch" },
+  { value: "Record Switch Location & State", label: "Record Switch Location & State", defaultPayload: "LED:{state}", desc: "Logs GPS coordinates and switch state to audit history and companion app" },
   { value: "Write PWM Duty / Angle", label: "Write PWM Duty / Angle", defaultPayload: "SERVO:{value}", desc: "Output hardware PWM duty cycle or RC Servo pulse angle" },
   { value: "Write Digital GPIO", label: "Write Digital GPIO (HIGH/LOW)", defaultPayload: "GPIO:HIGH", desc: "Drive GPIO pin to logical HIGH (3.3V) or LOW (0V)" },
   { value: "Trigger Buzzer & Alert", label: "Trigger Buzzer & Alert", defaultPayload: "BUZZER:1", desc: "Sound physical buzzer tone and flag software alert notification" },
@@ -33,6 +35,10 @@ export const RULE_ACTION_TYPES = [
 
 export const RULE_CONDITION_TYPES = [
   { value: "Always", label: "Always (Pass check)", hasThreshold: false, desc: "Fires immediately when the trigger event occurs without filtering" },
+  { value: "Location Mismatch on Turn OFF (OTP Guard)", label: "Location Mismatch on Turn OFF (OTP Guard)", hasThreshold: true, defaultThreshold: "100", defaultUnit: "m", isLocationCondition: true, desc: "Requires 6-digit OTP verification challenge if Switch is turned OFF > 100m away from the Turn-ON location" },
+  { value: "Within Geofence (<= Distance)", label: "Within Geofence (≤ Distance)", hasThreshold: true, defaultThreshold: "100", defaultUnit: "m", isLocationCondition: true, desc: "Switch action permitted only within specified distance of calibrated/reference location" },
+  { value: "Outside Geofence (> Distance)", label: "Outside Geofence (> Distance)", hasThreshold: true, defaultThreshold: "100", defaultUnit: "m", isLocationCondition: true, desc: "Fires alert or action when device is moved outside geofence boundary" },
+  { value: "GPS Location Verified", label: "GPS Location Verified (Accuracy Check)", hasThreshold: false, defaultThreshold: "50", defaultUnit: "m", isLocationCondition: true, desc: "Requires valid GPS coordinates, active permission, and acceptable accuracy before action" },
   { value: "Value >", label: "Value Greater Than (>)", hasThreshold: true, defaultThreshold: "30", defaultUnit: "°C", desc: "Fires only when the trigger value exceeds the specified threshold" },
   { value: "Value <", label: "Value Less Than (<)", hasThreshold: true, defaultThreshold: "10", defaultUnit: "°C", desc: "Fires only when the trigger value falls below the specified threshold" },
   { value: "Value ==", label: "Value Equals (==)", hasThreshold: true, defaultThreshold: "1", defaultUnit: "", desc: "Fires when trigger value exactly matches the target state (e.g. 1 / true / 0)" },

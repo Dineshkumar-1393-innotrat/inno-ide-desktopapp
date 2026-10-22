@@ -23,7 +23,6 @@ import {
   FaGripVertical,
   FaLightbulb,
   FaCircle,
-  FaMapMarkerAlt,
   FaTag,
   FaWpforms,
   FaSync,
@@ -48,7 +47,6 @@ import {
 // Static palette items for App Builder to avoid recreation on every render
 export const UI_PALETTE_ITEMS = [
   { type: "button", title: "Button", desc: "Tap action", icon: <FaCircle size={13} /> },
-  { type: "location", title: "Location Button", desc: "Device switch geolog & QR", icon: <FaMapMarkerAlt size={13} /> },
   { type: "label", title: "Label", desc: "Display text", icon: <FaTag size={13} /> },
   { type: "textfield", title: "Text Field", desc: "Dynamic Google form", icon: <FaWpforms size={13} /> },
   { type: "switch", title: "Switch", desc: "Toggle on/off", icon: <FaSync size={13} /> },

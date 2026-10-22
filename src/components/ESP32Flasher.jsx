@@ -468,6 +468,7 @@ export default function ESP32Flasher({
     isTestingRule,
     setIsTestingRule,
     handleOpenAddRule,
+    handleOpenAddLocationRule,
     handleOpenEditRule,
     handleSaveRuleModal,
     handleDeleteLogicBlock,
@@ -654,6 +655,7 @@ export default function ESP32Flasher({
         isTestingRule={isTestingRule}
         setIsTestingRule={setIsTestingRule}
         handleOpenAddRule={handleOpenAddRule}
+        handleOpenAddLocationRule={handleOpenAddLocationRule}
         handleOpenEditRule={handleOpenEditRule}
         handleSaveRuleModal={handleSaveRuleModal}
         handleDeleteLogicBlock={handleDeleteLogicBlock}

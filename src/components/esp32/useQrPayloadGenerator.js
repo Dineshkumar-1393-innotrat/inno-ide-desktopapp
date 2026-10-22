@@ -121,6 +121,7 @@ export default function useQrPayloadGenerator({
       const linkedWidget = widgets.find((w) => w.id === b.triggerWidgetId);
       const isComponentRule = b.triggerType === "component" || (!b.triggerWidgetId?.startsWith("telem_") && !b.triggerWidgetId?.startsWith("timer"));
       const isStale = isComponentRule && Boolean(b.triggerWidgetId) && !linkedWidget;
+      const isLocationRule = b.conditionType?.includes("Location") || b.condition?.includes("Location") || b.action?.includes("Location");
       const item = {
         id: b.id,
         name: b.name || "",
@@ -129,6 +130,9 @@ export default function useQrPayloadGenerator({
         triggerName: linkedWidget ? linkedWidget.title : (b.triggerName || "Trigger"),
         event: b.event || "on_toggle",
         condition: b.condition || "Always",
+        conditionType: b.conditionType || (isLocationRule ? "Location Mismatch on Turn OFF (OTP Guard)" : "Always"),
+        conditionThreshold: b.conditionThreshold !== undefined ? b.conditionThreshold : (isLocationRule ? 100 : undefined),
+        conditionUnit: b.conditionUnit || "m",
         action: b.action || "Send Hardware Command",
         payload: b.payload || (isLedRule ? "LED:{state}" : "1"),
         target: linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || b.targetHardware || "Bound → GPIO Pin") : (b.targetHardware || "Bound → GPIO Pin"),
@@ -136,7 +140,6 @@ export default function useQrPayloadGenerator({
         enabled: isStale ? false : (b.enabled !== false),
         isStale: isStale
       };
-      if (b.conditionThreshold !== undefined) item.conditionThreshold = b.conditionThreshold;
       if (isLedRule) {
         item.onPayload = "LED:1";
         item.offPayload = "LED:0";
@@ -172,11 +175,9 @@ export default function useQrPayloadGenerator({
       serverUrl: bridgeBaseUrl,
       bridgeUrl: `${bridgeBaseUrl}/api/action`,
       backendUrl: `http://${resolvedHostIp}:5004`,
-      port: activePort || "COM9",
-      qrSession: effectiveSessionTs,
-      qrExpiresAt: effectiveExpiresAtTs
+      port: activePort || "COM9"
     });
-  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, isCloudActive, remoteTunnelState?.url, effectiveSessionTs, effectiveExpiresAtTs]);
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, isCloudActive, remoteTunnelState?.url]);
 
   // Mode 2: Full Project Bundle QR
   const bundleQrPayload = useMemo(() => {
@@ -221,12 +222,10 @@ export default function useQrPayloadGenerator({
       serverUrl: bridgeBaseUrl,
       bridgeUrl: `${bridgeBaseUrl}/api/action`,
       port: activePort || "COM9",
-      qrSession: effectiveSessionTs,
-      qrExpiresAt: effectiveExpiresAtTs,
       widgets: compactWidgets,
       rules: compactRules
     });
-  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, cleanUiList, cleanLogicsList, isCloudActive, remoteTunnelState?.url, effectiveSessionTs, effectiveExpiresAtTs]);
+  }, [effectiveDeviceId, effectiveDeviceName, effectiveDeviceType, resolvedHostIp, resolvedHostPort, activePort, cleanUiList, cleanLogicsList, isCloudActive, remoteTunnelState?.url]);
 
   // Active QR payload based on selected QR mode
   const activeQrPayload = useMemo(() => {

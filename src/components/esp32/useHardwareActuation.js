@@ -85,7 +85,7 @@ export default function useHardwareActuation({
     if (window.electronAPI?.otp?.getLastLocation) {
       try {
         prevLoc = await window.electronAPI.otp.getLastLocation();
-      } catch {}
+      } catch { }
     }
     if (!prevLoc) {
       try {
@@ -94,7 +94,7 @@ export default function useHardwareActuation({
           return text.trim().startsWith("<") ? null : JSON.parse(text);
         });
         if (statusRes?.lastLocation) prevLoc = statusRes.lastLocation;
-      } catch {}
+      } catch { }
     }
 
     const mismatch = isLocationMismatch(prevLoc, switchLoc, 100);
@@ -108,7 +108,7 @@ export default function useHardwareActuation({
       if (window.electronAPI?.qr?.getSession) {
         try {
           activeQrSession = await window.electronAPI.qr.getSession();
-        } catch {}
+        } catch { }
       }
 
       let challenge = null;
@@ -284,9 +284,8 @@ export default function useHardwareActuation({
         {
           id: Date.now(),
           type: "tx",
-          text: `TX -> ${targetPort}: ${cmd.trim()} (${nextVal ? "LED ON" : "LED OFF"}) ${
-            hardwareActuated ? "[OK]" : `[FAILED: ${lastError || "port unavailable"}]`
-          }`,
+          text: `TX -> ${targetPort}: ${cmd.trim()} (${nextVal ? "LED ON" : "LED OFF"}) ${hardwareActuated ? "[OK]" : `[FAILED: ${lastError || "port unavailable"}]`
+            }`,
           time: new Date().toLocaleTimeString()
         }
       ]);
@@ -426,6 +425,28 @@ export default function useHardwareActuation({
   const handleExecuteRule = async (rule, triggerVal = null) => {
     if (!rule) return;
     const targetPort = activePort;
+
+    // Check if this rule is a Location-guarded action or OTP rule
+    const isLocationRule =
+      rule.action === "Send Serial Command (Location Verified)" ||
+      rule.action === "Record Switch Location & State" ||
+      rule.conditionType?.includes("Location") ||
+      rule.condition?.includes("Location") ||
+      rule.condition?.includes("OTP");
+
+    if (isLocationRule && (triggerVal !== null || rule.event === "on_turn_on" || rule.event === "on_turn_off")) {
+      const boolVal = triggerVal !== null
+        ? Boolean(triggerVal === true || triggerVal === 1 || triggerVal === "1")
+        : rule.event === "on_turn_off" ? false : true;
+
+      // Execute via the verified GPS location & OTP challenge pipeline
+      await handleToggleHardwareLed(boolVal);
+      return {
+        success: true,
+        text: `Executed Location & OTP Guarded Action for ${rule.name} (${boolVal ? "Turn ON: GPS Recorded" : "Turn OFF: Distance & OTP Verified"})`
+      };
+    }
+
     let formattedPayload = rule.payload || "CMD";
 
     if (triggerVal !== null) {
@@ -510,10 +531,18 @@ export default function useHardwareActuation({
       const activeRules = logicBlocks.filter((b) => b.enabled && b.triggerWidgetId === targetWidget.id);
 
       activeRules.forEach((rule) => {
-        let conditionMet = false;
-        const cond = rule.condition || "Always";
+        // Event match filter
+        if (rule.event === "on_turn_on" && !value) {
+          return; // Skip when widget is being turned off
+        }
+        if (rule.event === "on_turn_off" && Boolean(value)) {
+          return; // Skip when widget is being turned on
+        }
 
-        if (cond === "Always") {
+        let conditionMet = false;
+        const cond = rule.conditionType || rule.condition || "Always";
+
+        if (cond === "Always" || cond.startsWith("Always")) {
           conditionMet = true;
         } else if (cond.startsWith("Value >")) {
           const thresh = parseFloat(rule.conditionThreshold || cond.replace(/[^0-9.-]/g, "") || 0);
@@ -527,6 +556,13 @@ export default function useHardwareActuation({
         } else if (cond.startsWith("Value !=")) {
           const thresh = rule.conditionThreshold || "0";
           conditionMet = String(value) !== String(thresh);
+        } else if (
+          cond.includes("Location Mismatch") ||
+          cond.includes("OTP Guard") ||
+          cond.includes("Geofence") ||
+          cond.includes("GPS Location")
+        ) {
+          conditionMet = true;
         } else {
           conditionMet = true;
         }

@@ -99,6 +99,7 @@ function AppBuilderStudio({
   isTestingRule,
   setIsTestingRule,
   handleOpenAddRule,
+  handleOpenAddLocationRule,
   handleOpenEditRule,
   handleSaveRuleModal,
   handleDeleteLogicBlock,
@@ -293,10 +294,12 @@ function AppBuilderStudio({
               setLogicBlocks={setLogicBlocks}
               widgets={widgets}
               handleOpenAddRule={handleOpenAddRule}
+              handleOpenAddLocationRule={handleOpenAddLocationRule}
               handleExecuteRule={handleExecuteRule}
               handleOpenEditRule={handleOpenEditRule}
               handleToggleLogicBlock={handleToggleLogicBlock}
               handleDeleteLogicBlock={handleDeleteLogicBlock}
+              deviceDetectedLocation={deviceDetectedLocation}
             />
           )}
 
@@ -471,6 +474,7 @@ function AppBuilderStudio({
         effectiveDeviceName={effectiveDeviceName}
         effectiveDeviceType={effectiveDeviceType}
         bundleQrPayload={bundleQrPayload}
+        deviceDetectedLocation={deviceDetectedLocation}
       />
 
       {/* App Builder Auxiliary Modals (New App, Rename, Clear Canvas, CRUD Record) */}

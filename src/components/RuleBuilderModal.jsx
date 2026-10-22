@@ -26,9 +26,10 @@ import {
   TabList,
   TabPanels,
   Tab,
-  TabPanel
+  TabPanel,
+  Grid
 } from "@chakra-ui/react";
-import { FaCogs } from "react-icons/fa";
+import { FaCogs, FaMapMarkerAlt, FaShieldAlt, FaLock } from "react-icons/fa";
 import {
   ESP32_GPIO_OPTIONS,
   RULE_ACTION_TYPES,
@@ -60,7 +61,8 @@ export default function RuleBuilderModal({
   effectiveDeviceId = "esp32-companion-01",
   effectiveDeviceName = "ESP32 Companion",
   effectiveDeviceType = "LED",
-  bundleQrPayload = ""
+  bundleQrPayload = "",
+  deviceDetectedLocation = null
 }) {
   const effectivePort = selectedDevice?.port || "COM9";
 
@@ -302,7 +304,9 @@ export default function RuleBuilderModal({
                         value={editingRule.event || "on_toggle"}
                         onChange={(e) => setEditingRule((r) => ({ ...r, event: e.target.value }))}
                       >
-                        <option value="on_toggle">on_toggle (Switch turned ON / OFF)</option>
+                        <option value="on_toggle">on_toggle (Switch turned ON / OFF - Full Location Guard)</option>
+                        <option value="on_turn_on">on_turn_on (Switch turned ON - Record GPS Location)</option>
+                        <option value="on_turn_off">on_turn_off (Switch turned OFF - Location Mismatch OTP Guard)</option>
                         <option value="on_change">on_change (Slider or analog value moved)</option>
                         <option value="on_press">on_press (Button tapped)</option>
                         <option value="threshold_above">threshold_above (Sensor value exceeds limit)</option>
@@ -352,32 +356,46 @@ export default function RuleBuilderModal({
                           const val = e.target.value;
                           const condObj = RULE_CONDITION_TYPES.find((c) => c.value === val);
                           let newCond = val;
+                          const defThresh = editingRule.conditionThreshold || condObj?.defaultThreshold || (condObj?.isLocationCondition ? "100" : "30");
+                          const defUnit = condObj?.defaultUnit || (condObj?.isLocationCondition ? "m" : "°C");
+
                           if (val === "Always") {
                             newCond = "Always";
+                          } else if (val === "Location Mismatch on Turn OFF (OTP Guard)") {
+                            newCond = `Location Mismatch on Turn OFF (> ${defThresh}m OTP)`;
+                          } else if (val === "Within Geofence (<= Distance)") {
+                            newCond = `Within Geofence (<= ${defThresh}m)`;
+                          } else if (val === "Outside Geofence (> Distance)") {
+                            newCond = `Outside Geofence (> ${defThresh}m)`;
+                          } else if (val === "GPS Location Verified") {
+                            newCond = `GPS Location Verified (Accuracy < ${defThresh}m)`;
                           } else if (val === "Value >") {
-                            newCond = `Value > ${editingRule.conditionThreshold || condObj?.defaultThreshold || "30"}${editingRule.conditionUnit || "°C"}`;
+                            newCond = `Value > ${defThresh}${editingRule.conditionUnit || "°C"}`;
                           } else if (val === "Value <") {
-                            newCond = `Value < ${editingRule.conditionThreshold || condObj?.defaultThreshold || "10"}${editingRule.conditionUnit || "°C"}`;
+                            newCond = `Value < ${defThresh}${editingRule.conditionUnit || "°C"}`;
                           } else if (val === "Value ==") {
-                            newCond = `Value == ${editingRule.conditionThreshold || "1"}`;
+                            newCond = `Value == ${defThresh}`;
                           } else if (val === "Value !=") {
-                            newCond = `Value != ${editingRule.conditionThreshold || "0"}`;
+                            newCond = `Value != ${defThresh}`;
                           }
+
                           setEditingRule((r) => ({
                             ...r,
                             conditionType: val,
-                            condition: newCond
+                            condition: newCond,
+                            conditionThreshold: defThresh,
+                            conditionUnit: defUnit
                           }));
                         }}
                       >
                         {RULE_CONDITION_TYPES.map((c) => (
                           <option key={c.value} value={c.value}>
-                            {c.label}
+                            {c.isLocationCondition ? `📍 ${c.label}` : c.label}
                           </option>
                         ))}
                       </Select>
                       <FormHelperText fontSize="10px">
-                        Evaluate incoming trigger data before deciding to execute the hardware action.
+                        Evaluate incoming trigger data or GPS geofence before deciding to execute the hardware action.
                       </FormHelperText>
                     </FormControl>
 
@@ -386,7 +404,9 @@ export default function RuleBuilderModal({
                       <Grid templateColumns="2fr 1fr" gap={2}>
                         <FormControl isRequired>
                           <FormLabel fontSize="xs" fontWeight="bold">
-                            Threshold Value
+                            {editingRule.conditionType?.includes("Location") || editingRule.conditionType?.includes("Geofence") || editingRule.conditionType?.includes("GPS")
+                              ? "Distance / Geofence Radius"
+                              : "Threshold Value"}
                           </FormLabel>
                           <Input
                             size="sm"
@@ -394,13 +414,24 @@ export default function RuleBuilderModal({
                             value={editingRule.conditionThreshold || ""}
                             onChange={(e) => {
                               const val = e.target.value;
+                              let updatedFormula = `${editingRule.conditionType} ${val}${editingRule.conditionUnit || ""}`;
+                              if (editingRule.conditionType === "Location Mismatch on Turn OFF (OTP Guard)") {
+                                updatedFormula = `Location Mismatch on Turn OFF (> ${val}m OTP)`;
+                              } else if (editingRule.conditionType === "Within Geofence (<= Distance)") {
+                                updatedFormula = `Within Geofence (<= ${val}m)`;
+                              } else if (editingRule.conditionType === "Outside Geofence (> Distance)") {
+                                updatedFormula = `Outside Geofence (> ${val}m)`;
+                              } else if (editingRule.conditionType === "GPS Location Verified") {
+                                updatedFormula = `GPS Location Verified (Accuracy < ${val}m)`;
+                              }
+
                               setEditingRule((r) => ({
                                 ...r,
                                 conditionThreshold: val,
-                                condition: `${r.conditionType || "Value >"} ${val}${r.conditionUnit || ""}`
+                                condition: updatedFormula
                               }));
                             }}
-                            placeholder="e.g. 30"
+                            placeholder={editingRule.conditionType?.includes("Location") || editingRule.conditionType?.includes("Geofence") ? "e.g. 100" : "e.g. 30"}
                           />
                         </FormControl>
                         <FormControl>
@@ -419,10 +450,37 @@ export default function RuleBuilderModal({
                                 condition: `${r.conditionType || "Value >"} ${r.conditionThreshold || "30"}${u}`
                               }));
                             }}
-                            placeholder="e.g. °C, %, V"
+                            placeholder="e.g. m, °C, %"
                           />
                         </FormControl>
                       </Grid>
+                    )}
+
+                    {/* Location & OTP Security Logic Card */}
+                    {(editingRule.conditionType?.includes("Location") || editingRule.conditionType?.includes("Geofence") || editingRule.conditionType?.includes("GPS")) && (
+                      <Box p={3} bg="purple.50" borderRadius="xl" border="1px solid" borderColor="purple.200">
+                        <HStack spacing={2} mb={1}>
+                          <FaShieldAlt size={13} color="#7c3aed" />
+                          <Text fontSize="xs" fontWeight="bold" color="purple.900">
+                            Location &amp; OTP Security Logic:
+                          </Text>
+                        </HStack>
+                        <VStack align="start" spacing={1} fontSize="11px" color="purple.800" pl={1}>
+                          <Text>• <strong>Turn ON:</strong> Captures fresh device GPS coordinates and saves operation location.</Text>
+                          <Text>• <strong>Turn OFF:</strong> Calculates distance from Turn-ON coordinates. If movement exceeds {editingRule.conditionThreshold || "100"}m, a 6-digit OTP verification challenge is required.</Text>
+                          <Text>• <strong>Anti-Tamper Guard:</strong> The switch will NOT power OFF until the OTP challenge is confirmed.</Text>
+                        </VStack>
+                        {deviceDetectedLocation && (
+                          <Box mt={2} pt={2} borderTop="1px dashed" borderColor="purple.300">
+                            <HStack spacing={1.5}>
+                              <FaMapMarkerAlt size={11} color="#6d28d9" />
+                              <Text fontSize="10px" color="purple.900" fontWeight="bold">
+                                Device GPS: {deviceDetectedLocation.city || "Detected"} ({deviceDetectedLocation.lat?.toFixed(4)}, {deviceDetectedLocation.lon?.toFixed(4)} • ±{deviceDetectedLocation.accuracy || 12}m)
+                              </Text>
+                            </HStack>
+                          </Box>
+                        )}
+                      </Box>
                     )}
 
                     <Box p={3} bg="purple.50" borderRadius="xl" border="1px solid" borderColor="purple.200">
@@ -552,6 +610,20 @@ export default function RuleBuilderModal({
                         Placeholders: <code>{"{state}"}</code> (0 or 1), <code>{"{value}"}</code> (number), <code>{"{state_str}"}</code> (HIGH or LOW).
                       </FormHelperText>
                     </FormControl>
+
+                    {(editingRule.action?.includes("Location") || editingRule.conditionType?.includes("Location")) && (
+                      <Box p={3} bg="blue.50" borderRadius="xl" border="1px solid" borderColor="blue.200">
+                        <HStack spacing={2} mb={1}>
+                          <FaShieldAlt size={13} color="#2563eb" />
+                          <Text fontSize="xs" fontWeight="bold" color="blue.900">
+                            Location &amp; OTP Guarded Action:
+                          </Text>
+                        </HStack>
+                        <Text fontSize="11px" color="blue.800">
+                          Hardware actuation is gated by device GPS verification. If the switch is turned OFF from a mismatched location (&gt; 100m away), a 6-digit OTP challenge is required before transmitting commands to ESP32 {editingRule.targetHardware || "GPIO"}.
+                        </Text>
+                      </Box>
+                    )}
 
                     <Box p={3} bg="green.50" borderRadius="xl" border="1px solid" borderColor="green.200">
                       <Text fontSize="xs" fontWeight="bold" color="green.900">
