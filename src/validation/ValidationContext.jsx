@@ -27,13 +27,24 @@ export const ValidationProvider = ({ children }) => {
       setStageStatuses(newStatuses);
     });
 
+    const isFlashViolation = (v) =>
+      v &&
+      (v.message === 'Flash operation cannot start.' ||
+        v.currentStage === 'Flash' ||
+        v.blockingAction === 'flash.start');
+
     const unsubViolation = validationManager.onViolation((violation) => {
+      if (isFlashViolation(violation)) {
+        validationManager.clearActiveViolation();
+        setActiveViolation(null);
+        return;
+      }
       setActiveViolation(violation);
     });
 
     // Also listen to window events for decoupled components
     const handleGlobalViolation = (e) => {
-      if (e.detail) {
+      if (e.detail && !isFlashViolation(e.detail)) {
         setActiveViolation(e.detail);
       }
     };

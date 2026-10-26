@@ -312,7 +312,7 @@ export class SerialService {
 $ProgressPreference = 'SilentlyContinue';
 $res = @()
 try {
-  $pnp = Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -eq 'Ports' -or $_.Caption -match '\\(COM\\d+\\)' }
+  $pnp = Get-CimInstance -Query "SELECT Name, Caption, PNPDeviceID, Manufacturer FROM Win32_PnPEntity WHERE PNPClass = 'Ports' OR Caption LIKE '%(COM%)'" -ErrorAction SilentlyContinue
   foreach ($dev in $pnp) {
     if ($dev.Caption -match '\\((COM\\d+)\\)') {
       $res += [PSCustomObject]@{
@@ -327,7 +327,7 @@ try {
 
 try {
   if (Test-Path 'HKLM:\\HARDWARE\\DEVICEMAP\\SERIALCOMM') {
-    $reg = Get-ItemProperty -Path 'HKLM:\\HARDWARE\\DEVICEMAP\\SERIALCOMM'
+    $reg = Get-ItemProperty -Path 'HKLM:\\HARDWARE\\DEVICEMAP\\SERIALCOMM' -ErrorAction SilentlyContinue
     $reg.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
       $comPort = [string]$_.Value
       if (-not ($res | Where-Object { $_.Path -eq $comPort })) {
@@ -345,7 +345,7 @@ try {
 $res | ConvertTo-Json -Compress
 `;
         const enc = Buffer.from(psScript, 'utf16le').toString('base64');
-        const { stdout } = await execPromise(`powershell -NoProfile -NonInteractive -EncodedCommand ${enc}`, { timeout: 5000 });
+        const { stdout } = await execPromise(`powershell -NoProfile -NonInteractive -EncodedCommand ${enc}`, { timeout: 10000 });
         if (stdout && stdout.trim()) {
           const raw = stdout.trim();
           const jsonStart = raw.indexOf('[');
@@ -367,7 +367,7 @@ $res | ConvertTo-Json -Compress
           }
         }
       } catch (psErr) {
-        logger.warn('Windows PowerShell serial port scan warning:', psErr.message);
+        logger.warn('Windows PowerShell serial port scan warning:', psErr.killed ? 'PowerShell scan timed out' : (psErr.name || 'Scan failed'));
       }
     }
 

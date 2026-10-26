@@ -574,11 +574,16 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
               };
             }
             if (w.type === "switch" || w.id === "w-led") {
+              const currentHist = Array.isArray(w.locationHistory) ? w.locationHistory : [];
+              const filtered = currentHist.filter((h) => !isMatch(h, record));
+              const switchHist = [record, ...filtered.slice(0, 49)];
+              switchHist.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
               return {
                 ...w,
                 lastLocation: record,
                 lastOnLocation: isOn ? record : (w.lastOnLocation || null),
-                lastOffLocation: !isOn ? record : (w.lastOffLocation || null)
+                lastOffLocation: !isOn ? record : (w.lastOffLocation || null),
+                locationHistory: switchHist
               };
             }
             return w;

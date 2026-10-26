@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import { sanitizeRoute } from '../hooks/useRouteRestoration';
 import { useMeeting } from '../contexts/MeetingContext';
 import {
   Blocks,
@@ -218,10 +219,13 @@ const EditorNavbar = ({
     try {
       window.dispatchEvent(new CustomEvent('innoide:force-canvas-save'));
       const currentUserId = resolvedUser?.userId || resolvedUser?._id || resolvedUser?.id || localStorage.getItem('userId');
-      const currentPath = window.location.pathname || (typeof location !== 'undefined' ? location.pathname : null);
-      if (currentUserId && currentPath && currentPath !== '/' && currentPath !== '/logout') {
-        localStorage.setItem(`innoide:last_active_route:${currentUserId}`, currentPath);
-        localStorage.setItem('innoide:last_active_route', currentPath);
+      const rawPath = (typeof window !== 'undefined' && window.location.hash)
+        ? window.location.hash.replace(/^#/, '').split('?')[0]
+        : (window.location.pathname || '');
+      const validPath = sanitizeRoute(rawPath);
+      if (currentUserId && validPath) {
+        localStorage.setItem(`innoide:last_active_route:${currentUserId}`, validPath);
+        localStorage.setItem('innoide:last_active_route', JSON.stringify({ path: validPath, ts: Date.now() }));
       }
     } catch (e) {
       console.warn('Failed to save route before logout', e);

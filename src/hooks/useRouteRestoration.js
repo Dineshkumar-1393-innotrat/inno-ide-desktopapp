@@ -32,29 +32,136 @@ const EXCLUDED_ROUTES = new Set([
   "/defineproductone",
   "/defineproducttwo",
   "/defineproduct",
+  "/index.html",
 ]);
+
+/**
+ * Known valid application routes that can be safely restored.
+ */
+const KNOWN_VALID_ROUTES = new Set([
+  "/editor",
+  "/flowcharttest",
+  "/feedback",
+  "/textbox",
+  "/fileupload",
+  "/simulation",
+  "/simulationpopup",
+  "/blockdiagram",
+  "/blockprogramming",
+  "/fileexplorerone",
+  "/createproductdefination",
+  "/view-data",
+  "/embedded",
+  "/embedded/manage",
+  "/toggle",
+  "/mathcodeeditor",
+  "/meet",
+  "/rule-engine",
+  "/flasher",
+  "/template",
+]);
+
+/**
+ * Sanitizes and validates a route candidate.
+ * Returns a valid route string (e.g. "/editor") or null if invalid/corrupt.
+ */
+export function sanitizeRoute(rawRoute) {
+  if (!rawRoute || typeof rawRoute !== "string") return null;
+
+  let cleaned = rawRoute.trim();
+
+  // If raw string is JSON, attempt to extract the path property
+  if (cleaned.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      cleaned = parsed?.path || "";
+    } catch {
+      return null;
+    }
+  }
+
+  // Reject malformed, encoded JSON remnants or bad characters
+  if (
+    !cleaned ||
+    cleaned.startsWith("/%7B") ||
+    cleaned.startsWith("/%7b") ||
+    cleaned.startsWith("/{") ||
+    cleaned.includes("%22") ||
+    cleaned.includes('"') ||
+    cleaned.includes("}") ||
+    cleaned.includes("%7D") ||
+    cleaned.includes("%7d") ||
+    cleaned.includes("<") ||
+    cleaned.includes(">")
+  ) {
+    return null;
+  }
+
+  // Must begin with a single slash
+  if (!cleaned.startsWith("/")) return null;
+
+  // Check excluded routes
+  if (EXCLUDED_ROUTES.has(cleaned)) return null;
+
+  // Check against known valid routes
+  const normalizedPath = cleaned.split("?")[0].split("#")[0].toLowerCase();
+  const isValid =
+    KNOWN_VALID_ROUTES.has(normalizedPath) ||
+    normalizedPath.startsWith("/meet/");
+
+  return isValid ? cleaned : null;
+}
 
 export function useRouteRestoration() {
   const location = useLocation();
   const navigate = useNavigate();
   const hasRestored = useRef(false);
 
+  // Proactive cleanup of any corrupt or JSON-encoded routes in localStorage
+  useEffect(() => {
+    try {
+      const checkAndCleanKey = (k) => {
+        const val = localStorage.getItem(k);
+        if (
+          val &&
+          (val.includes("%7B") ||
+            val.includes("%7b") ||
+            val.includes("/%7B") ||
+            val.includes('{"path":"/%7B'))
+        ) {
+          localStorage.removeItem(k);
+        }
+      };
+
+      checkAndCleanKey(ROUTE_KEY);
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("innoide:last_active_route")) {
+          checkAndCleanKey(k);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   // ── Step 1: Save current route on every navigation ─────────────────────────
   useEffect(() => {
     const path = location.pathname;
-    if (EXCLUDED_ROUTES.has(path)) return;
+    const sanitized = sanitizeRoute(path);
+    if (!sanitized) return;
 
     try {
       localStorage.setItem(
         ROUTE_KEY,
-        JSON.stringify({ path, ts: Date.now() })
+        JSON.stringify({ path: sanitized, ts: Date.now() })
       );
       const rawUser = localStorage.getItem("userData");
       if (rawUser) {
         try {
           const uid = JSON.parse(rawUser)?.userId;
           if (uid) {
-            localStorage.setItem(`innoide:last_active_route:${uid}`, path);
+            localStorage.setItem(`innoide:last_active_route:${uid}`, sanitized);
           }
         } catch (e) {}
       }
@@ -70,8 +177,26 @@ export function useRouteRestoration() {
     if (hasRestored.current) return;
     hasRestored.current = true;
 
+    // Check if the current location is already corrupted in the URL bar
+    const currentPath = location.pathname;
+    if (
+      currentPath.startsWith("/%7B") ||
+      currentPath.startsWith("/%7b") ||
+      currentPath.startsWith("/{") ||
+      currentPath.includes("%22")
+    ) {
+      console.warn(
+        `[RouteRestoration] Corrupted route in address bar detected (${currentPath}), redirecting to /editor`
+      );
+      try {
+        localStorage.removeItem(ROUTE_KEY);
+      } catch {}
+      navigate("/editor", { replace: true });
+      return;
+    }
+
     // Only restore if we're at the hash root (haven't navigated anywhere yet)
-    if (location.pathname !== "/") return;
+    if (currentPath !== "/") return;
 
     // Check authentication: If user is not logged in, stay on the Login screen
     const token =
@@ -85,15 +210,19 @@ export function useRouteRestoration() {
 
     try {
       let targetPath = null;
-      let targetAge = 0;
 
       if (userData) {
         try {
           const uid = JSON.parse(userData)?.userId;
           if (uid) {
-            const userRoute = localStorage.getItem(`innoide:last_active_route:${uid}`);
-            if (userRoute && !EXCLUDED_ROUTES.has(userRoute) && userRoute !== "/") {
-              targetPath = userRoute;
+            const userRoute = localStorage.getItem(
+              `innoide:last_active_route:${uid}`
+            );
+            const valid = sanitizeRoute(userRoute);
+            if (valid) {
+              targetPath = valid;
+            } else if (userRoute) {
+              localStorage.removeItem(`innoide:last_active_route:${uid}`);
             }
           }
         } catch (e) {}
@@ -102,12 +231,18 @@ export function useRouteRestoration() {
       if (!targetPath) {
         const raw = localStorage.getItem(ROUTE_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw);
-          const { path, ts } = parsed;
-          const age = Date.now() - (ts || 0);
-          if (path && typeof path === "string" && !EXCLUDED_ROUTES.has(path) && path !== "/" && age < ROUTE_TTL_MS) {
-            targetPath = path;
-            targetAge = age;
+          try {
+            const parsed = JSON.parse(raw);
+            const { path, ts } = parsed || {};
+            const age = Date.now() - (ts || 0);
+            const valid = sanitizeRoute(path);
+            if (valid && age < ROUTE_TTL_MS) {
+              targetPath = valid;
+            } else {
+              localStorage.removeItem(ROUTE_KEY);
+            }
+          } catch {
+            localStorage.removeItem(ROUTE_KEY);
           }
         }
       }
@@ -119,6 +254,6 @@ export function useRouteRestoration() {
     } catch {
       /* ignore */
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

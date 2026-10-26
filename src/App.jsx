@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import "bootstrap/dist/css/bootstrap.min.css";
 import { ChakraProvider, Box, Spinner, Center } from "@chakra-ui/react";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -84,6 +84,15 @@ const PageLoader = () => (
     <Spinner size="xl" color="blue.500" thickness="3px" speed="0.8s" />
   </Center>
 );
+
+// Fallback redirect for unknown, unmatched, or corrupted routes to prevent blank white screens
+const FallbackRedirect = () => {
+  const token =
+    localStorage.getItem("token") || sessionStorage.getItem("token");
+  const userData =
+    localStorage.getItem("userData") || sessionStorage.getItem("userData");
+  return <Navigate to={token || userData ? "/editor" : "/"} replace />;
+};
 
 const App = () => {
   const location = useLocation();
@@ -183,6 +192,7 @@ const App = () => {
                         <Route path="/flasher" element={<ESP32Flasher />} />
 
                         <Route path="/autosave-demo" element={<AutoSaveDemo />} />
+                        <Route path="*" element={<FallbackRedirect />} />
                       </Routes>
                     </Suspense>
                   </Box>

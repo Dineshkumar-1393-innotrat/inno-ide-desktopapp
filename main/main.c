@@ -6,15 +6,28 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "driver/usb_serial_jtag.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led_strip.h"
 
-// Hardware Pin Definitions
+// Hardware Pin Definitions & Target Architecture Compatibility
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "driver/usb_serial_jtag.h"
+#define HAS_USB_SERIAL_JTAG 1
 #define LED_GPIO GPIO_NUM_48
 #define LED_GPIO_STANDARD GPIO_NUM_2
+#elif CONFIG_IDF_TARGET_ESP32C3
+#include "driver/usb_serial_jtag.h"
+#define HAS_USB_SERIAL_JTAG 1
+#define LED_GPIO GPIO_NUM_8
+#define LED_GPIO_STANDARD GPIO_NUM_2
+#else
+#define HAS_USB_SERIAL_JTAG 0
+#define LED_GPIO GPIO_NUM_2
+#define LED_GPIO_STANDARD GPIO_NUM_2
+#endif
+
 #define LED_COUNT 1
 #define COMMAND_BUFFER_SIZE 64
 
@@ -29,7 +42,9 @@ static volatile bool s_blink_enabled = true;
 static void send_serial_ack(const char *msg)
 {
     size_t len = strlen(msg);
+#if HAS_USB_SERIAL_JTAG
     usb_serial_jtag_write_bytes(msg, len, pdMS_TO_TICKS(50));
+#endif
     uart_write_bytes(UART_NUM_0, msg, len);
 }
 
@@ -94,9 +109,12 @@ static void poll_serial(char *buf, size_t *idx, size_t max_len)
     uint8_t byte = 0;
     while (true) {
         int read_count = 0;
+#if HAS_USB_SERIAL_JTAG
         if (usb_serial_jtag_read_bytes(&byte, 1, 0) > 0) {
             read_count = 1;
-        } else if (uart_read_bytes(UART_NUM_0, &byte, 1, 0) > 0) {
+        } else
+#endif
+        if (uart_read_bytes(UART_NUM_0, &byte, 1, 0) > 0) {
             read_count = 1;
         }
         if (read_count == 0) break;
@@ -142,11 +160,13 @@ void app_main(void)
     ESP_ERROR_CHECK(led_strip_clear(s_strip));
     ESP_ERROR_CHECK(led_strip_refresh(s_strip));
 
+#if HAS_USB_SERIAL_JTAG
     usb_serial_jtag_driver_config_t usb_config = {
         .tx_buffer_size = 1024,
         .rx_buffer_size = 1024,
     };
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
+#endif
 
     uart_config_t uart_config = {
         .baud_rate = 115200,

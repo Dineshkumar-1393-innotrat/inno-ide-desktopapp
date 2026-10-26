@@ -238,44 +238,8 @@ class WorkflowValidator {
       return { allowed: true };
     }
 
-    // Step 7: Flash requires validated Code and physical hardware
+    // Step 7: Flash stage - allow hardware flashing directly without blocking workflow popups
     if (stage === WorkflowStage.FLASH) {
-      if (!this.isProjectComplete(resolvedContext)) {
-        return this.createOrderViolation(
-          'Flash',
-          'Create Project',
-          'Flash operation cannot start.',
-          'No project workspace exists.',
-          'Please create a project first.',
-          'open-create-project',
-          '/editor',
-          resolvedContext
-        );
-      }
-      if (!this.isProductComplete(resolvedContext)) {
-        return this.createOrderViolation(
-          'Flash',
-          'Define Product',
-          'Flash operation cannot start.',
-          'Target product and hardware MCU definitions are missing.',
-          'Define the Product and target hardware first.',
-          'open-define-product',
-          '/editor',
-          resolvedContext
-        );
-      }
-      if (!this.isCodeComplete(resolvedContext)) {
-        return this.createOrderViolation(
-          'Flash',
-          'Write Code',
-          'Flash operation cannot start.',
-          'Firmware code must be written and validated before it can be flashed to hardware.',
-          'Resolve code issues and compile before flashing.',
-          'navigate-stage',
-          '/editor',
-          resolvedContext
-        );
-      }
       return { allowed: true };
     }
 

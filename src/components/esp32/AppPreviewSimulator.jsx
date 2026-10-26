@@ -151,11 +151,23 @@ export default function AppPreviewSimulator({
               >
                 {w.type === "switch" && (() => {
                   const locWidget = (visibleWidgets || []).find((item) => item.type === "location");
-                  const allGeologs = (Array.isArray(locWidget?.locationHistory) ? [...locWidget.locationHistory] : [])
-                    .filter((h) => !isStaleTestGeolog(h))
+                  const rawHistory = [
+                    ...(Array.isArray(locWidget?.locationHistory) ? locWidget.locationHistory : []),
+                    ...(Array.isArray(w.locationHistory) ? w.locationHistory : []),
+                  ];
+                  if (w.lastOnLocation && !rawHistory.some((h) => (h.id && h.id === w.lastOnLocation.id) || (h.timestamp === w.lastOnLocation.timestamp && h.event === "ON"))) {
+                    rawHistory.push(w.lastOnLocation);
+                  }
+                  if (w.lastOffLocation && !rawHistory.some((h) => (h.id && h.id === w.lastOffLocation.id) || (h.timestamp === w.lastOffLocation.timestamp && h.event === "OFF"))) {
+                    rawHistory.push(w.lastOffLocation);
+                  }
+                  if (locWidget?.lastLocation && !rawHistory.some((h) => h.id && h.id === locWidget.lastLocation.id)) {
+                    rawHistory.push(locWidget.lastLocation);
+                  }
+
+                  const switchLogs = rawHistory
+                    .filter((h) => h && (h.event === "ON" || h.event === "OFF" || h.action === "ON" || h.action === "OFF") && !isStaleTestGeolog(h))
                     .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
-                  const switchOnLoc = w.lastOnLocation || (locWidget?.lastLocation?.event === "ON" ? locWidget.lastLocation : null) || (allGeologs.find((h) => h.event === "ON") || null);
-                  const switchOffLoc = w.lastOffLocation || (locWidget?.lastLocation?.event === "OFF" ? locWidget.lastLocation : null) || (allGeologs.find((h) => h.event === "OFF") || null);
 
                   return (
                     <VStack align="stretch" spacing={2}>
@@ -175,117 +187,86 @@ export default function AppPreviewSimulator({
                         <Text fontWeight="semibold">Location required for ON/OFF logging</Text>
                       </HStack>
 
-                      {/* Live ON and OFF Timing & Location on Switch Widget */}
+                      {/* Cumulative Multiple Switch Logs */}
                       <VStack align="stretch" spacing={1.5} pt={1} borderTop="1px solid" borderColor="gray.100">
-                        {/* ON Timing & Location */}
-                        <Box
-                          p={2}
-                          bg="green.50"
-                          borderRadius="md"
-                          border="1px solid"
-                          borderColor={switchOnLoc ? "green.300" : "gray.200"}
-                        >
-                          <HStack justify="space-between" align="center" mb={0.5}>
-                            <HStack spacing={1}>
-                              <Box w="6px" h="6px" borderRadius="full" bg={switchOnLoc ? "green.500" : "gray.400"} />
-                              <Text fontSize="9px" fontWeight="extrabold" color={switchOnLoc ? "green.700" : "gray.400"} textTransform="uppercase">
-                                Switch ON Timing & Location
-                              </Text>
-                            </HStack>
-                            <Text fontSize="9px" fontWeight="bold" color={switchOnLoc ? "green.600" : "gray.400"} fontFamily="monospace">
-                              {switchOnLoc ? formatGeologTime(switchOnLoc) : "--:--:--"}
-                            </Text>
-                          </HStack>
-                          {switchOnLoc ? (
-                            <HStack justify="space-between" align="center">
-                              <Text fontSize="10px" fontWeight="bold" color="green.800" noOfLines={1}>
-                                📍 {switchOnLoc.city || "Logged Location"}
-                              </Text>
-                              <Text fontSize="8px" fontWeight="bold" color="green.600">
-                                Acc: {switchOnLoc.accuracy || 12}m
-                              </Text>
-                            </HStack>
-                          ) : (
-                            <Text fontSize="9px" color="gray.400" fontStyle="italic">
-                              No switch ON event recorded yet
+                        <HStack justify="space-between" align="center" px={0.5}>
+                          <Text fontSize="9px" fontWeight="extrabold" color="gray.600" textTransform="uppercase" letterSpacing="0.5px">
+                            Switch Logs ({switchLogs.length})
+                          </Text>
+                          {switchLogs.length > 2 && (
+                            <Text fontSize="8px" color="gray.400" fontWeight="semibold">
+                              Scroll for more ↓
                             </Text>
                           )}
-                          {switchOnLoc?.lat && (
-                            <HStack justify="space-between" align="center" mt={0.5}>
-                              <Text fontSize="8px" color="gray.400" fontFamily="monospace">
-                                {switchOnLoc.lat}° N, {switchOnLoc.lng}° E
-                              </Text>
-                              <Text
-                                as="a"
-                                href={`https://www.google.com/maps?q=${switchOnLoc.lat},${switchOnLoc.lng}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                fontSize="8px"
-                                fontWeight="bold"
-                                color="green.500"
-                                _hover={{ textDecoration: "underline" }}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                View Map ↗
-                              </Text>
-                            </HStack>
-                          )}
-                        </Box>
+                        </HStack>
 
-                        {/* OFF Timing & Location */}
-                        <Box
-                          p={2}
-                          bg="red.50"
-                          borderRadius="md"
-                          border="1px solid"
-                          borderColor={switchOffLoc ? "red.300" : "gray.200"}
-                        >
-                          <HStack justify="space-between" align="center" mb={0.5}>
-                            <HStack spacing={1}>
-                              <Box w="6px" h="6px" borderRadius="full" bg={switchOffLoc ? "red.500" : "gray.400"} />
-                              <Text fontSize="9px" fontWeight="extrabold" color={switchOffLoc ? "red.700" : "gray.400"} textTransform="uppercase">
-                                Switch OFF Timing & Location
-                              </Text>
-                            </HStack>
-                            <Text fontSize="9px" fontWeight="bold" color={switchOffLoc ? "red.600" : "gray.400"} fontFamily="monospace">
-                              {switchOffLoc ? formatGeologTime(switchOffLoc) : "--:--:--"}
-                            </Text>
-                          </HStack>
-                          {switchOffLoc ? (
-                            <HStack justify="space-between" align="center">
-                              <Text fontSize="10px" fontWeight="bold" color="red.800" noOfLines={1}>
-                                📍 {switchOffLoc.city || "Logged Location"}
-                              </Text>
-                              <Text fontSize="8px" fontWeight="bold" color="red.600">
-                                Acc: {switchOffLoc.accuracy || 10}m
-                              </Text>
-                            </HStack>
-                          ) : (
+                        {switchLogs.length === 0 ? (
+                          <Box p={3} bg="gray.50" borderRadius="md" border="1px dashed" borderColor="gray.200" textAlign="center">
                             <Text fontSize="9px" color="gray.400" fontStyle="italic">
-                              No switch OFF event recorded yet
+                              No ON/OFF events recorded yet. Toggle switch to log location & timing.
                             </Text>
-                          )}
-                          {switchOffLoc?.lat && (
-                            <HStack justify="space-between" align="center" mt={0.5}>
-                              <Text fontSize="8px" color="gray.400" fontFamily="monospace">
-                                {switchOffLoc.lat}° N, {switchOffLoc.lng}° E
-                              </Text>
-                              <Text
-                                as="a"
-                                href={`https://www.google.com/maps?q=${switchOffLoc.lat},${switchOffLoc.lng}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                fontSize="8px"
-                                fontWeight="bold"
-                                color="red.500"
-                                _hover={{ textDecoration: "underline" }}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                View Map ↗
-                              </Text>
-                            </HStack>
-                          )}
-                        </Box>
+                          </Box>
+                        ) : (
+                          <VStack align="stretch" spacing={1.5} maxH="280px" overflowY="auto" pr={0.5}>
+                            {switchLogs.map((item, idx) => {
+                              const isON = item.event === "ON" || item.action === "ON";
+                              const lat = item.lat != null ? parseFloat(item.lat) : (item.latitude != null ? parseFloat(item.latitude) : null);
+                              const lng = item.lng != null ? parseFloat(item.lng) : (item.longitude != null ? parseFloat(item.longitude) : null);
+                              return (
+                                <Box
+                                  key={item.id || `log-${idx}-${item.time || item.timestamp}`}
+                                  p={2}
+                                  bg={isON ? "green.50" : "red.50"}
+                                  borderRadius="md"
+                                  border="1px solid"
+                                  borderColor={isON ? "green.300" : "red.300"}
+                                >
+                                  <HStack justify="space-between" align="center" mb={0.5}>
+                                    <HStack spacing={1}>
+                                      <Box w="6px" h="6px" borderRadius="full" bg={isON ? "green.500" : "red.500"} />
+                                      <Text fontSize="9px" fontWeight="extrabold" color={isON ? "green.700" : "red.700"} textTransform="uppercase">
+                                        {isON ? "Switch ON Timing & Location" : "Switch OFF Timing & Location"}
+                                      </Text>
+                                    </HStack>
+                                    <Text fontSize="9px" fontWeight="bold" color={isON ? "green.600" : "red.600"} fontFamily="monospace">
+                                      {formatGeologTime(item)}
+                                    </Text>
+                                  </HStack>
+
+                                  <HStack justify="space-between" align="center">
+                                    <Text fontSize="10px" fontWeight="bold" color={isON ? "green.800" : "red.800"} noOfLines={1}>
+                                      📍 {item.city || (isON ? "Switch ON" : "Switch OFF")}
+                                    </Text>
+                                    <Text fontSize="8px" fontWeight="bold" color={isON ? "green.600" : "red.600"}>
+                                      Acc: {item.accuracy != null ? item.accuracy : (isON ? 12 : 10)}m
+                                    </Text>
+                                  </HStack>
+
+                                  {lat != null && lng != null && (
+                                    <HStack justify="space-between" align="center" mt={0.5}>
+                                      <Text fontSize="8px" color="gray.400" fontFamily="monospace">
+                                        {lat.toFixed(4)}° N, {lng.toFixed(4)}° E
+                                      </Text>
+                                      <Text
+                                        as="a"
+                                        href={`https://www.google.com/maps?q=${lat},${lng}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        fontSize="8px"
+                                        fontWeight="bold"
+                                        color={isON ? "green.600" : "red.600"}
+                                        _hover={{ textDecoration: "underline" }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        View Map ↗
+                                      </Text>
+                                    </HStack>
+                                  )}
+                                </Box>
+                              );
+                            })}
+                          </VStack>
+                        )}
                       </VStack>
                     </VStack>
                   );

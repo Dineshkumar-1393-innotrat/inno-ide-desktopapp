@@ -57,6 +57,7 @@ import { API } from '@/config';
 import { Button, useToast } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { sanitizeRoute } from "../hooks/useRouteRestoration";
 import axios from "axios";
 
 const AuthButton = () => {
@@ -82,10 +83,13 @@ const AuthButton = () => {
       if (userDataStr) {
         try { uId = JSON.parse(userDataStr)?.userId; } catch (e) {}
       }
-      const currentPath = window.location.pathname;
-      if (uId && currentPath && currentPath !== "/" && currentPath !== "/logout") {
-        localStorage.setItem(`innoide:last_active_route:${uId}`, currentPath);
-        localStorage.setItem("innoide:last_active_route", currentPath);
+      const rawPath = (typeof window !== "undefined" && window.location.hash)
+        ? window.location.hash.replace(/^#/, "").split("?")[0]
+        : (window.location.pathname || "");
+      const validPath = sanitizeRoute(rawPath);
+      if (uId && validPath) {
+        localStorage.setItem(`innoide:last_active_route:${uId}`, validPath);
+        localStorage.setItem("innoide:last_active_route", JSON.stringify({ path: validPath, ts: Date.now() }));
       }
 
       await axios.post(`${API.MAIN}/api/v1/auth/logout`, { token });

@@ -29,7 +29,14 @@ const ValidationViolationModal = ({
   onNavigate,
   onAutoFix,
 }) => {
-  if (!violation) return null;
+  if (
+    !violation ||
+    violation.message === 'Flash operation cannot start.' ||
+    violation.currentStage === 'Flash' ||
+    violation.blockingAction === 'flash.start'
+  ) {
+    return null;
+  }
 
   // 1. Resolve Target / Required Stage
   let rawRequiredStage = violation.requiredStage || violation.targetScreen || '';

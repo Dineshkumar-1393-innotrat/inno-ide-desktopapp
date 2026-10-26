@@ -150,8 +150,62 @@ export const getStandaloneHtmlContent = ({
           </div>
         ` : widgets.filter(w => w.visible !== false).map(w => {
         if (w.type === 'switch') {
-          const switchOnLoc = w.lastOnLocation || initialOnLoc;
-          const switchOffLoc = w.lastOffLocation || initialOffLoc;
+          // Gather all switch logs for this widget or from allGeologs
+          const rawHist = (Array.isArray(w.locationHistory) && w.locationHistory.length > 0)
+            ? w.locationHistory
+            : allGeologs;
+          const switchLogs = rawHist
+            .filter(g => (g.event === 'ON' || g.event === 'OFF' || g.action === 'ON' || g.action === 'OFF') && !isStaleTestGeolog(g))
+            .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
+
+          // If no history in array yet but lastOnLocation/lastOffLocation/initial exist, seed them
+          if (switchLogs.length === 0) {
+            const seedOff = w.lastOffLocation || initialOffLoc;
+            const seedOn = w.lastOnLocation || initialOnLoc;
+            if (seedOff) switchLogs.push(seedOff);
+            if (seedOn && (!seedOff || seedOn.id !== seedOff.id)) switchLogs.push(seedOn);
+            switchLogs.sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
+          }
+
+          const renderLogCardHtml = (item) => {
+            const isON = item.event === 'ON' || item.action === 'ON';
+            const bg = isON ? '#f0fdf4' : '#fef2f2';
+            const border = isON ? '#bbf7d0' : '#fecaca';
+            const dotColor = isON ? '#22c55e' : '#ef4444';
+            const titleColor = isON ? '#15803d' : '#b91c1c';
+            const timeColor = isON ? '#16a34a' : '#dc2626';
+            const cityColor = isON ? '#14532d' : '#7f1d1d';
+            const accColor = isON ? '#16a34a' : '#dc2626';
+            const titleText = isON ? 'SWITCH ON TIMING & LOCATION' : 'SWITCH OFF TIMING & LOCATION';
+            const timeText = formatGeologTime(item);
+            const cityText = item.city || (isON ? 'Switch ON' : 'Switch OFF');
+            const accText = item.accuracy != null ? ('Acc: ' + item.accuracy + 'm') : '';
+            const lat = item.lat != null ? parseFloat(item.lat) : (item.latitude != null ? parseFloat(item.latitude) : null);
+            const lng = item.lng != null ? parseFloat(item.lng) : (item.longitude != null ? parseFloat(item.longitude) : null);
+            const coordsText = (lat != null && lng != null) ? (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E') : '';
+            const mapUrl = (lat != null && lng != null) ? ('https://www.google.com/maps?q=' + lat + ',' + lng) : '#';
+            return `
+              <div class="switch-log-entry" style="background: ${bg}; border: 1px solid ${border}; border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 9px; font-weight: 800; color: ${titleColor}; display: flex; align-items: center; gap: 4px; text-transform: uppercase;">
+                    <span style="width: 6px; height: 6px; border-radius: 50%; background: ${dotColor};"></span> ${titleText}
+                  </span>
+                  <span style="font-size: 9px; font-weight: 700; color: ${timeColor}; font-family: monospace;">
+                    ${timeText}
+                  </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
+                  <span style="font-size: 10px; font-weight: 700; color: ${cityColor};">📍 <span>${cityText}</span></span>
+                  <span style="font-size: 8px; color: ${accColor}; font-weight: 700;">${accText}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 8px; color: #64748b; font-family: monospace;">${coordsText}</span>
+                  ${coordsText ? `<a href="${mapUrl}" target="_blank" style="font-size: 8px; font-weight: 700; color: ${timeColor}; text-decoration: none;">View Map ↗</a>` : ''}
+                </div>
+              </div>
+            `;
+          };
+
           return `
             <div class="card ${w.state ? 'glow-blue' : ''}" id="card-${w.id}" style="${w.backgroundColor ? `background: ${w.backgroundColor};` : ''}${w.cornerRadius ? `border-radius: ${w.cornerRadius}px;` : ''}">
               <div class="row">
@@ -168,50 +222,20 @@ export const getStandaloneHtmlContent = ({
                 <span>📍</span> <span id="switch-hint-text-${w.id}">Location required for ON/OFF logging</span>
               </div>
 
-              <!-- LIVE ON & OFF TIMING AND LOCATION DISPLAY -->
+              <!-- LIVE ON & OFF TIMING AND LOCATION DISPLAY (MULTIPLE LOGS) -->
               <div id="switch-telemetry-${w.id}" style="margin-top: 8px; border-top: 1px solid #f1f5f9; padding-top: 8px; display: flex; flex-direction: column; gap: 6px;">
-                <!-- ON Timing & Location -->
-                <div id="switch-on-row-${w.id}" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 9px; font-weight: 800; color: #15803d; display: flex; align-items: center; gap: 4px; text-transform: uppercase;">
-                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #22c55e;"></span> SWITCH ON TIMING & LOCATION
-                    </span>
-                    <span id="switch-on-time-${w.id}" style="font-size: 9px; font-weight: 700; color: #16a34a; font-family: monospace;">
-                      ${switchOnLoc ? formatGeologTime(switchOnLoc) : '--:--:--'}
-                    </span>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
-                    <span style="font-size: 10px; font-weight: 700; color: #14532d;">📍 <span id="switch-on-city-${w.id}">${switchOnLoc?.city || 'No ON event recorded yet'}</span></span>
-                    <span id="switch-on-acc-${w.id}" style="font-size: 8px; color: #16a34a; font-weight: 700;">${switchOnLoc ? ('Acc: ' + (switchOnLoc.accuracy != null ? switchOnLoc.accuracy : '12') + 'm') : ''}</span>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span id="switch-on-coords-${w.id}" style="font-size: 8px; color: #64748b; font-family: monospace;">
-                      ${switchOnLoc?.lat ? (parseFloat(switchOnLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOnLoc.lng).toFixed(4) + '° E') : ''}
-                    </span>
-                    <a id="switch-on-map-link-${w.id}" href="${switchOnLoc?.lat ? ('https://www.google.com/maps?q=' + switchOnLoc.lat + ',' + switchOnLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #16a34a; text-decoration: none; display: ${switchOnLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
-                  </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 1px;">
+                  <span style="font-size: 9px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Switch Logs (<span id="switch-logs-count-${w.id}">${switchLogs.length}</span>)
+                  </span>
+                  ${switchLogs.length > 2 ? `<span style="font-size: 8px; color: #94a3b8; font-weight: 600;">Scroll for more ↓</span>` : ''}
                 </div>
-
-                <!-- OFF Timing & Location -->
-                <div id="switch-off-row-${w.id}" style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 9px; font-weight: 800; color: #b91c1c; display: flex; align-items: center; gap: 4px; text-transform: uppercase;">
-                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> SWITCH OFF TIMING & LOCATION
-                    </span>
-                    <span id="switch-off-time-${w.id}" style="font-size: 9px; font-weight: 700; color: #dc2626; font-family: monospace;">
-                      ${switchOffLoc ? formatGeologTime(switchOffLoc) : '--:--:--'}
-                    </span>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">
-                    <span style="font-size: 10px; font-weight: 700; color: #7f1d1d;">📍 <span id="switch-off-city-${w.id}">${switchOffLoc?.city || 'No OFF event recorded yet'}</span></span>
-                    <span id="switch-off-acc-${w.id}" style="font-size: 8px; color: #dc2626; font-weight: 700;">${switchOffLoc ? ('Acc: ' + (switchOffLoc.accuracy != null ? switchOffLoc.accuracy : '10') + 'm') : ''}</span>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span id="switch-off-coords-${w.id}" style="font-size: 8px; color: #64748b; font-family: monospace;">
-                      ${switchOffLoc?.lat ? (parseFloat(switchOffLoc.lat).toFixed(4) + '° N, ' + parseFloat(switchOffLoc.lng).toFixed(4) + '° E') : ''}
-                    </span>
-                    <a id="switch-off-map-link-${w.id}" href="${switchOffLoc?.lat ? ('https://www.google.com/maps?q=' + switchOffLoc.lat + ',' + switchOffLoc.lng) : '#'}" target="_blank" style="font-size: 8px; font-weight: 700; color: #dc2626; text-decoration: none; display: ${switchOffLoc?.lat ? 'inline' : 'none'};">View Map ↗</a>
-                  </div>
+                <div id="switch-logs-list-${w.id}" style="display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; padding-right: 2px;">
+                  ${switchLogs.length === 0 ? `
+                    <div id="switch-logs-empty-${w.id}" style="font-size: 9px; color: #94a3b8; text-align: center; padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; font-style: italic;">
+                      No ON/OFF events recorded yet. Toggle switch to log location & timing.
+                    </div>
+                  ` : switchLogs.map(renderLogCardHtml).join('')}
                 </div>
               </div>
             </div>`;
@@ -883,9 +907,54 @@ export const getStandaloneHtmlContent = ({
     }
 
     var clientLocationHistory = (${JSON.stringify(
-      (widgets.find(w => w.type === 'location')?.locationHistory || []).filter(g => !isStaleTestGeolog(g))
+      widgets.reduce((acc, w) => {
+        if (Array.isArray(w.locationHistory)) acc.push(...w.locationHistory);
+        if (w.lastOnLocation) acc.push(w.lastOnLocation);
+        if (w.lastOffLocation) acc.push(w.lastOffLocation);
+        if (w.lastLocation) acc.push(w.lastLocation);
+        return acc;
+      }, []).filter(g => !isStaleTestGeolog(g))
     )}).filter(function(g) { return !isStaleClientGeolog(g); });
     clientLocationHistory.sort(function(a, b) { return getClientLogTimestampMs(b) - getClientLogTimestampMs(a); });
+
+    function renderSwitchLogEntry(item) {
+      if (!item) return '';
+      var isON = item.event === 'ON' || item.action === 'ON';
+      var bg = isON ? '#f0fdf4' : '#fef2f2';
+      var border = isON ? '#bbf7d0' : '#fecaca';
+      var dotColor = isON ? '#22c55e' : '#ef4444';
+      var titleColor = isON ? '#15803d' : '#b91c1c';
+      var timeColor = isON ? '#16a34a' : '#dc2626';
+      var cityColor = isON ? '#14532d' : '#7f1d1d';
+      var accColor = isON ? '#16a34a' : '#dc2626';
+      var titleText = isON ? 'SWITCH ON TIMING & LOCATION' : 'SWITCH OFF TIMING & LOCATION';
+      var timeText = formatClientLogTime(item);
+      var cityText = item.city || (isON ? 'Switch ON' : 'Switch OFF');
+      var accText = item.accuracy != null ? ('Acc: ' + item.accuracy + 'm') : '';
+      var lat = item.lat != null ? parseFloat(item.lat) : (item.latitude != null ? parseFloat(item.latitude) : null);
+      var lng = item.lng != null ? parseFloat(item.lng) : (item.longitude != null ? parseFloat(item.longitude) : null);
+      var coordsText = (lat != null && lng != null) ? (lat.toFixed(4) + '° N, ' + lng.toFixed(4) + '° E') : '';
+      var mapUrl = (lat != null && lng != null) ? ('https://www.google.com/maps?q=' + lat + ',' + lng) : '#';
+
+      return '<div class="switch-log-entry" style="background: ' + bg + '; border: 1px solid ' + border + '; border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px;">' +
+        '<div style="display: flex; justify-content: space-between; align-items: center;">' +
+          '<span style="font-size: 9px; font-weight: 800; color: ' + titleColor + '; display: flex; align-items: center; gap: 4px; text-transform: uppercase;">' +
+            '<span style="width: 6px; height: 6px; border-radius: 50%; background: ' + dotColor + ';"></span> ' + titleText +
+          '</span>' +
+          '<span style="font-size: 9px; font-weight: 700; color: ' + timeColor + '; font-family: monospace;">' +
+            timeText +
+          '</span>' +
+        '</div>' +
+        '<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1px;">' +
+          '<span style="font-size: 10px; font-weight: 700; color: ' + cityColor + ';">📍 <span>' + cityText + '</span></span>' +
+          '<span style="font-size: 8px; color: ' + accColor + '; font-weight: 700;">' + accText + '</span>' +
+        '</div>' +
+        '<div style="display: flex; justify-content: space-between; align-items: center;">' +
+          '<span style="font-size: 8px; color: #64748b; font-family: monospace;">' + coordsText + '</span>' +
+          (coordsText ? '<a href="' + mapUrl + '" target="_blank" style="font-size: 8px; font-weight: 700; color: ' + timeColor + '; text-decoration: none;">View Map ↗</a>' : '') +
+        '</div>' +
+      '</div>';
+    }
 
     function formatClientLogTime(item) {
       if (!item) return '';
@@ -1062,6 +1131,28 @@ export const getStandaloneHtmlContent = ({
         document.querySelectorAll('[id^="off-acc-row-"]').forEach(function(el) { el.style.display = 'none'; });
         document.querySelectorAll('[id^="off-empty-"]').forEach(function(el) { el.style.display = 'block'; });
       }
+
+      // 2b. Update Switch widgets with all cumulative switch logs (Multiple Logs List)
+      var switchLogEvents = clientLocationHistory.filter(function(item) {
+        return item && (item.event === 'ON' || item.event === 'OFF' || item.action === 'ON' || item.action === 'OFF') && !isStaleClientGeolog(item);
+      });
+      switchLogEvents.sort(function(a, b) {
+        return getClientLogTimestampMs(b) - getClientLogTimestampMs(a);
+      });
+
+      document.querySelectorAll('[id^="switch-logs-list-"]').forEach(function(listEl) {
+        var wid = listEl.id.replace('switch-logs-list-', '');
+        var countEl = document.getElementById('switch-logs-count-' + wid);
+        if (countEl) countEl.innerText = switchLogEvents.length;
+
+        if (switchLogEvents.length === 0) {
+          listEl.innerHTML = '<div id="switch-logs-empty-' + wid + '" style="font-size: 9px; color: #94a3b8; text-align: center; padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; font-style: italic;">No ON/OFF events recorded yet. Toggle switch to log location & timing.</div>';
+        } else {
+          listEl.innerHTML = switchLogEvents.map(function(item) {
+            return renderSwitchLogEntry(item);
+          }).join('');
+        }
+      });
 
       // 3. History List
       if (clientLocationHistory.length > 0) {
@@ -2341,10 +2432,34 @@ export const getStandaloneHtmlContent = ({
       // 6b. Location-Mismatch Verification Check
       // Retrieve the last successfully executed operation location
       var prevOperationLoc = getLastSuccessfulOperationLocation();
-      var mismatch = checkLocationMismatch(prevOperationLoc, geoEvent, 100);
+
+      // Look up the configured threshold from the matching rule for this widget
+      var matchedRule = rules.find(function(r) {
+        return r.enabled && (r.triggerWidgetId === id || r.trigger === id) &&
+          (r.conditionType === 'Location Mismatch on Turn OFF (OTP Guard)' ||
+           (r.condition && r.condition.indexOf('Location Mismatch') !== -1) ||
+           (r.condition && r.condition.indexOf('OTP') !== -1));
+      });
+      var ruleThreshold = matchedRule && matchedRule.conditionThreshold !== undefined
+        ? parseFloat(matchedRule.conditionThreshold) || 100
+        : 100;
+
+      var mismatch = checkLocationMismatch(prevOperationLoc, geoEvent, ruleThreshold);
 
       var isSwitchOff = !checked;
-      var requiresOtp = isSwitchOff && mismatch.isMismatch;
+      var hasOtpRule = Boolean(matchedRule);
+
+      // OTP is required on switch OFF when an OTP Guard rule is configured AND:
+      //   a) No previous ON-location recorded yet (first switch OFF guard), OR
+      //   b) Raw GPS distance from the ON location exceeds the configured threshold
+      //      (uses the Distance / Geofence Radius value directly — no accuracy-buffer inflation)
+      var rawDistance = mismatch.distance; // metres, or null if coords missing
+      var locationMismatchExceedsThreshold =
+        !prevOperationLoc ||              // no prior location → always guard
+        rawDistance == null ||            // couldn't compute distance → guard
+        rawDistance > ruleThreshold;      // actual movement > configured threshold (e.g. 1 m)
+
+      var requiresOtp = isSwitchOff && hasOtpRule && locationMismatchExceedsThreshold;
       var verificationToken = null;
 
       if (requiresOtp) {
@@ -2354,7 +2469,10 @@ export const getStandaloneHtmlContent = ({
 
         // Keep switch visually in prior state while OTP verification is pending
         if (switchEl) switchEl.checked = !checked;
-        updateSwitchHint(id, 'Location mismatch detected (' + mismatch.distance + 'm) — OTP required for Switch OFF', 'pending');
+        var hintDistText = rawDistance != null
+          ? (' — moved ' + rawDistance + 'm (threshold: ' + ruleThreshold + 'm)')
+          : '';
+        updateSwitchHint(id, 'OTP required: location change detected' + hintDistText, 'pending');
 
         // Request OTP challenge from backend or fallback to local challenge
         var challengeData = null;
@@ -2389,8 +2507,8 @@ export const getStandaloneHtmlContent = ({
             deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
             currentLocation: geoEvent,
             previousLocation: prevOperationLoc,
-            distance: mismatch.distance,
-            threshold: mismatch.threshold || 100,
+            distance: rawDistance,
+            threshold: ruleThreshold,
             qrSession: qrSessionTimestamp || undefined,
             qrExpiresAt: qrExpiresAtTimestamp || (Date.now() + 1200000),
             expiresInSeconds: fallbackRemaining,

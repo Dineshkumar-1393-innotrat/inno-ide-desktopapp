@@ -48,30 +48,10 @@ export default function useFlashPipeline({
 
   // Run Flash Pipeline
   const handleStartFlash = useCallback(async () => {
-    // 1. Centralized InnoIDE Workflow Validation for Flash
+    // Clear any active workflow violation popups so flashing is never obstructed
     try {
-      const validationResult = await validationManager.validateAction(ValidationAction.FLASH_START, {
-        selectedDevice,
-        selectedPort: selectedDevice?.port,
-        hardware: {
-          port: selectedDevice?.port,
-          chip: selectedDevice?.chip,
-          connected: Boolean(selectedDevice?.port),
-        },
-        currentScreen: "Flasher",
-        action: "flash.start",
-      });
-
-      if (!validationResult.valid && validationResult.violations?.length > 0) {
-        const errorViolation = validationResult.violations.find((v) => v.severity === ValidationSeverity.ERROR);
-        if (errorViolation) {
-          validationManager.setActiveViolation(errorViolation);
-          return;
-        }
-      }
-    } catch (valErr) {
-      console.warn("[ESP32Flasher] Flash validation check warning:", valErr);
-    }
+      validationManager.clearActiveViolation();
+    } catch (_) {}
 
     if (!selectedDevice || !selectedDevice.port) {
       if (toast) {

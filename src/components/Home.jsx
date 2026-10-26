@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { API } from '@/config';
 import { useNavigate } from "react-router-dom";
+import { sanitizeRoute } from "../hooks/useRouteRestoration";
 import { motion } from "framer-motion";
 import {
   Box,
@@ -174,9 +175,9 @@ const Home = () => {
         });
 
         // Restore user's last active route if they were on a canvas or editor screen
-        const lastRoute = localStorage.getItem(`innoide:last_active_route:${uId}`) 
-          || localStorage.getItem("innoide:last_active_route");
-        const targetRoute = (lastRoute && lastRoute !== "/" && lastRoute !== "/logout") ? lastRoute : "/editor";
+        const userRoute = uId ? localStorage.getItem(`innoide:last_active_route:${uId}`) : null;
+        const globalRoute = localStorage.getItem("innoide:last_active_route");
+        const targetRoute = sanitizeRoute(userRoute) || sanitizeRoute(globalRoute) || "/editor";
 
         navigate(targetRoute, { state: { userId: uId } });
       } else {
@@ -361,9 +362,9 @@ const Home = () => {
                               duration: 3000,
                             });
 
-                            const lastRoute = localStorage.getItem(`innoide:last_active_route:${uId}`) 
-                              || localStorage.getItem("innoide:last_active_route");
-                            const targetRoute = (lastRoute && lastRoute !== "/" && lastRoute !== "/logout") ? lastRoute : "/editor";
+                            const userRoute = uId ? localStorage.getItem(`innoide:last_active_route:${uId}`) : null;
+                            const globalRoute = localStorage.getItem("innoide:last_active_route");
+                            const targetRoute = sanitizeRoute(userRoute) || sanitizeRoute(globalRoute) || "/editor";
 
                             navigate(targetRoute, { state: { userId: uId } });
                           } else {

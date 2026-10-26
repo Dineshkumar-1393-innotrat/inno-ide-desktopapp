@@ -108,10 +108,41 @@ def get_idf_path():
             return cand
     return ""
 
+def ensure_idf_environment():
+    """Ensure ESP-IDF environment variables (PATH, IDF_PYTHON_ENV_PATH, etc.) are loaded."""
+    if shutil.which("cmake") is not None and get_env("IDF_PATH"):
+        return
+
+    idf_path = get_idf_path()
+    if not idf_path:
+        return
+
+    if os.name == "nt":
+        export_bat = os.path.join(idf_path, "export.bat")
+        if os.path.isfile(export_bat):
+            try:
+                res = subprocess.run(
+                    f'call "{export_bat}" > nul && set',
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    cwd=idf_path,
+                    timeout=30
+                )
+                if res.returncode == 0:
+                    for line in res.stdout.splitlines():
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            os.environ[k] = v
+            except Exception:
+                pass
+
 def find_idf_py_executable():
     """Locate idf.py executable or Python script."""
     global last_idf_lookup_error
     last_idf_lookup_error = ""
+
+    ensure_idf_environment()
 
     # Prefer the selected ESP-IDF installation and its own Python virtualenv.
     idf_path = get_idf_path()
@@ -295,15 +326,28 @@ def ensure_reactive_firmware(code):
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "driver/usb_serial_jtag.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led_strip.h"
 
-// Hardware Pin Definitions
+// Hardware Pin Definitions & Target Architecture Compatibility
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "driver/usb_serial_jtag.h"
+#define HAS_USB_SERIAL_JTAG 1
 #define LED_GPIO {led_gpio}
 #define LED_GPIO_STANDARD GPIO_NUM_2
+#elif CONFIG_IDF_TARGET_ESP32C3
+#include "driver/usb_serial_jtag.h"
+#define HAS_USB_SERIAL_JTAG 1
+#define LED_GPIO GPIO_NUM_8
+#define LED_GPIO_STANDARD GPIO_NUM_2
+#else
+#define HAS_USB_SERIAL_JTAG 0
+#define LED_GPIO GPIO_NUM_2
+#define LED_GPIO_STANDARD GPIO_NUM_2
+#endif
+
 #define LED_COUNT 1
 #define COMMAND_BUFFER_SIZE 64
 
@@ -318,7 +362,9 @@ static volatile bool s_blink_enabled = true;
 static void send_serial_ack(const char *msg)
 {{
     size_t len = strlen(msg);
+#if HAS_USB_SERIAL_JTAG
     usb_serial_jtag_write_bytes(msg, len, pdMS_TO_TICKS(50));
+#endif
     uart_write_bytes(UART_NUM_0, msg, len);
 }}
 
@@ -383,9 +429,12 @@ static void poll_serial(char *buf, size_t *idx, size_t max_len)
     uint8_t byte = 0;
     while (true) {{
         int read_count = 0;
+#if HAS_USB_SERIAL_JTAG
         if (usb_serial_jtag_read_bytes(&byte, 1, 0) > 0) {{
             read_count = 1;
-        }} else if (uart_read_bytes(UART_NUM_0, &byte, 1, 0) > 0) {{
+        }} else
+#endif
+        if (uart_read_bytes(UART_NUM_0, &byte, 1, 0) > 0) {{
             read_count = 1;
         }}
         if (read_count == 0) break;
@@ -431,11 +480,13 @@ void app_main(void)
     ESP_ERROR_CHECK(led_strip_clear(s_strip));
     ESP_ERROR_CHECK(led_strip_refresh(s_strip));
 
+#if HAS_USB_SERIAL_JTAG
     usb_serial_jtag_driver_config_t usb_config = {{
         .tx_buffer_size = 1024,
         .rx_buffer_size = 1024,
     }};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
+#endif
 
     uart_config_t uart_config = {{
         .baud_rate = 115200,
@@ -945,17 +996,24 @@ def start_monitor(port, project_dir):
 
 def run_pipeline(url, target, port, project_dir, code_file=""):
     """Run full pipeline: fetch/read -> write -> set_target -> build -> flash (and STOP)."""
-    # Auto-detect chip from hardware if target is 'auto'
-    if target.lower() == "auto":
-        send_event("log", stream="system", log="[Pipeline] Target set to 'auto'. Detecting connected chip...")
+    # Auto-detect chip from hardware if port is available and target is auto/esp32
+    if port and target.lower() in ("auto", "esp32"):
+        send_event("log", stream="system", log=f"[Pipeline] Checking connected hardware chip on {port}...")
         detected = detect_chip(port)
         if detected and detected in ALLOWED_TARGETS:
-            send_event("log", stream="system", log=f"[Pipeline] Auto-detected chip: {detected}")
+            if target.lower() != detected:
+                send_event("log", stream="system", log=f"[Pipeline] Hardware chip on {port} is '{detected}' (overriding '{target}').")
+            else:
+                send_event("log", stream="system", log=f"[Pipeline] Auto-detected connected chip: {detected}")
             target = detected
-        else:
+        elif target.lower() == "auto":
             current = get_current_idf_target(project_dir)
             target = current if (current and current in ALLOWED_TARGETS) else "esp32s3"
             send_event("log", stream="system", log=f"[Pipeline] Could not auto-detect chip. Using '{target}'.")
+    elif target.lower() == "auto":
+        current = get_current_idf_target(project_dir)
+        target = current if (current and current in ALLOWED_TARGETS) else "esp32s3"
+        send_event("log", stream="system", log=f"[Pipeline] Could not auto-detect chip. Using '{target}'.")
 
     if target.lower() not in ALLOWED_TARGETS:
         send_event("error", stage="validation", message=f"Invalid target '{target}'. Allowed targets: {sorted(list(ALLOWED_TARGETS))}")
