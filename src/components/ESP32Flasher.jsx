@@ -87,10 +87,6 @@ export default function ESP32Flasher({
 
   // Active Wizard Step: 'connection' | 'devices' | 'compatibility' | 'flashing' | 'success' | 'app_builder'
   const [wizardStep, setWizardStepState] = useState(() => {
-    if (initialStep && initialStep !== "app_builder") {
-      return initialStep;
-    }
-    // Restore "app_builder" from localStorage only if the saved timestamp is < 30 min old
     try {
       const raw = localStorage.getItem("inno_flasher_active_step");
       if (raw) {
@@ -103,17 +99,21 @@ export default function ESP32Flasher({
             return parsed.step;
           }
         } catch {
-          if (raw !== "app_builder") return raw;
+          if (raw) return raw;
         }
       }
     } catch { }
-    return "connection";
+    return initialStep || "connection";
   });
 
-  // Sync wizardStep if initialStep prop changes
+  // Sync wizardStep ONLY when initialStep prop actually changes from its previous value
+  const prevInitialStepRef = useRef(initialStep);
   useEffect(() => {
-    if (initialStep && initialStep !== "app_builder") {
-      setWizardStepState(initialStep);
+    if (prevInitialStepRef.current !== initialStep) {
+      prevInitialStepRef.current = initialStep;
+      if (initialStep) {
+        setWizardStepState(initialStep);
+      }
     }
   }, [initialStep]);
 

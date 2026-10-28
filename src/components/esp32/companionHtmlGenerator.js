@@ -342,14 +342,14 @@ export const getStandaloneHtmlContent = ({
                   <span id="host-badge-${w.id}" style="font-size: 8px; font-weight: 700; background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px;">CALIBRATED</span>
                 </div>
                 <div id="host-city-${w.id}" style="font-size: 11px; font-weight: 700; color: #1e3a8a; margin-top: 2px;">
-                  📍 ${esp32Loc?.city || 'Calibrated Location'}${esp32Loc?.country ? ', ' + esp32Loc.country : ', India'}
+                  📍 ${esp32Loc?.city || 'Chennai Office (Little Mount)'}${esp32Loc?.country ? ', ' + esp32Loc.country : ', India'}
                 </div>
                 <div id="host-addr-${w.id}" style="font-size: 10px; color: #475569; line-height: 1.3;">
-                  ${esp32Loc?.address || 'Chennai, Tamil Nadu, India'}
+                  ${esp32Loc?.address || 'Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015'}
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
                   <span id="host-gps-${w.id}" style="font-size: 9px; color: #2563eb; font-family: monospace; font-weight: 600;">
-                    ${esp32Loc?.lat ? (esp32Loc.lat + '° N, ' + esp32Loc.lng + '° E') : '13.0147° N, 80.2242° E'}
+                    ${esp32Loc?.lat ? (esp32Loc.lat + '° N, ' + esp32Loc.lng + '° E') : '13.0185° N, 80.2227° E'}
                   </span>
                   <span id="host-source-${w.id}" style="font-size: 8px; color: #64748b;">
                     ${esp32Loc?.source ? '(' + esp32Loc.source.replace('IP Geolocation ', '') + ')' : '(Host Calibrated)'}
@@ -650,7 +650,7 @@ export const getStandaloneHtmlContent = ({
         <!-- Previous Location -->
         <div style="display: flex; flex-direction: column; gap: 1px;">
           <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Previous Operation Location</div>
-          <div id="otpPrevLocationText" style="font-size: 12px; font-weight: 600; color: #334155;">📍 Little Mount • 13.0147° N, 80.2242° E</div>
+          <div id="otpPrevLocationText" style="font-size: 12px; font-weight: 600; color: #334155;">📍 Chennai Office • 13.0185° N, 80.2227° E</div>
         </div>
         <!-- Current Location -->
         <div style="display: flex; flex-direction: column; gap: 1px;">
@@ -660,7 +660,7 @@ export const getStandaloneHtmlContent = ({
         <!-- Distance Alert -->
         <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 2px;">
           <span style="font-size: 11px; color: #64748b;">Distance Difference:</span>
-          <span id="otpDistanceText" style="font-size: 11px; font-weight: 800; color: #b45309;">~8.4 km (Threshold: 100m)</span>
+          <span id="otpDistanceText" style="font-size: 11px; font-weight: 800; color: #b45309;">~8.4 km (Threshold: 50m)</span>
         </div>
       </div>
 
@@ -730,13 +730,22 @@ export const getStandaloneHtmlContent = ({
           return;
         }
 
+        var locToSend = (extra && extra.location)
+          ? extra.location
+          : (typeof clientLocationHistory !== 'undefined' && clientLocationHistory.length > 0)
+            ? clientLocationHistory[0]
+            : (typeof lastRecordedLocation !== 'undefined' && lastRecordedLocation)
+              ? lastRecordedLocation
+              : undefined;
+
         const bodyObj = Object.assign({
           payload: cleanPayload || (isOff ? 'LED:0' : 'LED:1'),
           SwitchStatus: switchStatus,
           value: switchStatus === 1,
           port: COMPANION_PORT || 'COM9',
           qrSession: qrSessionTimestamp || undefined,
-          qrExpiresAt: qrExpiresAtTimestamp || undefined
+          qrExpiresAt: qrExpiresAtTimestamp || undefined,
+          location: locToSend
         }, extra || {});
         const bodyStr = JSON.stringify(bodyObj);
 
@@ -828,10 +837,36 @@ export const getStandaloneHtmlContent = ({
       rules.forEach(r => {
         if (!r.enabled) return;
         if (r.triggerWidgetId === widgetId || r.trigger === widgetId || r.triggerName === title) {
+          // Event match filter
+          if (r.event === 'on_turn_on' && !val) return;
+          if (r.event === 'on_turn_off' && Boolean(val)) return;
+
           let passed = true;
-          if (r.condition && r.condition.includes('>')) {
-            const num = parseFloat(r.condition.replace(/[^0-9.]/g, ''));
-            if (typeof val === 'number' && val <= num) passed = false;
+          const cond = r.conditionType || r.condition || 'Always';
+          const thresh = parseFloat(r.conditionThreshold || (r.condition ? r.condition.replace(/[^0-9.-]/g, '') : 0) || 0);
+
+          if (cond === 'Always' || cond.indexOf('Always') === 0) {
+            passed = true;
+          } else if (cond.indexOf('Value >') === 0 || (r.condition && r.condition.indexOf('>') !== -1 && r.condition.indexOf('Geofence') === -1)) {
+            if (typeof val === 'number' && val <= thresh) passed = false;
+          } else if (cond.indexOf('Value <') === 0 || (r.condition && r.condition.indexOf('<') !== -1 && r.condition.indexOf('Geofence') === -1)) {
+            if (typeof val === 'number' && val >= thresh) passed = false;
+          } else if (cond.indexOf('Value ==') === 0) {
+            const eqVal = r.conditionThreshold || '1';
+            passed = String(val) === String(eqVal) || (typeof val === 'boolean' && (val ? '1' : '0') === String(eqVal));
+          } else if (cond.indexOf('Value !=') === 0) {
+            const neqVal = r.conditionThreshold || '0';
+            passed = String(val) !== String(neqVal);
+          } else if (cond.indexOf('Within Geofence') !== -1 || cond.indexOf('Outside Geofence') !== -1) {
+            const prev = getLastSuccessfulOperationLocation();
+            const cur = clientLocationHistory && clientLocationHistory[0];
+            if (prev && cur && prev.lat != null && cur.lat != null) {
+              const d = calculateDistanceMeters(prev.lat, prev.lng, cur.lat, cur.lng);
+              const limit = thresh || 50;
+              passed = cond.indexOf('Within Geofence') !== -1 ? (d !== null && d <= limit) : (d !== null && d > limit);
+            } else {
+              passed = false;
+            }
           }
           if (passed) {
             execCounts[r.id] = (execCounts[r.id] || 0) + 1;
@@ -839,7 +874,10 @@ export const getStandaloneHtmlContent = ({
             if (el) el.innerText = 'Executions: ' + execCounts[r.id];
             const payload = (r.payload || '').replace('{state}', val ? '1' : '0').replace('{value}', val);
             addLog('⚡ [LOGIC] "' + r.name + '" -> TX: ' + payload + ' to ' + (r.targetHardware || r.target || 'Hardware'));
-            sendHardwareAction(payload, { ruleId: r.id, ruleName: r.name });
+            var curLoc = (typeof clientLocationHistory !== 'undefined' && clientLocationHistory.length > 0)
+              ? clientLocationHistory[0]
+              : (typeof lastRecordedLocation !== 'undefined' ? lastRecordedLocation : null);
+            sendHardwareAction(payload, { ruleId: r.id, ruleName: r.name, location: curLoc || undefined });
           }
         }
       });
@@ -916,6 +954,34 @@ export const getStandaloneHtmlContent = ({
       }, []).filter(g => !isStaleTestGeolog(g))
     )}).filter(function(g) { return !isStaleClientGeolog(g); });
     clientLocationHistory.sort(function(a, b) { return getClientLogTimestampMs(b) - getClientLogTimestampMs(a); });
+        // Constant Geofence Reference Coordinates: Chennai Office (~13.0185° N, ~80.2227° E)
+    const GEOFENCE_ORIGIN = Object.freeze({
+      name: "Chennai Office (Primary Location)",
+      organization: "Innotrat Labs",
+      lat: 13.0185,
+      lng: 80.2227,
+      latitude: 13.0185,
+      longitude: 80.2227,
+      city: "Little Mount, Saidapet",
+      locality: "Little Mount",
+      district: "Chennai",
+      state: "Tamil Nadu",
+      postalCode: "600015",
+      country: "India",
+      address: "Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015",
+      source: "Chennai Office (Primary Location)"
+    });
+    const CONSTANT_PRIMARY_LOCATION = GEOFENCE_ORIGIN;
+    const DEFAULT_LATITUDE = 13.0185;
+    const DEFAULT_LONGITUDE = 80.2227;
+
+    var serverInitialLocation = ${JSON.stringify(
+      (locWidget?.lastLocation?.event === 'ON' && !isStaleTestGeolog(locWidget.lastLocation))
+        ? locWidget.lastLocation
+        : (deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation)
+          ? deviceDetectedLocation
+          : (allGeologs.find(h => h.event === 'ON') || null))
+    )};
 
     function renderSwitchLogEntry(item) {
       if (!item) return '';
@@ -1561,6 +1627,34 @@ export const getStandaloneHtmlContent = ({
     var onOtpVerifiedCallback = null;
     var onOtpCancelledCallback = null;
 
+    function convertThresholdToMeters(threshold, unit) {
+      if (threshold === null || threshold === undefined || threshold === '') return null;
+      var num = Number(threshold);
+      if (isNaN(num) || !isFinite(num) || num < 0) return null;
+      var cleanUnit = String(unit || 'm').toLowerCase().trim();
+      switch (cleanUnit) {
+        case 'm':
+        case 'meter':
+        case 'meters':
+        case '':
+          return num;
+        case 'km':
+        case 'kilometer':
+        case 'kilometers':
+          return num * 1000;
+        case 'ft':
+        case 'feet':
+        case 'foot':
+          return num * 0.3048;
+        case 'mi':
+        case 'mile':
+        case 'miles':
+          return num * 1609.344;
+        default:
+          return null;
+      }
+    }
+
     function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
       if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
       var p1 = Number(lat1);
@@ -1579,45 +1673,52 @@ export const getStandaloneHtmlContent = ({
           Math.sin(dLon / 2) *
           Math.sin(dLon / 2);
       var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return Math.round(R * c);
+      // Return exact floating-point distance without premature integer rounding
+      return R * c;
     }
 
-    function checkLocationMismatch(prevLoc, curLoc, thresholdMeters) {
-      thresholdMeters = thresholdMeters || 100;
-      if (!prevLoc || (prevLoc.lat == null && prevLoc.latitude == null)) {
-        return { isMismatch: false, distance: 0, reason: 'NO_PREVIOUS_LOCATION' };
+    function checkLocationMismatch(curLoc, thresholdMeters) {
+      var effThresh = convertThresholdToMeters(thresholdMeters);
+      if (effThresh === null) effThresh = 50;
+
+      if (!curLoc || (curLoc.lat == null && curLoc.latitude == null) || (curLoc.lng == null && curLoc.longitude == null)) {
+        return { isMismatch: true, distance: null, threshold: effThresh, reason: 'MISSING_CURRENT_LOCATION' };
       }
-      if (!curLoc || (curLoc.lat == null && curLoc.latitude == null)) {
-        return { isMismatch: true, distance: null, reason: 'MISSING_CURRENT_LOCATION' };
+      var cLat = Number(curLoc.lat != null ? curLoc.lat : curLoc.latitude);
+      var cLng = Number(curLoc.lng != null ? curLoc.lng : curLoc.longitude);
+      if (isNaN(cLat) || isNaN(cLng) || cLat < -90 || cLat > 90 || cLng < -180 || cLng > 180) {
+        return { isMismatch: true, distance: null, threshold: effThresh, reason: 'INVALID_COORDINATES' };
       }
-      var pLat = prevLoc.lat != null ? prevLoc.lat : prevLoc.latitude;
-      var pLng = prevLoc.lng != null ? prevLoc.lng : prevLoc.longitude;
-      var cLat = curLoc.lat != null ? curLoc.lat : curLoc.latitude;
-      var cLng = curLoc.lng != null ? curLoc.lng : curLoc.longitude;
-      var rawDist = calculateDistanceMeters(pLat, pLng, cLat, cLng);
+      // Calculate distance strictly against GEOFENCE_ORIGIN
+      var rawDist = calculateDistanceMeters(GEOFENCE_ORIGIN.latitude, GEOFENCE_ORIGIN.longitude, cLat, cLng);
       if (rawDist === null) {
-        return { isMismatch: true, distance: null, reason: 'INVALID_COORDINATES' };
+        return { isMismatch: true, distance: null, threshold: effThresh, reason: 'INVALID_COORDINATES' };
       }
-      var pAcc = Number(prevLoc.accuracy || 0);
-      var cAcc = Number(curLoc.accuracy || 0);
-      var accuracyBuffer = Math.min(Math.max(pAcc, cAcc), 50);
-      var effectiveThreshold = thresholdMeters + accuracyBuffer;
+      // Boundary check: distanceMeters <= thresholdMeters -> allow; distanceMeters > thresholdMeters -> require OTP
       return {
-        isMismatch: rawDist > effectiveThreshold,
+        isMismatch: rawDist > effThresh,
         distance: rawDist,
-        threshold: thresholdMeters,
-        effectiveThreshold: effectiveThreshold
+        threshold: effThresh,
+        origin: GEOFENCE_ORIGIN
       };
     }
 
     function getLastSuccessfulOperationLocation() {
       if (Array.isArray(clientLocationHistory) && clientLocationHistory.length > 0) {
+        var onLoc = clientLocationHistory.find(function(h) {
+          return (h.event === 'ON' || h.action === 'ON') && !isStaleClientGeolog(h) && (h.lat != null || h.latitude != null);
+        });
+        if (onLoc) return onLoc;
+
         var found = clientLocationHistory.find(function(h) {
           return !isStaleClientGeolog(h) && (h.lat != null || h.latitude != null);
         });
         if (found) return found;
       }
-      return null;
+      if (serverInitialLocation && !isStaleClientGeolog(serverInitialLocation) && (serverInitialLocation.lat != null || serverInitialLocation.latitude != null)) {
+        return serverInitialLocation;
+      }
+      return CONSTANT_PRIMARY_LOCATION;
     }
 
     function quickFillDemoOtp() {
@@ -1699,7 +1800,7 @@ export const getStandaloneHtmlContent = ({
       if (distEl) {
         var dist = challengeData.distance != null ? challengeData.distance : 0;
         var distFormatted = dist < 1000 ? (dist + ' m') : ((dist / 1000).toFixed(1) + ' km');
-        distEl.innerText = '~' + distFormatted + ' (Threshold: ' + (challengeData.threshold || 100) + 'm)';
+        distEl.innerText = '~' + distFormatted + ' (Threshold: ' + (challengeData.threshold || 50) + 'm)';
       }
 
       if (devBox) {
@@ -2017,13 +2118,22 @@ export const getStandaloneHtmlContent = ({
             return resolve({ success: false, error: 'QR & OTP session expired. Please re-scan QR code.' });
           }
 
+          var locToSend = (extra && extra.location)
+            ? extra.location
+            : (typeof clientLocationHistory !== 'undefined' && clientLocationHistory.length > 0)
+              ? clientLocationHistory[0]
+              : (typeof lastRecordedLocation !== 'undefined' && lastRecordedLocation)
+                ? lastRecordedLocation
+                : undefined;
+
           var bodyObj = Object.assign({
             payload: cleanPayload || (isOff ? 'LED:0' : 'LED:1'),
             SwitchStatus: switchStatus,
             value: switchStatus === 1,
             port: COMPANION_PORT || 'COM9',
             qrSession: qrSessionTimestamp || undefined,
-            qrExpiresAt: qrExpiresAtTimestamp || undefined
+            qrExpiresAt: qrExpiresAtTimestamp || undefined,
+            location: locToSend
           }, extra || {});
           var bodyStr = JSON.stringify(bodyObj);
 
@@ -2050,7 +2160,13 @@ export const getStandaloneHtmlContent = ({
             } else {
               var errMsg = (res && res.error) || 'ESP32 did not confirm the requested state';
               addLog('⚠️ [ESP32] Hardware rejected: ' + errMsg);
-              resolve({ success: false, error: errMsg });
+              resolve({
+                success: false,
+                error: errMsg,
+                requiresOtp: Boolean(res && (res.requiresOtp || res.code === 'OTP_REQUIRED')),
+                code: res && res.code,
+                res: res
+              });
             }
           })
           .catch(function(err) {
@@ -2435,31 +2551,51 @@ export const getStandaloneHtmlContent = ({
 
       // Look up the configured threshold from the matching rule for this widget
       var matchedRule = rules.find(function(r) {
-        return r.enabled && (r.triggerWidgetId === id || r.trigger === id) &&
-          (r.conditionType === 'Location Mismatch on Turn OFF (OTP Guard)' ||
-           (r.condition && r.condition.indexOf('Location Mismatch') !== -1) ||
-           (r.condition && r.condition.indexOf('OTP') !== -1));
+        if (!r.enabled) return false;
+        var widgetMatches = r.triggerWidgetId === id || r.trigger === id || r.triggerName === title ||
+          id === 'w-led' || r.triggerWidgetId === 'w-led' || !r.triggerWidgetId;
+        if (!widgetMatches) return false;
+
+        var condType = String(r.conditionType || '');
+        var condText = String(r.condition || '');
+        var ruleName = String(r.name || '');
+
+        return condType === 'Location Mismatch on Turn OFF (OTP Guard)' ||
+          condType.indexOf('Geofence') !== -1 ||
+          condType.indexOf('Location') !== -1 ||
+          condText.indexOf('Location Mismatch') !== -1 ||
+          condText.indexOf('Geofence') !== -1 ||
+          condText.indexOf('OTP') !== -1 ||
+          condText.indexOf('Location Guard') !== -1 ||
+          ruleName.indexOf('OTP') !== -1 ||
+          ruleName.indexOf('Location') !== -1 ||
+          ruleName.indexOf('Geofence') !== -1 ||
+          ruleName.indexOf('Sync') !== -1;
       });
-      var ruleThreshold = matchedRule && matchedRule.conditionThreshold !== undefined
-        ? parseFloat(matchedRule.conditionThreshold) || 100
-        : 100;
 
-      var mismatch = checkLocationMismatch(prevOperationLoc, geoEvent, ruleThreshold);
+      var rawRuleThreshold = 50;
+      var ruleUnit = 'm';
+      if (matchedRule) {
+        if (matchedRule.conditionThreshold !== undefined && matchedRule.conditionThreshold !== '') {
+          rawRuleThreshold = matchedRule.conditionThreshold;
+        } else if (matchedRule.condition) {
+          var numMatch = String(matchedRule.condition).match(/[0-9.]+/);
+          if (numMatch) rawRuleThreshold = numMatch[0];
+        }
+        if (matchedRule.conditionUnit) ruleUnit = matchedRule.conditionUnit;
+      }
+      var ruleThreshold = convertThresholdToMeters(rawRuleThreshold, ruleUnit);
+      if (ruleThreshold === null) ruleThreshold = 50;
 
-      var isSwitchOff = !checked;
+      // Evaluate distance strictly from GEOFENCE_ORIGIN
+      var mismatch = checkLocationMismatch(geoEvent, ruleThreshold);
+      var targetAction = checked ? 'ON' : 'OFF';
       var hasOtpRule = Boolean(matchedRule);
+      var rawDistance = mismatch.distance;
+      var locationMismatchExceedsThreshold = mismatch.isMismatch;
 
-      // OTP is required on switch OFF when an OTP Guard rule is configured AND:
-      //   a) No previous ON-location recorded yet (first switch OFF guard), OR
-      //   b) Raw GPS distance from the ON location exceeds the configured threshold
-      //      (uses the Distance / Geofence Radius value directly — no accuracy-buffer inflation)
-      var rawDistance = mismatch.distance; // metres, or null if coords missing
-      var locationMismatchExceedsThreshold =
-        !prevOperationLoc ||              // no prior location → always guard
-        rawDistance == null ||            // couldn't compute distance → guard
-        rawDistance > ruleThreshold;      // actual movement > configured threshold (e.g. 1 m)
-
-      var requiresOtp = isSwitchOff && hasOtpRule && locationMismatchExceedsThreshold;
+      // Consistent Geofence Policy: Applies to BOTH ON and OFF operations outside radius
+      var requiresOtp = hasOtpRule && locationMismatchExceedsThreshold;
       var verificationToken = null;
 
       if (requiresOtp) {
@@ -2482,7 +2618,7 @@ export const getStandaloneHtmlContent = ({
             body: JSON.stringify({
               widgetId: id,
               switchTitle: title,
-              action: 'OFF',
+              action: targetAction,
               deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
               currentLocation: geoEvent,
               previousLocation: prevOperationLoc,
@@ -2503,7 +2639,7 @@ export const getStandaloneHtmlContent = ({
             challengeId: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
             widgetId: id,
             switchTitle: title,
-            action: 'OFF',
+            action: targetAction,
             deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
             currentLocation: geoEvent,
             previousLocation: prevOperationLoc,
@@ -2557,10 +2693,73 @@ export const getStandaloneHtmlContent = ({
         value: checked,
         switchTitle: title,
         location: geoEvent,
-        verificationToken: verificationToken
+        verificationToken: verificationToken,
+        threshold: ruleThreshold,
+        unit: ruleUnit,
+        conditionThreshold: rawRuleThreshold,
+        conditionUnit: ruleUnit
       });
 
       // 8. Confirm ESP32 response (Important Failure Handling)
+      if (!res || !res.success) {
+        if (res && (res.requiresOtp || res.code === 'OTP_REQUIRED')) {
+          var backendPrev = res.res?.previousLocation || prevOperationLoc;
+          var dist = res.res?.distance || rawDistance || 0;
+          var thresh = res.res?.threshold || ruleThreshold || 50;
+          var backendChallenge = null;
+          try {
+            backendChallenge = await fetchCompanionSafeJson('/api/otp/request', {
+              method: 'POST',
+              body: JSON.stringify({
+                widgetId: id,
+                switchTitle: title,
+                action: 'OFF',
+                deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
+                currentLocation: geoEvent,
+                previousLocation: backendPrev,
+                qrSession: qrSessionTimestamp || undefined,
+                qrExpiresAt: qrExpiresAtTimestamp || undefined
+              })
+            });
+          } catch(e) {}
+          if (!backendChallenge || !backendChallenge.success) {
+            var fbOtp = String(Math.floor(100000 + Math.random() * 900000));
+            backendChallenge = {
+              success: true,
+              challengeId: 'local-' + Date.now(),
+              widgetId: id,
+              switchTitle: title,
+              action: 'OFF',
+              deviceId: 'ESP32-S3 (' + (COMPANION_PORT || 'COM9') + ')',
+              currentLocation: geoEvent,
+              previousLocation: backendPrev,
+              distance: dist,
+              threshold: thresh,
+              expiresInSeconds: 1200,
+              resendCooldownSeconds: 30,
+              devDemoMode: true,
+              devOtp: fbOtp
+            };
+          }
+          var vTok = await new Promise(function(resolveVerify) {
+            openOtpModal(backendChallenge, function(tok) { resolveVerify(tok); }, function() { resolveVerify(null); });
+          });
+          if (vTok) {
+            var retryRes = await sendHardwareActionAsync(cmd, {
+              widgetId: id,
+              widgetType: 'switch',
+              value: checked,
+              switchTitle: title,
+              location: geoEvent,
+              verificationToken: vTok
+            });
+            if (retryRes && retryRes.success) {
+              res = retryRes;
+            }
+          }
+        }
+      }
+
       if (!res || !res.success) {
         revertSwitchUI();
         updateSwitchHint(id, 'ESP32 failed to confirm state', 'error');

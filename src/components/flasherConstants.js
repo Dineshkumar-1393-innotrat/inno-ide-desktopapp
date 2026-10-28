@@ -1,3 +1,27 @@
+// Single Source of Truth: Geofence Origin Reference Coordinates
+export const GEOFENCE_ORIGIN = Object.freeze({
+  latitude: 13.0185,
+  longitude: 80.2227,
+  lat: 13.0185,
+  lng: 80.2227,
+  name: "Chennai Office (Primary Location)",
+  organization: "Innotrat Labs",
+  city: "Little Mount, Saidapet",
+  locality: "Little Mount",
+  district: "Chennai",
+  state: "Tamil Nadu",
+  postalCode: "600015",
+  country: "India",
+  address: "Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015",
+  source: "Chennai Office (Primary Location)"
+});
+
+export const PRIMARY_OFFICE_LOCATION = GEOFENCE_ORIGIN;
+
+export const DEFAULT_LATITUDE = 13.0185;
+export const DEFAULT_LONGITUDE = 80.2227;
+export const DEFAULT_OFFICE_ADDRESS = "Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015";
+
 // ESP32 GPIO Options & Roles for Hardware Rules & Actions
 export const ESP32_GPIO_OPTIONS = [
   { pin: "GPIO 2", label: "GPIO 2 (Onboard LED / Strapping)", role: "Digital Output / PWM", defaultTarget: "Onboard LED", defaultAction: "Send Serial Command", defaultPayload: "LED:{state}" },
@@ -35,9 +59,9 @@ export const RULE_ACTION_TYPES = [
 
 export const RULE_CONDITION_TYPES = [
   { value: "Always", label: "Always (Pass check)", hasThreshold: false, desc: "Fires immediately when the trigger event occurs without filtering" },
-  { value: "Location Mismatch on Turn OFF (OTP Guard)", label: "Location Mismatch on Turn OFF (OTP Guard)", hasThreshold: true, defaultThreshold: "100", defaultUnit: "m", isLocationCondition: true, desc: "Requires 6-digit OTP verification challenge if Switch is turned OFF > 100m away from the Turn-ON location" },
-  { value: "Within Geofence (<= Distance)", label: "Within Geofence (≤ Distance)", hasThreshold: true, defaultThreshold: "100", defaultUnit: "m", isLocationCondition: true, desc: "Switch action permitted only within specified distance of calibrated/reference location" },
-  { value: "Outside Geofence (> Distance)", label: "Outside Geofence (> Distance)", hasThreshold: true, defaultThreshold: "100", defaultUnit: "m", isLocationCondition: true, desc: "Fires alert or action when device is moved outside geofence boundary" },
+  { value: "Location Mismatch on Turn OFF (OTP Guard)", label: "Location Mismatch on Turn OFF (OTP Guard)", hasThreshold: true, defaultThreshold: "50", defaultUnit: "m", isLocationCondition: true, desc: "Requires 6-digit OTP verification challenge if Switch is turned OFF > 50m away from the Turn-ON location" },
+  { value: "Within Geofence (<= Distance)", label: "Within Geofence (≤ Distance)", hasThreshold: true, defaultThreshold: "50", defaultUnit: "m", isLocationCondition: true, desc: "Switch action permitted only within specified distance of calibrated/reference location" },
+  { value: "Outside Geofence (> Distance)", label: "Outside Geofence (> Distance)", hasThreshold: true, defaultThreshold: "50", defaultUnit: "m", isLocationCondition: true, desc: "Fires alert or action when device is moved outside geofence boundary" },
   { value: "GPS Location Verified", label: "GPS Location Verified (Accuracy Check)", hasThreshold: false, defaultThreshold: "50", defaultUnit: "m", isLocationCondition: true, desc: "Requires valid GPS coordinates, active permission, and acceptable accuracy before action" },
   { value: "Value >", label: "Value Greater Than (>)", hasThreshold: true, defaultThreshold: "30", defaultUnit: "°C", desc: "Fires only when the trigger value exceeds the specified threshold" },
   { value: "Value <", label: "Value Less Than (<)", hasThreshold: true, defaultThreshold: "10", defaultUnit: "°C", desc: "Fires only when the trigger value falls below the specified threshold" },

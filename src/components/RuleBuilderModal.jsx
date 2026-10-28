@@ -356,7 +356,7 @@ export default function RuleBuilderModal({
                           const val = e.target.value;
                           const condObj = RULE_CONDITION_TYPES.find((c) => c.value === val);
                           let newCond = val;
-                          const defThresh = editingRule.conditionThreshold || condObj?.defaultThreshold || (condObj?.isLocationCondition ? "100" : "30");
+                          const defThresh = editingRule.conditionThreshold || condObj?.defaultThreshold || (condObj?.isLocationCondition ? "50" : "30");
                           const defUnit = condObj?.defaultUnit || (condObj?.isLocationCondition ? "m" : "°C");
 
                           if (val === "Always") {
@@ -377,6 +377,8 @@ export default function RuleBuilderModal({
                             newCond = `Value == ${defThresh}`;
                           } else if (val === "Value !=") {
                             newCond = `Value != ${defThresh}`;
+                          } else if (val === "Value Between") {
+                            newCond = `Value in Range [${defThresh || "20, 45"}]`;
                           }
 
                           setEditingRule((r) => ({
@@ -431,7 +433,7 @@ export default function RuleBuilderModal({
                                 condition: updatedFormula
                               }));
                             }}
-                            placeholder={editingRule.conditionType?.includes("Location") || editingRule.conditionType?.includes("Geofence") ? "e.g. 100" : "e.g. 30"}
+                            placeholder={editingRule.conditionType?.includes("Location") || editingRule.conditionType?.includes("Geofence") ? "e.g. 50" : "e.g. 30"}
                           />
                         </FormControl>
                         <FormControl>
@@ -467,7 +469,7 @@ export default function RuleBuilderModal({
                         </HStack>
                         <VStack align="start" spacing={1} fontSize="11px" color="purple.800" pl={1}>
                           <Text>• <strong>Turn ON:</strong> Captures fresh device GPS coordinates and saves operation location.</Text>
-                          <Text>• <strong>Turn OFF:</strong> Calculates distance from Turn-ON coordinates. If movement exceeds {editingRule.conditionThreshold || "100"}m, a 6-digit OTP verification challenge is required.</Text>
+                          <Text>• <strong>Turn OFF:</strong> Calculates distance from Turn-ON coordinates. If movement exceeds {editingRule.conditionThreshold || "50"}m, a 6-digit OTP verification challenge is required.</Text>
                           <Text>• <strong>Anti-Tamper Guard:</strong> The switch will NOT power OFF until the OTP challenge is confirmed.</Text>
                         </VStack>
                         {deviceDetectedLocation && (
@@ -620,7 +622,7 @@ export default function RuleBuilderModal({
                           </Text>
                         </HStack>
                         <Text fontSize="11px" color="blue.800">
-                          Hardware actuation is gated by device GPS verification. If the switch is turned OFF from a mismatched location (&gt; 100m away), a 6-digit OTP challenge is required before transmitting commands to ESP32 {editingRule.targetHardware || "GPIO"}.
+                          Hardware actuation is gated by device GPS verification. If the switch is turned OFF from a mismatched location (&gt; 50m away), a 6-digit OTP challenge is required before transmitting commands to ESP32 {editingRule.targetHardware || "GPIO"}.
                         </Text>
                       </Box>
                     )}

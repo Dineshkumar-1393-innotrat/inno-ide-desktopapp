@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { isLocationMismatch } from "./locationOtpService.js";
+import { isLocationMismatch, calculateDistanceMeters, GEOFENCE_ORIGIN, PRIMARY_OFFICE_LOCATION, convertThresholdToMeters } from "./locationOtpService.js";
 
 /**
  * Custom hook to handle real serial port actuation (USB/COM/TCP),
@@ -97,9 +97,17 @@ export default function useHardwareActuation({
       } catch { }
     }
 
-    const mismatch = isLocationMismatch(prevLoc, switchLoc, 100);
-    const isSwitchOff = !nextVal;
-    const requiresOtp = isSwitchOff && mismatch.isMismatch;
+    // Extract dynamic threshold & unit from active matching rule
+    const activeRule = logicBlocks?.find((b) => b.enabled && (b.triggerWidgetId === "w-led" || !b.triggerWidgetId || /led|light|switch/i.test(b.name || "")));
+    const ruleThresholdMeters = activeRule
+      ? (convertThresholdToMeters(activeRule.conditionThreshold, activeRule.conditionUnit) || 50)
+      : 50;
+
+    // Evaluate distance strictly against GEOFENCE_ORIGIN
+    const mismatch = isLocationMismatch(switchLoc, ruleThresholdMeters);
+    const targetAction = nextVal ? "ON" : "OFF";
+    // Consistent Geofence Policy: Both ON and OFF operations outside radius require OTP
+    const requiresOtp = mismatch.isMismatch;
     let verificationToken = null;
 
     if (requiresOtp) {
@@ -119,9 +127,10 @@ export default function useHardwareActuation({
         challenge = await window.electronAPI.otp.request({
           widgetId: "w-led",
           switchTitle: "Switch",
-          action: "OFF",
+          action: targetAction,
           currentLocation: switchLoc,
           previousLocation: prevLoc,
+          threshold: ruleThresholdMeters,
           qrSession: effectiveQrGen,
           qrExpiresAt: effectiveQrExp
         });
@@ -133,9 +142,10 @@ export default function useHardwareActuation({
             body: JSON.stringify({
               widgetId: "w-led",
               switchTitle: "Switch",
-              action: "OFF",
+              action: targetAction,
               currentLocation: switchLoc,
               previousLocation: prevLoc,
+              threshold: ruleThresholdMeters,
               qrSession: effectiveQrGen,
               qrExpiresAt: effectiveQrExp
             })
@@ -153,11 +163,11 @@ export default function useHardwareActuation({
             challengeId: `local-${Date.now()}`,
             widgetId: "w-led",
             switchTitle: "Switch",
-            action: "OFF",
+            action: targetAction,
             currentLocation: switchLoc,
             previousLocation: prevLoc,
             distance: mismatch.distance,
-            threshold: mismatch.threshold || 100,
+            threshold: mismatch.threshold || ruleThresholdMeters,
             expiresInSeconds: remainingSecs || 1200,
             qrExpiresAt: effectiveQrExp,
             qrSession: effectiveQrGen,
@@ -476,7 +486,15 @@ export default function useHardwareActuation({
           fetch("http://localhost:5055/api/action", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: serialMsg, port: targetPort, value: triggerVal, SwitchStatus: triggerVal ? 1 : 0 })
+            body: JSON.stringify({
+              payload: serialMsg,
+              port: targetPort,
+              value: triggerVal,
+              SwitchStatus: triggerVal ? 1 : 0,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              syncOnly: true
+            })
           }).catch(() => { });
         } catch (_) { }
         setSerialTrafficLogs((logs) => [
@@ -541,27 +559,46 @@ export default function useHardwareActuation({
 
         let conditionMet = false;
         const cond = rule.conditionType || rule.condition || "Always";
+        const ruleThresh = parseFloat(rule.conditionThreshold || cond.replace(/[^0-9.-]/g, "") || 0);
 
         if (cond === "Always" || cond.startsWith("Always")) {
           conditionMet = true;
         } else if (cond.startsWith("Value >")) {
-          const thresh = parseFloat(rule.conditionThreshold || cond.replace(/[^0-9.-]/g, "") || 0);
-          conditionMet = parseFloat(value) > thresh;
+          conditionMet = parseFloat(value) > ruleThresh;
         } else if (cond.startsWith("Value <")) {
-          const thresh = parseFloat(rule.conditionThreshold || cond.replace(/[^0-9.-]/g, "") || 0);
-          conditionMet = parseFloat(value) < thresh;
+          conditionMet = parseFloat(value) < ruleThresh;
         } else if (cond.startsWith("Value ==")) {
           const thresh = rule.conditionThreshold || "1";
           conditionMet = String(value) === String(thresh) || (typeof value === "boolean" && (value ? "1" : "0") === thresh);
         } else if (cond.startsWith("Value !=")) {
           const thresh = rule.conditionThreshold || "0";
           conditionMet = String(value) !== String(thresh);
-        } else if (
-          cond.includes("Location Mismatch") ||
-          cond.includes("OTP Guard") ||
-          cond.includes("Geofence") ||
-          cond.includes("GPS Location")
-        ) {
+        } else if (cond.includes("Value in Range") || cond.includes("Value Between")) {
+          const parts = String(rule.conditionThreshold || "20, 45").split(/[,\s-]+/).map(Number);
+          if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            const min = Math.min(parts[0], parts[1]);
+            const max = Math.max(parts[0], parts[1]);
+            const v = parseFloat(value);
+            conditionMet = v >= min && v <= max;
+          } else {
+            conditionMet = true;
+          }
+        } else if (cond.includes("Within Geofence") || cond.includes("Outside Geofence")) {
+          const curLoc = typeof window !== "undefined" ? window._lastDetectedLocation : null;
+          if (curLoc && (curLoc.lat != null || curLoc.latitude != null) && (curLoc.lng != null || curLoc.longitude != null)) {
+            const cLat = curLoc.lat != null ? curLoc.lat : curLoc.latitude;
+            const cLng = curLoc.lng != null ? curLoc.lng : curLoc.longitude;
+            const d = calculateDistanceMeters(GEOFENCE_ORIGIN.latitude, GEOFENCE_ORIGIN.longitude, cLat, cLng);
+            const limit = convertThresholdToMeters(rule.conditionThreshold, rule.conditionUnit) || ruleThresh || 50;
+            conditionMet = cond.includes("Within Geofence") ? (d !== null && d <= limit) : (d !== null && d > limit);
+          } else {
+            conditionMet = false;
+          }
+        } else if (cond.includes("GPS Location Verified")) {
+          const curLoc = typeof window !== "undefined" ? window._lastDetectedLocation : null;
+          const reqAcc = ruleThresh || 50;
+          conditionMet = Boolean(curLoc && curLoc.lat != null && Number(curLoc.accuracy || 100) <= reqAcc);
+        } else if (cond.includes("Location Mismatch") || cond.includes("OTP Guard")) {
           conditionMet = true;
         } else {
           conditionMet = true;

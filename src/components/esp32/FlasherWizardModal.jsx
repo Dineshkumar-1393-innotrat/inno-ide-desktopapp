@@ -114,6 +114,7 @@ export default function FlasherWizardModal({
               ESP-IDF Setup
             </Button>
             <Button
+              type="button"
               size="xs"
               variant="solid"
               bg="whiteAlpha.300"
@@ -122,7 +123,11 @@ export default function FlasherWizardModal({
               _active={{ transform: "scale(0.98)" }}
               borderRadius="full"
               leftIcon={<FaMobileAlt size={11} />}
-              onClick={() => setWizardStep("app_builder")}
+              onClick={(e) => {
+                e?.preventDefault?.();
+                e?.stopPropagation?.();
+                setWizardStep("app_builder");
+              }}
               title="Skip flashing and jump directly to App Builder & Publish QR screen"
               fontWeight="bold"
               shadow="sm"
@@ -144,7 +149,11 @@ export default function FlasherWizardModal({
                   spacing={2}
                   align="center"
                   cursor="pointer"
-                  onClick={() => setWizardStep(stepMapping[s.id])}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    setWizardStep(stepMapping[s.id]);
+                  }}
                   opacity={isActive ? 1 : 0.85}
                   _hover={{ opacity: 1 }}
                   title={`Jump to Step ${s.id}: ${s.label}`}
@@ -272,6 +281,7 @@ export default function FlasherWizardModal({
               {/* Action Buttons */}
               <VStack w="100%" spacing={3}>
                 <Button
+                  type="button"
                   w="100%"
                   size="lg"
                   colorScheme="blue"
@@ -279,7 +289,11 @@ export default function FlasherWizardModal({
                   _hover={{ bg: "#1d4ed8" }}
                   borderRadius="xl"
                   shadow="lg"
-                  onClick={() => setWizardStep("app_builder")}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    setWizardStep("app_builder");
+                  }}
                   fontWeight="bold"
                   leftIcon={<Text fontSize="md">📱</Text>}
                   rightIcon={<FaChevronRight size={13} />}
@@ -486,24 +500,34 @@ export default function FlasherWizardModal({
               {/* Bottom Action & Skip Link */}
               <VStack spacing={2} pt={1}>
                 <Button
+                  type="button"
                   w="100%"
                   size="lg"
                   colorScheme="blue"
                   bg="#2563eb"
                   _hover={{ bg: "#1d4ed8" }}
                   borderRadius="xl"
-                  onClick={() => setWizardStep("devices")}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    setWizardStep("devices");
+                  }}
                   fontWeight="bold"
                 >
                   Continue →
                 </Button>
                 <Button
+                  type="button"
                   variant="ghost"
                   colorScheme="blue"
                   size="sm"
                   fontSize="xs"
                   fontWeight="semibold"
-                  onClick={() => setWizardStep("app_builder")}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    setWizardStep("app_builder");
+                  }}
                   _hover={{ textDecoration: "underline", bg: blueCardBg }}
                 >
                   Already flashed or designing? Skip to App Builder &amp; Publish QR →
@@ -768,19 +792,29 @@ export default function FlasherWizardModal({
               {/* Bottom Actions */}
               <HStack justify="space-between" pt={2}>
                 <Button
+                  type="button"
                   variant="outline"
                   borderRadius="xl"
-                  onClick={() => setWizardStep("connection")}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    setWizardStep("connection");
+                  }}
                   leftIcon={<FaChevronLeft size={11} />}
                 >
                   Back
                 </Button>
                 <Button
+                  type="button"
                   colorScheme="blue"
                   bg="#2563eb"
                   _hover={{ bg: "#1d4ed8" }}
                   borderRadius="xl"
-                  onClick={() => setWizardStep("compatibility")}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    setWizardStep("compatibility");
+                  }}
                   fontWeight="bold"
                   px={6}
                   isDisabled={!selectedDevice || devices.length === 0}
@@ -864,19 +898,29 @@ export default function FlasherWizardModal({
               {/* Bottom Actions */}
               <HStack justify="space-between" pt={2}>
                 <Button
+                  type="button"
                   variant="outline"
                   borderRadius="xl"
-                  onClick={() => setWizardStep("devices")}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    setWizardStep("devices");
+                  }}
                   leftIcon={<FaChevronLeft size={11} />}
                 >
                   Back
                 </Button>
                 <Button
+                  type="button"
                   colorScheme="blue"
                   bg="#2563eb"
                   _hover={{ bg: "#1d4ed8" }}
                   borderRadius="xl"
-                  onClick={handleStartFlash}
+                  onClick={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    handleStartFlash?.(e);
+                  }}
                   fontWeight="bold"
                   px={6}
                   leftIcon={<FaBolt size={13} />}

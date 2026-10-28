@@ -190,7 +190,7 @@ export default function useWidgetOperations({
       }
       // If it is w-led, handleToggleHardwareLed already dispatched the LED command.
       // Avoid duplicate simultaneous writes for the same widget.
-      if (tgt && targetId !== "w-led" && evaluateRulesForWidget) {
+      if (tgt && evaluateRulesForWidget) {
         evaluateRulesForWidget(tgt, prop, value);
       }
     }

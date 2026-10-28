@@ -517,9 +517,11 @@ export default function useCompanionTunnel({
       const hostLoc =
         deviceDetectedLocation && !isStaleTestGeolog(deviceDetectedLocation) ? deviceDetectedLocation : null;
 
+      const companionPort = companionServerInfo?.port || 5055;
+
       // Seed companion server state
       try {
-        await fetch("http://localhost:5055/api/action", {
+        await fetch(`http://localhost:${companionPort}/api/action`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -531,16 +533,9 @@ export default function useCompanionTunnel({
         });
       } catch (e) { }
 
-      // Push updated HTML to both possible companion servers
+      // Push updated HTML to active companion server (port 5055)
       try {
-        await fetch("http://localhost:5055/api/update-html", {
-          method: "POST",
-          headers: { "Content-Type": "text/html; charset=utf-8" },
-          body: html
-        });
-      } catch (e) { }
-      try {
-        await fetch("http://localhost:5056/api/update-html", {
+        await fetch(`http://localhost:${companionPort}/api/update-html`, {
           method: "POST",
           headers: { "Content-Type": "text/html; charset=utf-8" },
           body: html
