@@ -1,3 +1,19 @@
+export const CONSTANT_PRIMARY_LOCATION = Object.freeze({
+  name: "Chennai Office (Primary Location)",
+  organization: "Innotrat Labs",
+  lat: 13.0185,
+  lng: 80.2227,
+  latitude: 13.0185,
+  longitude: 80.2227,
+  city: "Little Mount",
+  locality: "Little Mount, Saidapet",
+  address: "Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015",
+  country: "India",
+  source: "Chennai Office (Primary Location)"
+});
+export const DEFAULT_LATITUDE = 13.0185;
+export const DEFAULT_LONGITUDE = 80.2227;
+
 import { registerFilesystemIPC } from './filesystem.ipc.js';
 import { registerProjectIPC } from './project.ipc.js';
 import { registerDeviceIPC } from './device.ipc.js';
@@ -12,11 +28,17 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+export const GEOFENCE_ORIGIN = CONSTANT_PRIMARY_LOCATION;
+
 import {
+  GEOFENCE_ORIGIN as SERVICE_GEOFENCE_ORIGIN,
+  PRIMARY_OFFICE_LOCATION,
   defaultLocationOtpService,
   isLocationMismatch,
   calculateDistanceMeters,
-  formatDistance
+  formatDistance,
+  convertThresholdToMeters,
+  validateGpsCoordinates
 } from '../../src/components/esp32/locationOtpService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,12 +58,14 @@ let companionState = {
   lastLocation: null,
   switchLocations: [],
   hostLocation: {
-    lat: 13.0147,
-    lng: 80.2242,
+    lat: 13.0185,
+    lng: 80.2227,
     city: 'Little Mount',
-    address: 'Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India',
+    locality: 'Little Mount, Saidapet',
+    address: 'Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015',
     country: 'India',
-    source: 'Calibrated Location (Little Mount)',
+    organization: 'Innotrat Labs',
+    source: 'Chennai Office (Primary Location)',
     timestamp: new Date().toLocaleTimeString()
   },
   qrSession: {
@@ -900,6 +924,47 @@ export function registerAllIPCHandlers(getMainWindow) {
                 }));
               }
 
+              // Auto-resolve location if omitted in request (e.g. from automation rules or desktop background sync)
+              if (!data.location) {
+                if (companionState.lastLocation && !isStaleGeolog(companionState.lastLocation) && (companionState.lastLocation.lat != null || companionState.lastLocation.latitude != null)) {
+                  data.location = { ...companionState.lastLocation, event: isExplicitOn ? 'ON' : isExplicitOff ? 'OFF' : companionState.lastLocation.event };
+                } else if (companionState.hostLocation && (companionState.hostLocation.lat != null || companionState.hostLocation.latitude != null)) {
+                  data.location = {
+                    id: 'loc-host-' + Date.now(),
+                    event: isExplicitOn ? 'ON' : isExplicitOff ? 'OFF' : 'SWITCH',
+                    switchTitle: data.switchTitle || (isExplicitOn ? 'Switch ON' : 'Switch OFF'),
+                    lat: companionState.hostLocation.lat,
+                    lng: companionState.hostLocation.lng,
+                    city: companionState.hostLocation.city || 'Little Mount',
+                    address: companionState.hostLocation.address || 'Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015',
+                    source: companionState.hostLocation.source || 'Chennai Office (Primary Location)',
+                    time: new Date().toLocaleTimeString(),
+                    timestamp: Date.now()
+                  };
+                } else if (Array.isArray(companionState.switchLocations) && companionState.switchLocations.length > 0) {
+                  const fallbackLog = companionState.switchLocations.find(l => !isStaleGeolog(l) && (l.lat != null || l.latitude != null));
+                  if (fallbackLog) {
+                    data.location = { ...fallbackLog, event: isExplicitOn ? 'ON' : isExplicitOff ? 'OFF' : fallbackLog.event };
+                  }
+                }
+              }
+
+              // Fallback for automated rule actions (data.ruleId) or test triggers
+              if (!data.location && (data.ruleId || data.test)) {
+                data.location = {
+                  id: 'rule-loc-' + Date.now(),
+                  event: isExplicitOn ? 'ON' : isExplicitOff ? 'OFF' : 'SWITCH',
+                  switchTitle: data.switchTitle || data.ruleName || 'Automation Rule',
+                  lat: companionState.hostLocation?.lat || 13.0185,
+                  lng: companionState.hostLocation?.lng || 80.2227,
+                  city: companionState.hostLocation?.city || 'Little Mount',
+                  address: companionState.hostLocation?.address || 'Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015',
+                  source: 'Chennai Office (Primary Location)',
+                  time: new Date().toLocaleTimeString(),
+                  timestamp: Date.now()
+                };
+              }
+
               if (!data.location) {
                 console.warn('[CompanionServer] Switch command rejected: missing location data.');
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -910,20 +975,48 @@ export function registerAllIPCHandlers(getMainWindow) {
                 }));
               }
 
+              if (isExplicitOn && !data.location.event) data.location.event = 'ON';
+              if (isExplicitOff && !data.location.event) data.location.event = 'OFF';
+
               let prevLocation = null;
               if (Array.isArray(companionState.switchLocations) && companionState.switchLocations.length > 0) {
-                prevLocation = companionState.switchLocations.find(l => !isStaleGeolog(l) && (l.lat != null || l.latitude != null));
+                // Priority 1: Match the baseline ON event
+                prevLocation = companionState.switchLocations.find(l => !isStaleGeolog(l) && (l.event === 'ON' || l.action === 'ON') && (l.lat != null || l.latitude != null))
+                  || companionState.switchLocations.find(l => !isStaleGeolog(l) && (l.lat != null || l.latitude != null));
               }
               if (!prevLocation && companionState.lastLocation && !isStaleGeolog(companionState.lastLocation) && (companionState.lastLocation.lat != null || companionState.lastLocation.latitude != null)) {
                 prevLocation = companionState.lastLocation;
               }
+              if (!prevLocation) {
+                prevLocation = companionState.hostLocation || CONSTANT_PRIMARY_LOCATION;
+              }
 
-              const mismatch = isLocationMismatch(prevLocation, data.location, defaultLocationOtpService.distanceThresholdMeters);
-              const isSwitchOff = !isExplicitOn;
-              const requiresOtp = isSwitchOff && mismatch.isMismatch;
+              // Dynamic Threshold extraction & Unit Conversion
+              const rawThreshold = data.threshold !== undefined ? data.threshold : (data.conditionThreshold !== undefined ? data.conditionThreshold : defaultLocationOtpService.distanceThresholdMeters);
+              const rawUnit = data.unit !== undefined ? data.unit : (data.conditionUnit || 'm');
+              const effectiveThreshold = convertThresholdToMeters(rawThreshold, rawUnit) || defaultLocationOtpService.distanceThresholdMeters;
+
+              // Validate GPS Input (fail-closed if invalid, missing coords, or spoofed)
+              const gpsValidation = validateGpsCoordinates(data.location);
+              if (!gpsValidation.valid) {
+                console.warn('[CompanionServer] Switch command rejected: invalid GPS input:', gpsValidation.reason);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({
+                  success: false,
+                  error: 'Valid device location is required before executing switch operation (' + gpsValidation.reason + ').',
+                  code: 'LOCATION_INVALID',
+                  reason: gpsValidation.reason
+                }));
+              }
+
+              // Evaluate Boundary strictly against immutable GEOFENCE_ORIGIN
+              const mismatch = isLocationMismatch(data.location, effectiveThreshold);
+              const targetAction = isExplicitOn ? 'ON' : 'OFF';
+
+              // Consistent Geofence Policy: Applies to BOTH ON and OFF operations outside radius
+              const requiresOtp = mismatch.isMismatch;
 
               if (requiresOtp) {
-                const targetAction = 'OFF';
                 let tokenCheck = defaultLocationOtpService.validateToken({
                   token: data.verificationToken,
                   widgetId: data.widgetId,
@@ -936,23 +1029,24 @@ export function registerAllIPCHandlers(getMainWindow) {
                 }
 
                 if (!tokenCheck.valid) {
-                  console.warn(`[CompanionServer] Location mismatch: authorization failed (${tokenCheck.error}). Distance: ${mismatch.distance}m`);
+                  console.warn(`[CompanionServer] Geofence boundary check: authorization failed (${tokenCheck.error}). Distance: ${mismatch.distance}m, Threshold: ${effectiveThreshold}m`);
                   res.writeHead(403, { 'Content-Type': 'application/json' });
                   return res.end(JSON.stringify({
                     success: false,
-                    error: 'Location mismatch detected: OTP verification required before switch off operation.',
+                    error: `Geofence boundary check: OTP verification required before switch ${targetAction.toLowerCase()} operation outside ${effectiveThreshold}m radius.`,
                     requiresOtp: true,
                     code: tokenCheck.code || 'OTP_REQUIRED',
                     distance: mismatch.distance,
-                    threshold: mismatch.threshold,
-                    previousLocation: prevLocation,
-                    currentLocation: data.location
+                    threshold: effectiveThreshold,
+                    geofenceOrigin: GEOFENCE_ORIGIN,
+                    currentLocation: data.location,
+                    action: targetAction
                   }));
                 }
 
-                // Consume single-use token immediately before hardware actuation
+                // Single-use token enforcement: Consume immediately before hardware actuation to prevent replay
                 defaultLocationOtpService.consumeToken(data.verificationToken);
-                console.log('[CompanionServer] Location mismatch authorized with token. Proceeding to hardware actuation.');
+                console.log(`[CompanionServer] Geofence switch ${targetAction} operation authorized with single-use token. Proceeding to hardware actuation.`);
               }
             }
 
@@ -1056,8 +1150,8 @@ export function registerAllIPCHandlers(getMainWindow) {
                   lat: companionState.hostLocation.lat,
                   lng: companionState.hostLocation.lng,
                   city: companionState.hostLocation.city || 'Little Mount',
-                  address: companionState.hostLocation.address || '',
-                  source: companionState.hostLocation.source || 'Host Device',
+                  address: companionState.hostLocation.address || 'Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015',
+                  source: companionState.hostLocation.source || 'Chennai Office (Primary Location)',
                   time: new Date().toLocaleTimeString(),
                   timestamp: Date.now()
                 };

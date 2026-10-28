@@ -284,12 +284,12 @@ export default function useDeviceLocation({ widgets, setWidgets, autoPersistApp,
 
         if (!resolved) {
           resolved = {
-            lat: 13.0147,
-            lng: 80.2242,
+            lat: 13.0185,
+            lng: 80.2227,
             city: "Little Mount",
-            address: "Little Mount, Anna Salai (Mount Road), Chennai, Tamil Nadu, 600015, India",
+            address: "Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015",
             country: "India",
-            source: "Calibrated Location (Little Mount)",
+            source: "Chennai Office (Primary Location)",
             timestamp: new Date().toLocaleTimeString()
           };
         }

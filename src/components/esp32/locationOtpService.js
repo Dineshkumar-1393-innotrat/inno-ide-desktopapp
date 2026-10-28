@@ -5,7 +5,33 @@
  * verification token issuance, and single-use authorization for hardware switch operations.
  */
 
-export const DEFAULT_DISTANCE_THRESHOLD_METERS = 100;
+export const DEFAULT_DISTANCE_THRESHOLD_METERS = 50;
+export const DEFAULT_LATITUDE = 13.0185;
+export const DEFAULT_LONGITUDE = 80.2227;
+
+/**
+ * Immutable Single Source of Truth for Geofence Origin Coordinates:
+ * Chennai Office: Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai (~13.0185° N, ~80.2227° E)
+ */
+export const GEOFENCE_ORIGIN = Object.freeze({
+  latitude: 13.0185,
+  longitude: 80.2227,
+  lat: 13.0185,
+  lng: 80.2227,
+  name: "Chennai Office (Primary Location)",
+  organization: "Innotrat Labs",
+  city: "Little Mount, Saidapet",
+  locality: "Little Mount",
+  district: "Chennai",
+  state: "Tamil Nadu",
+  postalCode: "600015",
+  country: "India",
+  address: "Door No. 17/A, Muthayal Naidu Street, Little Mount, Saidapet, Chennai, Tamil Nadu 600015",
+  source: "Chennai Office (Primary Location)"
+});
+
+export const PRIMARY_OFFICE_LOCATION = GEOFENCE_ORIGIN;
+
 export const DEFAULT_OTP_EXPIRY_SECONDS = 1200; // 20 minutes
 export const DEFAULT_MAX_ATTEMPTS = 3;
 export const DEFAULT_RESEND_COOLDOWN_SECONDS = 30;
@@ -18,12 +44,81 @@ function getCrypto() {
 }
 
 /**
+ * Converts a threshold value and unit to meters.
+ * Validates that threshold is a finite, non-negative number.
+ * Fails closed (returns null) if missing, invalid, or unsupported.
+ * @param {number|string} threshold
+ * @param {string} unit - 'm', 'km', 'ft', 'mi'
+ * @returns {number|null} Converted threshold in meters, or null if invalid.
+ */
+export function convertThresholdToMeters(threshold, unit = 'm') {
+  if (threshold === null || threshold === undefined || threshold === '') return null;
+  const num = Number(threshold);
+  if (isNaN(num) || !isFinite(num) || num < 0) return null;
+
+  const cleanUnit = String(unit || 'm').toLowerCase().trim();
+  switch (cleanUnit) {
+    case 'm':
+    case 'meter':
+    case 'meters':
+    case '':
+      return num;
+    case 'km':
+    case 'kilometer':
+    case 'kilometers':
+      return num * 1000;
+    case 'ft':
+    case 'feet':
+    case 'foot':
+      return num * 0.3048;
+    case 'mi':
+    case 'mile':
+    case 'miles':
+      return num * 1609.344;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Validates GPS coordinates and integrity.
+ * Fails closed if missing, out of range, mocked, or inaccurate.
+ * @param {Object} loc
+ * @returns {{ valid: boolean, latitude?: number, longitude?: number, reason?: string }}
+ */
+export function validateGpsCoordinates(loc) {
+  if (!loc || typeof loc !== 'object') {
+    return { valid: false, reason: 'MISSING_LOCATION_OBJECT' };
+  }
+  const lat = loc.lat != null ? Number(loc.lat) : (loc.latitude != null ? Number(loc.latitude) : NaN);
+  const lng = loc.lng != null ? Number(loc.lng) : (loc.lon != null ? Number(loc.lon) : (loc.longitude != null ? Number(loc.longitude) : NaN));
+
+  if (isNaN(lat) || isNaN(lng) || !isFinite(lat) || !isFinite(lng)) {
+    return { valid: false, reason: 'INVALID_NUMERIC_COORDINATES' };
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return { valid: false, reason: 'COORDINATES_OUT_OF_RANGE' };
+  }
+  if (loc.isMock === true || loc.mocked === true) {
+    return { valid: false, reason: 'MOCKED_GPS_DETECTED' };
+  }
+  if (loc.accuracy != null) {
+    const acc = Number(loc.accuracy);
+    if (isNaN(acc) || !isFinite(acc) || acc < 0 || acc > 5000) {
+      return { valid: false, reason: 'INVALID_GPS_ACCURACY' };
+    }
+  }
+  return { valid: true, latitude: lat, longitude: lng };
+}
+
+/**
  * Calculates the great-circle distance between two GPS coordinates in meters using the Haversine formula.
+ * Returns exact floating-point distance without premature integer rounding before comparison.
  * @param {number|string} lat1 - Latitude of first point
  * @param {number|string} lon1 - Longitude of first point
  * @param {number|string} lat2 - Latitude of second point
  * @param {number|string} lon2 - Longitude of second point
- * @returns {number|null} Distance in meters rounded to nearest integer, or null if coordinates are invalid.
+ * @returns {number|null} Exact distance in meters, or null if coordinates are invalid.
  */
 export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
   if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
@@ -32,6 +127,8 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
   const p2 = Number(lat2);
   const l2 = Number(lon2);
   if (isNaN(p1) || isNaN(l1) || isNaN(p2) || isNaN(l2)) return null;
+  if (!isFinite(p1) || !isFinite(l1) || !isFinite(p2) || !isFinite(l2)) return null;
+  if (p1 < -90 || p1 > 90 || p2 < -90 || p2 > 90 || l1 < -180 || l1 > 180 || l2 < -180 || l2 > 180) return null;
 
   // Exact same coordinates
   if (p1 === p2 && l1 === l2) return 0;
@@ -46,7 +143,7 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c);
+  return R * c;
 }
 
 /**
@@ -54,76 +151,93 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
  */
 export function formatDistance(meters) {
   if (meters == null || isNaN(meters)) return 'Unknown distance';
-  if (meters < 1000) return `${meters} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
+  if (meters < 1000) return String(Math.round(meters * 10) / 10) + ' m';
+  return (meters / 1000).toFixed(2) + ' km';
 }
 
 /**
- * Compares current location with previous successful location, accounting for GPS accuracy.
- * @param {Object} prevLoc - Previous successful operation location
- * @param {Object} curLoc - Current device location
- * @param {number} thresholdMeters - Configurable threshold (default: 100m)
+ * Compares current location strictly against the fixed GEOFENCE_ORIGIN constant.
+ * Never uses previous location or dynamic location as origin.
+ * Enforces boundary: distanceMeters <= thresholdMeters -> allow; distanceMeters > thresholdMeters -> OTP required.
+ * @param {Object} param1 - Location object or (legacy prevLoc)
+ * @param {Object|number} [param2] - Current location or threshold
+ * @param {number} [param3] - Configurable threshold
  * @returns {Object} Mismatch evaluation result
  */
-export function isLocationMismatch(prevLoc, curLoc, thresholdMeters = DEFAULT_DISTANCE_THRESHOLD_METERS) {
-  // If there is no previous successful location recorded, this is the first operation -> no mismatch
-  if (!prevLoc || (prevLoc.lat == null && prevLoc.latitude == null) || (prevLoc.lng == null && prevLoc.longitude == null)) {
+export function isLocationMismatch(param1, param2, param3) {
+  let curLoc;
+  let rawThreshold;
+
+  if (param3 !== undefined) {
+    // Legacy call: (prevLoc, curLoc, threshold) -> strictly compare curLoc against GEOFENCE_ORIGIN
+    curLoc = param2;
+    rawThreshold = param3;
+  } else if (param2 !== undefined && (typeof param2 === 'number' || typeof param2 === 'string')) {
+    // Standard call: (curLoc, threshold)
+    curLoc = param1;
+    rawThreshold = param2;
+  } else {
+    // Default call: (curLoc)
+    curLoc = param2 || param1;
+    rawThreshold = DEFAULT_DISTANCE_THRESHOLD_METERS;
+  }
+
+  // Validate and convert threshold (fail closed if missing or invalid)
+  const thresholdMeters = convertThresholdToMeters(rawThreshold);
+  if (thresholdMeters === null) {
     return {
-      isMismatch: false,
-      distance: 0,
-      threshold: thresholdMeters,
-      reason: 'FIRST_OPERATION_NO_PREVIOUS_LOCATION'
+      isMismatch: true,
+      distance: null,
+      threshold: rawThreshold,
+      origin: GEOFENCE_ORIGIN,
+      reason: 'INVALID_OR_MISSING_THRESHOLD'
     };
   }
 
-  // If current location is missing/unavailable, we cannot verify location
-  if (!curLoc || (curLoc.lat == null && curLoc.latitude == null) || (curLoc.lng == null && curLoc.longitude == null)) {
+  // GPS validation (fail closed)
+  const gpsValidation = validateGpsCoordinates(curLoc);
+  if (!gpsValidation.valid) {
     return {
       isMismatch: true,
       distance: null,
       threshold: thresholdMeters,
-      reason: 'MISSING_CURRENT_LOCATION'
+      origin: GEOFENCE_ORIGIN,
+      reason: gpsValidation.reason
     };
   }
 
-  const prevLat = prevLoc.lat != null ? prevLoc.lat : prevLoc.latitude;
-  const prevLng = prevLoc.lng != null ? prevLoc.lng : prevLoc.longitude;
-  const curLat = curLoc.lat != null ? curLoc.lat : curLoc.latitude;
-  const curLng = curLoc.lng != null ? curLoc.lng : curLoc.longitude;
+  const rawDist = calculateDistanceMeters(
+    GEOFENCE_ORIGIN.latitude,
+    GEOFENCE_ORIGIN.longitude,
+    gpsValidation.latitude,
+    gpsValidation.longitude
+  );
 
-  const rawDist = calculateDistanceMeters(prevLat, prevLng, curLat, curLng);
   if (rawDist === null) {
     return {
       isMismatch: true,
       distance: null,
       threshold: thresholdMeters,
+      origin: GEOFENCE_ORIGIN,
       reason: 'INVALID_COORDINATES'
     };
   }
 
-  // Account for GPS accuracy and temporary fluctuations:
-  // We apply an accuracy buffer to avoid unnecessary OTP prompts caused by GPS drift.
-  // We cap the buffer at 50 meters so wide GPS inaccuracies don't mask a real physical move.
-  const prevAcc = Number(prevLoc.accuracy || 0);
-  const curAcc = Number(curLoc.accuracy || 0);
-  const accuracyBuffer = Math.min(Math.max(prevAcc, curAcc), 50);
-  const effectiveThreshold = thresholdMeters + accuracyBuffer;
-
-  const isMismatch = rawDist > effectiveThreshold;
+  // Boundary condition check:
+  // distanceMeters <= thresholdMeters -> within boundary (no OTP, isMismatch: false)
+  // distanceMeters > thresholdMeters -> outside boundary (OTP required, isMismatch: true)
+  const isMismatch = rawDist > thresholdMeters;
 
   return {
     isMismatch,
     distance: rawDist,
     threshold: thresholdMeters,
-    effectiveThreshold,
-    accuracyBuffer,
+    origin: GEOFENCE_ORIGIN,
+    currentLocation: curLoc,
     formattedDistance: formatDistance(rawDist)
   };
 }
 
-/**
- * Generates a cryptographically secure 6-digit numeric OTP.
- */
 export function generateSecureOtp() {
   const c = getCrypto();
   if (c && typeof c.getRandomValues === 'function') {
@@ -198,6 +312,8 @@ export class LocationOtpService {
     deviceId = 'ESP32-S3 (COM9)',
     currentLocation = null,
     previousLocation = null,
+    threshold = null,
+    unit = 'm',
     devDemoMode = null,
     qrSession = null,
     qrExpiresAt = null
@@ -205,7 +321,8 @@ export class LocationOtpService {
     this.cleanExpired();
 
     const normalizedAction = String(action).toUpperCase() === 'ON' ? 'ON' : 'OFF';
-    const mismatchResult = isLocationMismatch(previousLocation, currentLocation, this.distanceThresholdMeters);
+    const effectiveThreshold = threshold != null ? (convertThresholdToMeters(threshold, unit) || this.distanceThresholdMeters) : this.distanceThresholdMeters;
+    const mismatchResult = isLocationMismatch(currentLocation, effectiveThreshold);
     const otp = generateSecureOtp();
     const challengeId = `otp-${Date.now()}-${generateVerificationToken().substring(0, 8)}`;
     const now = Date.now();
@@ -233,7 +350,7 @@ export class LocationOtpService {
       currentLocation,
       previousLocation,
       distance: mismatchResult.distance,
-      threshold: this.distanceThresholdMeters,
+      threshold: effectiveThreshold,
       createdAt: now,
       expiresAt: targetExpiresAt,
       qrSession: qrSession ? Number(qrSession) : null,
@@ -263,7 +380,7 @@ export class LocationOtpService {
       action: normalizedAction,
       switchTitle,
       distance: mismatchResult.distance,
-      threshold: this.distanceThresholdMeters,
+      threshold: effectiveThreshold,
       expiresInSeconds,
       qrExpiresAt: resolvedQrExp,
       qrSession: challenge.qrSession,

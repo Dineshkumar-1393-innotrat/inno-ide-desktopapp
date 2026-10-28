@@ -893,7 +893,7 @@ export default function AppBuilderInspector({
                         <Text fontSize="9px" color="blue.600" noOfLines={2}>{esp32Loc.address}</Text>
                         <HStack justify="space-between" mt={0.5}>
                           <Text fontSize="9px" color="blue.500" fontFamily="monospace" fontWeight="bold">
-                            {esp32Loc.lat}° N, {esp32Loc.lng}° E
+                            {Number(esp32Loc.lat).toFixed(6)}° N, {Number(esp32Loc.lng).toFixed(6)}° E
                           </Text>
                           <Text fontSize="8px" color="blue.400">{esp32Loc.source?.replace("IP Geolocation ", "") || "Network"}</Text>
                         </HStack>

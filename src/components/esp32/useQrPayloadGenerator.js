@@ -131,7 +131,7 @@ export default function useQrPayloadGenerator({
         event: b.event || "on_toggle",
         condition: b.condition || "Always",
         conditionType: b.conditionType || (isLocationRule ? "Location Mismatch on Turn OFF (OTP Guard)" : "Always"),
-        conditionThreshold: b.conditionThreshold !== undefined ? b.conditionThreshold : (isLocationRule ? "100" : undefined),
+        conditionThreshold: b.conditionThreshold !== undefined ? String(b.conditionThreshold) : (isLocationRule ? "50" : undefined),
         conditionUnit: b.conditionUnit || "m",
         action: b.action || "Send Hardware Command",
         payload: b.payload || (isLedRule ? "LED:{state}" : "1"),

@@ -175,6 +175,7 @@ export default function AppDesignerCanvas({
   const setActiveWidgetId = setSelectedWidgetId;
   const previewTab = "designer";
   const [starterAlertVisible, setStarterAlertVisible] = useState(false);
+  const [openCanvasLogsMap, setOpenCanvasLogsMap] = useState({});
 
   return (
     <>
@@ -574,13 +575,87 @@ export default function AppDesignerCanvas({
                                       }}
                                     />
                                   </HStack>
-                                  <HStack spacing={1} color="blue.500" fontSize="9px">
-                                    <FaMapMarkerAlt size={9} />
-                                    <Text fontWeight="semibold">Location required for ON/OFF logging</Text>
+                                  {/* Constant Device Location Block (Exactly as in handwritten wireframe) */}
+                                  <Box
+                                    p={2.5}
+                                    bg={isDarkBg ? "whiteAlpha.100" : "blue.50"}
+                                    borderRadius="md"
+                                    border="1px solid"
+                                    borderColor={isDarkBg ? "whiteAlpha.200" : "blue.200"}
+                                    position="relative"
+                                  >
+                                    <Badge
+                                      position="absolute"
+                                      top="6px"
+                                      right="6px"
+                                      colorScheme="purple"
+                                      fontSize="8px"
+                                      px={1.5}
+                                      py={0.5}
+                                      borderRadius="full"
+                                      fontWeight="bold"
+                                      border="1px solid"
+                                      borderColor="purple.300"
+                                    >
+                                      Constant
+                                    </Badge>
+                                    <Text fontSize="10px" fontWeight="extrabold" color={isDarkBg ? "blue.200" : "blue.900"} mb={1}>
+                                      Device location
+                                    </Text>
+                                    <HStack spacing={1.5} align="flex-start" color={isDarkBg ? "blue.300" : "blue.800"}>
+                                      <Box mt={0.5} color="blue.500">
+                                        <FaMapMarkerAlt size={10} />
+                                      </Box>
+                                      <VStack align="start" spacing={0}>
+                                        <Text fontWeight="bold" fontSize="10px">
+                                          {deviceDetectedLocation?.city ? `${deviceDetectedLocation.city}${deviceDetectedLocation.state ? `, ${deviceDetectedLocation.state}` : ""}` : "Little Mount"}
+                                        </Text>
+                                        <Text fontSize="9px" color="gray.500" fontFamily="monospace">
+                                          {deviceDetectedLocation?.latitude != null
+                                            ? `${Number(deviceDetectedLocation.latitude).toFixed(6)}° N, ${Number(deviceDetectedLocation.longitude).toFixed(6)}° E`
+                                            : (deviceDetectedLocation?.lat != null
+                                              ? `${Number(deviceDetectedLocation.lat).toFixed(6)}° N, ${Number(deviceDetectedLocation.lng).toFixed(6)}° E`
+                                              : "13.013271° N, 80.222660° E")}
+                                        </Text>
+                                      </VStack>
+                                    </HStack>
+
+                                    <HStack justify="space-between" align="center" mt={1.5} pt={1} borderTop="1px dashed" borderColor={isDarkBg ? "whiteAlpha.200" : "blue.200"}>
+                                      <Text fontSize="9px" color={secondaryTextColor}>
+                                        Boundary threshold: <strong>50 meters</strong>
+                                      </Text>
+                                      <Badge colorScheme="green" fontSize="8px" px={1.5} borderRadius="full">
+                                        Active
+                                      </Badge>
+                                    </HStack>
+                                  </Box>
+
+                                  {/* Clickable Link for Switch Log (Collapsible drawer matching wireframe) */}
+                                  <HStack justify="space-between" align="center" pt={0.5}>
+                                    <Button
+                                      variant="link"
+                                      size="xs"
+                                      colorScheme="blue"
+                                      fontSize="10px"
+                                      fontWeight="bold"
+                                      textDecoration="underline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenCanvasLogsMap((prev) => ({ ...prev, [w.id]: !prev[w.id] }));
+                                      }}
+                                    >
+                                      {openCanvasLogsMap[w.id]
+                                        ? "▴ hide switch log"
+                                        : `click here for switch log (${switchLogs.length})`}
+                                    </Button>
+                                    <Text fontSize="8px" color="gray.400">
+                                      {openCanvasLogsMap[w.id] ? "Logs expanded" : "Click to view logs"}
+                                    </Text>
                                   </HStack>
 
                                   {/* Cumulative Multiple Switch Logs */}
-                                  <VStack align="stretch" spacing={1.5} pt={1} borderTop="1px solid" borderColor={isDarkBg ? "whiteAlpha.200" : "gray.200"}>
+                                  {openCanvasLogsMap[w.id] && (
+                                    <VStack align="stretch" spacing={1.5} pt={1} borderTop="1px solid" borderColor={isDarkBg ? "whiteAlpha.200" : "gray.200"}>
                                     <HStack justify="space-between" align="center" px={0.5}>
                                       <Text fontSize="9px" fontWeight="extrabold" color={secondaryTextColor} textTransform="uppercase" letterSpacing="0.5px">
                                         Switch Logs ({switchLogs.length})
@@ -660,7 +735,8 @@ export default function AppDesignerCanvas({
                                       </VStack>
                                     )}
                                   </VStack>
-                                </VStack>
+                                )}
+                              </VStack>
                               );
                             })()}
 
@@ -1093,7 +1169,7 @@ export default function AppDesignerCanvas({
                                         <Text fontSize="9px" color="blue.600" noOfLines={1}>{esp32Loc.address}</Text>
                                         <HStack justify="space-between">
                                           <Text fontSize="9px" color="blue.500" fontFamily="monospace" fontWeight="semibold">
-                                            {esp32Loc.lat}° N, {esp32Loc.lng}° E
+                                            {Number(esp32Loc.lat).toFixed(6)}° N, {Number(esp32Loc.lng).toFixed(6)}° E
                                           </Text>
                                           <Text fontSize="8px" color="blue.400">{esp32Loc.source?.replace("IP Geolocation ", "") || "Network"}</Text>
                                         </HStack>

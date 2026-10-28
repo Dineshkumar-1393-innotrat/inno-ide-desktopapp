@@ -93,244 +93,244 @@ export default function VisualBlocksView({
       {/* Rules List */}
       <VStack spacing={3.5} align="stretch">
         {logicBlocks.map((block, idx) => {
-            const linkedWidget = widgets.find((w) => w.id === block.triggerWidgetId);
-            const isComponentTrigger = block.triggerType === "component" || (!block.triggerWidgetId?.startsWith("telem_") && !block.triggerWidgetId?.startsWith("timer"));
-            const isStale = isComponentTrigger && Boolean(block.triggerWidgetId) && !linkedWidget;
-            const liveTriggerName = linkedWidget ? linkedWidget.title : (block.triggerName || "Trigger Source");
-            const liveBinding = linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || "GPIO Pin") : block.targetHardware;
+          const linkedWidget = widgets.find((w) => w.id === block.triggerWidgetId);
+          const isComponentTrigger = block.triggerType === "component" || (!block.triggerWidgetId?.startsWith("telem_") && !block.triggerWidgetId?.startsWith("timer"));
+          const isStale = isComponentTrigger && Boolean(block.triggerWidgetId) && !linkedWidget;
+          const liveTriggerName = linkedWidget ? linkedWidget.title : (block.triggerName || "Trigger Source");
+          const liveBinding = linkedWidget ? (linkedWidget.boundTargetName || linkedWidget.boundTarget || "GPIO Pin") : block.targetHardware;
 
-            const isLocationRule = block.conditionType?.includes("Location") || block.conditionType?.includes("Geofence") || block.condition?.includes("Location") || block.action?.includes("Location");
+          const isLocationRule = block.conditionType?.includes("Location") || block.conditionType?.includes("Geofence") || block.condition?.includes("Location") || block.action?.includes("Location");
 
-            return (
-              <Box
-                key={block.id}
-                p={4}
-                bg="white"
-                borderRadius="2xl"
-                border="1.5px solid"
-                borderColor={isStale ? "red.300" : isLocationRule ? "purple.300" : block.enabled ? "blue.200" : "gray.200"}
-                shadow="sm"
-                opacity={block.enabled && !isStale ? 1 : 0.7}
-                transition="all 0.15s ease"
-                _hover={{ shadow: "md", borderColor: isStale ? "red.400" : isLocationRule ? "purple.400" : "blue.400" }}
-              >
-                {/* Header Row of Rule Card */}
-                <HStack justify="space-between" mb={3}>
-                  <HStack spacing={2.5}>
-                    <Badge
-                      colorScheme={isStale ? "red" : isLocationRule ? "purple" : "blue"}
-                      variant="solid"
-                      bg={isStale ? "red.500" : isLocationRule ? "#7c3aed" : "blue.500"}
-                      borderRadius="md"
-                      px={2}
-                      py={0.5}
-                      fontSize="10px"
-                      fontWeight="extrabold"
-                    >
-                      RULE #{idx + 1}
+          return (
+            <Box
+              key={block.id}
+              p={4}
+              bg="white"
+              borderRadius="2xl"
+              border="1.5px solid"
+              borderColor={isStale ? "red.300" : isLocationRule ? "purple.300" : block.enabled ? "blue.200" : "gray.200"}
+              shadow="sm"
+              opacity={block.enabled && !isStale ? 1 : 0.7}
+              transition="all 0.15s ease"
+              _hover={{ shadow: "md", borderColor: isStale ? "red.400" : isLocationRule ? "purple.400" : "blue.400" }}
+            >
+              {/* Header Row of Rule Card */}
+              <HStack justify="space-between" mb={3}>
+                <HStack spacing={2.5}>
+                  <Badge
+                    colorScheme={isStale ? "red" : isLocationRule ? "purple" : "blue"}
+                    variant="solid"
+                    bg={isStale ? "red.500" : isLocationRule ? "#7c3aed" : "blue.500"}
+                    borderRadius="md"
+                    px={2}
+                    py={0.5}
+                    fontSize="10px"
+                    fontWeight="extrabold"
+                  >
+                    RULE #{idx + 1}
+                  </Badge>
+                  <Text fontWeight="extrabold" fontSize="sm" color="gray.800">
+                    {block.name}
+                  </Text>
+                  {isLocationRule && (
+                    <Badge colorScheme="purple" variant="subtle" fontSize="9px">
+                      📍 LOCATION &amp; OTP GUARD
                     </Badge>
-                    <Text fontWeight="extrabold" fontSize="sm" color="gray.800">
-                      {block.name}
-                    </Text>
-                    {isLocationRule && (
-                      <Badge colorScheme="purple" variant="subtle" fontSize="9px">
-                        📍 LOCATION &amp; OTP GUARD
-                      </Badge>
-                    )}
-                    {isStale && (
-                      <Badge colorScheme="red" variant="subtle" fontSize="9px">
-                        ⚠️ Component Deleted
-                      </Badge>
-                    )}
-                  </HStack>
-
-                  {/* Quick Actions (Test, Edit, Toggle, Delete) */}
-                  <HStack spacing={2}>
-                    <Tooltip
-                      label={isStale ? "Cannot test: referenced component was removed from mobile app" : isLocationRule ? "Test run location rule (executes with location & OTP verification)" : "Test run this rule immediately"}
-                      fontSize="xs"
-                    >
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        colorScheme={isStale ? "gray" : isLocationRule ? "purple" : "orange"}
-                        isDisabled={isStale}
-                        leftIcon={<FaBolt size={10} />}
-                        onClick={async () => {
-                          const res = await handleExecuteRule(block, 1);
-                          toast({
-                            title: "Rule Executed",
-                            description: res?.text || `Sent command for ${block.name}`,
-                            status: res?.success ? "success" : "warning",
-                            duration: 2500
-                          });
-                        }}
-                      >
-                        Test
-                      </Button>
-                    </Tooltip>
-                    <Tooltip label="Edit Rule Configuration" fontSize="xs">
-                      <IconButton
-                        icon={<FaEdit size={12} />}
-                        size="xs"
-                        variant="outline"
-                        colorScheme={isLocationRule ? "purple" : "blue"}
-                        onClick={() => handleOpenEditRule(block, 0)}
-                        aria-label="Edit rule"
-                      />
-                    </Tooltip>
-                    <Switch
-                      size="sm"
-                      colorScheme={isLocationRule ? "purple" : "blue"}
-                      isChecked={block.enabled && !isStale}
-                      isDisabled={isStale}
-                      onChange={() => handleToggleLogicBlock(block.id)}
-                    />
-                    <Tooltip label="Delete Rule" fontSize="xs">
-                      <IconButton
-                        icon={<FaTrashAlt size={11} />}
-                        size="xs"
-                        variant="ghost"
-                        color="red.500"
-                        _hover={{ bg: "red.50" }}
-                        onClick={() => handleDeleteLogicBlock(block.id)}
-                        aria-label="Delete rule"
-                      />
-                    </Tooltip>
-                  </HStack>
+                  )}
+                  {isStale && (
+                    <Badge colorScheme="red" variant="subtle" fontSize="9px">
+                      ⚠️ Component Deleted
+                    </Badge>
+                  )}
                 </HStack>
 
-                {/* Stale Component Warning Banner */}
-                {isStale && (
-                  <Box p={2.5} bg="red.50" borderRadius="xl" border="1px solid" borderColor="red.200" mb={3}>
-                    <HStack justify="space-between" align="center">
-                      <HStack spacing={2}>
-                        <Text fontSize="12px">⚠️</Text>
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="xs" fontWeight="bold" color="red.800">
-                            Component Removed from Designer
-                          </Text>
-                          <Text fontSize="11px" color="red.600">
-                            The component "{block.triggerName}" (ID: {block.triggerWidgetId}) was removed from the mobile app. Click Edit to reassign this rule.
-                          </Text>
-                        </VStack>
-                      </HStack>
-                      <Button size="xs" colorScheme="red" variant="outline" onClick={() => handleOpenEditRule(block, 0)}>
-                        Reassign
-                      </Button>
-                    </HStack>
-                  </Box>
-                )}
-
-                {/* Visual Blocks Interlocking Nodes - Clickable to configure each segment */}
-                <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={2.5} alignItems="stretch">
-                  {/* Block 1: Trigger Node */}
-                  <Box
-                    p={3}
-                    bg={isStale ? "#fef2f2" : "#fffbeb"}
-                    border="1.5px solid"
-                    borderColor={isStale ? "#fecaca" : "#fde68a"}
-                    borderRadius="xl"
-                    cursor="pointer"
-                    transition="all 0.15s ease"
-                    _hover={{ borderColor: isStale ? "#ef4444" : "#f59e0b", bg: isStale ? "#fee2e2" : "#fef3c7", transform: "translateY(-1px)" }}
-                    onClick={() => handleOpenEditRule(block, 0)}
+                {/* Quick Actions (Test, Edit, Toggle, Delete) */}
+                <HStack spacing={2}>
+                  <Tooltip
+                    label={isStale ? "Cannot test: referenced component was removed from mobile app" : isLocationRule ? "Test run location rule (executes with location & OTP verification)" : "Test run this rule immediately"}
+                    fontSize="xs"
                   >
-                    <HStack justify="space-between">
-                      <Text fontSize="9px" fontWeight="extrabold" color={isStale ? "#b91c1c" : "#92400e"} letterSpacing="0.5px" textTransform="uppercase">
-                        ⚡ TRIGGER EVENT
-                      </Text>
-                      <FaEdit size={9} color={isStale ? "#b91c1c" : "#b45309"} />
-                    </HStack>
-                    <Text fontSize="xs" fontWeight="bold" color={isStale ? "red.700" : "gray.900"} mt={1} noOfLines={1}>
-                      {liveTriggerName}
-                    </Text>
-                    <HStack spacing={1} mt={0.5}>
-                      <Text fontSize="11px" color={isStale ? "red.600" : "#b45309"} fontWeight="medium">
-                        {block.event === "on_turn_on"
-                          ? "Turn ON (Record Loc)"
-                          : block.event === "on_turn_off"
-                            ? "Turn OFF (OTP Guard)"
-                            : (block.event || "on_trigger")}
-                      </Text>
-                      {linkedWidget && (
-                        <Text fontSize="10px" color="gray.400">
-                          • {linkedWidget.type}
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      colorScheme={isStale ? "gray" : isLocationRule ? "purple" : "orange"}
+                      isDisabled={isStale}
+                      leftIcon={<FaBolt size={10} />}
+                      onClick={async () => {
+                        const res = await handleExecuteRule(block, 1);
+                        toast({
+                          title: "Rule Executed",
+                          description: res?.text || `Sent command for ${block.name}`,
+                          status: res?.success ? "success" : "warning",
+                          duration: 2500
+                        });
+                      }}
+                    >
+                      Test
+                    </Button>
+                  </Tooltip>
+                  <Tooltip label="Edit Rule Configuration" fontSize="xs">
+                    <IconButton
+                      icon={<FaEdit size={12} />}
+                      size="xs"
+                      variant="outline"
+                      colorScheme={isLocationRule ? "purple" : "blue"}
+                      onClick={() => handleOpenEditRule(block, 0)}
+                      aria-label="Edit rule"
+                    />
+                  </Tooltip>
+                  <Switch
+                    size="sm"
+                    colorScheme={isLocationRule ? "purple" : "blue"}
+                    isChecked={block.enabled && !isStale}
+                    isDisabled={isStale}
+                    onChange={() => handleToggleLogicBlock(block.id)}
+                  />
+                  <Tooltip label="Delete Rule" fontSize="xs">
+                    <IconButton
+                      icon={<FaTrashAlt size={11} />}
+                      size="xs"
+                      variant="ghost"
+                      color="red.500"
+                      _hover={{ bg: "red.50" }}
+                      onClick={() => handleDeleteLogicBlock(block.id)}
+                      aria-label="Delete rule"
+                    />
+                  </Tooltip>
+                </HStack>
+              </HStack>
+
+              {/* Stale Component Warning Banner */}
+              {isStale && (
+                <Box p={2.5} bg="red.50" borderRadius="xl" border="1px solid" borderColor="red.200" mb={3}>
+                  <HStack justify="space-between" align="center">
+                    <HStack spacing={2}>
+                      <Text fontSize="12px">⚠️</Text>
+                      <VStack align="start" spacing={0}>
+                        <Text fontSize="xs" fontWeight="bold" color="red.800">
+                          Component Removed from Designer
                         </Text>
+                        <Text fontSize="11px" color="red.600">
+                          The component "{block.triggerName}" (ID: {block.triggerWidgetId}) was removed from the mobile app. Click Edit to reassign this rule.
+                        </Text>
+                      </VStack>
+                    </HStack>
+                    <Button size="xs" colorScheme="red" variant="outline" onClick={() => handleOpenEditRule(block, 0)}>
+                      Reassign
+                    </Button>
+                  </HStack>
+                </Box>
+              )}
+
+              {/* Visual Blocks Interlocking Nodes - Clickable to configure each segment */}
+              <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={2.5} alignItems="stretch">
+                {/* Block 1: Trigger Node */}
+                <Box
+                  p={3}
+                  bg={isStale ? "#fef2f2" : "#fffbeb"}
+                  border="1.5px solid"
+                  borderColor={isStale ? "#fecaca" : "#fde68a"}
+                  borderRadius="xl"
+                  cursor="pointer"
+                  transition="all 0.15s ease"
+                  _hover={{ borderColor: isStale ? "#ef4444" : "#f59e0b", bg: isStale ? "#fee2e2" : "#fef3c7", transform: "translateY(-1px)" }}
+                  onClick={() => handleOpenEditRule(block, 0)}
+                >
+                  <HStack justify="space-between">
+                    <Text fontSize="9px" fontWeight="extrabold" color={isStale ? "#b91c1c" : "#92400e"} letterSpacing="0.5px" textTransform="uppercase">
+                      ⚡ TRIGGER EVENT
+                    </Text>
+                    <FaEdit size={9} color={isStale ? "#b91c1c" : "#b45309"} />
+                  </HStack>
+                  <Text fontSize="xs" fontWeight="bold" color={isStale ? "red.700" : "gray.900"} mt={1} noOfLines={1}>
+                    {liveTriggerName}
+                  </Text>
+                  <HStack spacing={1} mt={0.5}>
+                    <Text fontSize="11px" color={isStale ? "red.600" : "#b45309"} fontWeight="medium">
+                      {block.event === "on_turn_on"
+                        ? "Turn ON (Record Loc)"
+                        : block.event === "on_turn_off"
+                          ? "Turn OFF (OTP Guard)"
+                          : (block.event || "on_trigger")}
+                    </Text>
+                    {linkedWidget && (
+                      <Text fontSize="10px" color="gray.400">
+                        • {linkedWidget.type}
+                      </Text>
+                    )}
+                  </HStack>
+                </Box>
+
+                {/* Block 2: Condition Node */}
+                <Box
+                  p={3}
+                  bg={isLocationRule ? "#f5f3ff" : "#faf5ff"}
+                  border="1.5px solid"
+                  borderColor={isLocationRule ? "#c4b5fd" : "#e9d5ff"}
+                  borderRadius="xl"
+                  cursor="pointer"
+                  transition="all 0.15s ease"
+                  _hover={{ borderColor: isLocationRule ? "#7c3aed" : "#a855f7", bg: isLocationRule ? "#ede9fe" : "#f3e8ff", transform: "translateY(-1px)" }}
+                  onClick={() => handleOpenEditRule(block, 1)}
+                >
+                  <HStack justify="space-between">
+                    <HStack spacing={1}>
+                      <Text fontSize="9px" fontWeight="extrabold" color={isLocationRule ? "#6d28d9" : "#6b21a8"} letterSpacing="0.5px" textTransform="uppercase">
+                        {isLocationRule ? "📍 LOCATION CONDITION" : "👁 CONDITION"}
+                      </Text>
+                      {isLocationRule && (
+                        <Badge colorScheme="purple" fontSize="8px" px={1} borderRadius="sm">
+                          OTP
+                        </Badge>
                       )}
                     </HStack>
-                  </Box>
+                    <FaEdit size={9} color={isLocationRule ? "#6d28d9" : "#7e22ce"} />
+                  </HStack>
+                  <Text fontSize="xs" fontWeight="bold" color="gray.900" mt={1} noOfLines={1}>
+                    {block.conditionType?.includes("Location Mismatch")
+                      ? `Location Mismatch (> ${block.conditionThreshold || 100}m)`
+                      : (block.condition || "Always")}
+                  </Text>
+                  <Text fontSize="11px" color={isLocationRule ? "#6d28d9" : "#7e22ce"} fontWeight="medium" mt={0.5} noOfLines={1}>
+                    {block.conditionType?.includes("Location Mismatch")
+                      ? "Triggers 6-digit OTP on Turn OFF"
+                      : block.conditionType?.includes("Within Geofence")
+                        ? `Allowed if ≤ ${block.conditionThreshold || 100}m`
+                        : block.conditionType?.includes("GPS")
+                          ? "GPS lock & accuracy check"
+                          : "Pass check"}
+                  </Text>
+                </Box>
 
-                  {/* Block 2: Condition Node */}
-                  <Box
-                    p={3}
-                    bg={isLocationRule ? "#f5f3ff" : "#faf5ff"}
-                    border="1.5px solid"
-                    borderColor={isLocationRule ? "#c4b5fd" : "#e9d5ff"}
-                    borderRadius="xl"
-                    cursor="pointer"
-                    transition="all 0.15s ease"
-                    _hover={{ borderColor: isLocationRule ? "#7c3aed" : "#a855f7", bg: isLocationRule ? "#ede9fe" : "#f3e8ff", transform: "translateY(-1px)" }}
-                    onClick={() => handleOpenEditRule(block, 1)}
-                  >
-                    <HStack justify="space-between">
-                      <HStack spacing={1}>
-                        <Text fontSize="9px" fontWeight="extrabold" color={isLocationRule ? "#6d28d9" : "#6b21a8"} letterSpacing="0.5px" textTransform="uppercase">
-                          {isLocationRule ? "📍 LOCATION CONDITION" : "👁 CONDITION"}
-                        </Text>
-                        {isLocationRule && (
-                          <Badge colorScheme="purple" fontSize="8px" px={1} borderRadius="sm">
-                            OTP
-                          </Badge>
-                        )}
-                      </HStack>
-                      <FaEdit size={9} color={isLocationRule ? "#6d28d9" : "#7e22ce"} />
-                    </HStack>
-                    <Text fontSize="xs" fontWeight="bold" color="gray.900" mt={1} noOfLines={1}>
-                      {block.conditionType?.includes("Location Mismatch")
-                        ? `Location Mismatch (> ${block.conditionThreshold || 100}m)`
-                        : (block.condition || "Always")}
+                {/* Block 3: Action Node */}
+                <Box
+                  p={3}
+                  bg={isLocationRule ? "#eff6ff" : "#f0fdf4"}
+                  border="1.5px solid"
+                  borderColor={isLocationRule ? "#bfdbfe" : "#bbf7d0"}
+                  borderRadius="xl"
+                  cursor="pointer"
+                  transition="all 0.15s ease"
+                  _hover={{ borderColor: isLocationRule ? "#3b82f6" : "#22c55e", bg: isLocationRule ? "#dbeafe" : "#dcfce7", transform: "translateY(-1px)" }}
+                  onClick={() => handleOpenEditRule(block, 2)}
+                >
+                  <HStack justify="space-between">
+                    <Text fontSize="9px" fontWeight="extrabold" color={isLocationRule ? "#1e40af" : "#166534"} letterSpacing="0.5px" textTransform="uppercase">
+                      {isLocationRule ? "🪄 LOCATION ACTION" : "🪄 HARDWARE ACTION"}
                     </Text>
-                    <Text fontSize="11px" color={isLocationRule ? "#6d28d9" : "#7e22ce"} fontWeight="medium" mt={0.5} noOfLines={1}>
-                      {block.conditionType?.includes("Location Mismatch")
-                        ? "Triggers 6-digit OTP on Turn OFF"
-                        : block.conditionType?.includes("Within Geofence")
-                          ? `Allowed if ≤ ${block.conditionThreshold || 100}m`
-                          : block.conditionType?.includes("GPS")
-                            ? "GPS lock & accuracy check"
-                            : "Pass check"}
-                    </Text>
-                  </Box>
-
-                  {/* Block 3: Action Node */}
-                  <Box
-                    p={3}
-                    bg={isLocationRule ? "#eff6ff" : "#f0fdf4"}
-                    border="1.5px solid"
-                    borderColor={isLocationRule ? "#bfdbfe" : "#bbf7d0"}
-                    borderRadius="xl"
-                    cursor="pointer"
-                    transition="all 0.15s ease"
-                    _hover={{ borderColor: isLocationRule ? "#3b82f6" : "#22c55e", bg: isLocationRule ? "#dbeafe" : "#dcfce7", transform: "translateY(-1px)" }}
-                    onClick={() => handleOpenEditRule(block, 2)}
-                  >
-                    <HStack justify="space-between">
-                      <Text fontSize="9px" fontWeight="extrabold" color={isLocationRule ? "#1e40af" : "#166534"} letterSpacing="0.5px" textTransform="uppercase">
-                        {isLocationRule ? "🪄 LOCATION ACTION" : "🪄 HARDWARE ACTION"}
-                      </Text>
-                      <FaEdit size={9} color={isLocationRule ? "#1d4ed8" : "#15803d"} />
-                    </HStack>
-                    <Text fontSize="xs" fontWeight="bold" color="gray.900" mt={1} noOfLines={1}>
-                      {block.action || "Hardware Command"}
-                    </Text>
-                    <Text fontSize="11px" color={isLocationRule ? "#1d4ed8" : "#15803d"} fontWeight="semibold" mt={0.5} noOfLines={1}>
-                      → {liveBinding || block.targetHardware || "ESP32 GPIO"} {isLocationRule ? "• (OTP Guarded)" : ""}
-                    </Text>
-                  </Box>
-                </Grid>
-              </Box>
-            );
-          })}
+                    <FaEdit size={9} color={isLocationRule ? "#1d4ed8" : "#15803d"} />
+                  </HStack>
+                  <Text fontSize="xs" fontWeight="bold" color="gray.900" mt={1} noOfLines={1}>
+                    {block.action || "Hardware Command"}
+                  </Text>
+                  <Text fontSize="11px" color={isLocationRule ? "#1d4ed8" : "#15803d"} fontWeight="semibold" mt={0.5} noOfLines={1}>
+                    → {liveBinding || block.targetHardware || "ESP32 GPIO"} {isLocationRule ? "• (OTP Guarded)" : ""}
+                  </Text>
+                </Box>
+              </Grid>
+            </Box>
+          );
+        })}
 
         {logicBlocks.length === 0 && (
           <Box p={8} textAlign="center" bg="white" borderRadius="2xl" border="1px dashed" borderColor="gray.300">
@@ -389,7 +389,7 @@ export default function VisualBlocksView({
                       triggerWidgetId: switchWidget.id,
                       triggerName: switchWidget.title,
                       event: "on_toggle",
-                      condition: "Location Mismatch on Turn OFF (> 100m OTP)",
+                      condition: "Location Mismatch on Turn OFF (> 50m OTP)",
                       conditionType: "Location Mismatch on Turn OFF (OTP Guard)",
                       conditionThreshold: "100",
                       conditionUnit: "m",

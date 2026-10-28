@@ -296,6 +296,8 @@ export default function PublishCompanionModal({
         size="4xl"
         isCentered
         scrollBehavior="inside"
+        closeOnOverlayClick={false}
+        closeOnEsc={false}
       >
         <ModalOverlay backdropFilter="blur(6px)" bg="blackAlpha.700" />
         <ModalContent

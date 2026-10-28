@@ -676,9 +676,32 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
 
   const {
     isOpen: isFlashModalOpen,
-    onOpen: onOpenFlashModal,
-    onClose: onCloseFlashModal
-  } = useDisclosure();
+    onOpen: onOpenFlashModalRaw,
+    onClose: onCloseFlashModalRaw
+  } = useDisclosure({
+    defaultIsOpen: (() => {
+      try {
+        return localStorage.getItem("inno_flasher_modal_open") === "true";
+      } catch {
+        return false;
+      }
+    })()
+  });
+
+  const onOpenFlashModal = useCallback(() => {
+    try {
+      localStorage.setItem("inno_flasher_modal_open", "true");
+    } catch { }
+    onOpenFlashModalRaw();
+  }, [onOpenFlashModalRaw]);
+
+  const onCloseFlashModal = useCallback(() => {
+    try {
+      localStorage.removeItem("inno_flasher_modal_open");
+    } catch { }
+    onCloseFlashModalRaw();
+  }, [onCloseFlashModalRaw]);
+
   const { sidebarWidth, isResizing, startResizing } = useResizableSidebar(240, 160, 480);
   const [debugStatus, setDebugStatus] = useState("idle");
   const [debugLastAction, setDebugLastAction] = useState(null);
@@ -1862,6 +1885,8 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
         onClose={handleCloseFlashModal}
         size="full"
         scrollBehavior="inside"
+        closeOnOverlayClick={false}
+        closeOnEsc={false}
       >
         <ModalOverlay bg="blackAlpha.700" backdropFilter="blur(8px)" />
         <ModalContent

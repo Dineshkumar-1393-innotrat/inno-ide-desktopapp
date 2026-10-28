@@ -68,6 +68,11 @@ export default function AppPreviewSimulator({
   handleSubmitFormAnswer
 }) {
   const [isSerialTrafficOpen, setIsSerialTrafficOpen] = useState(false);
+  const [openSwitchLogsMap, setOpenSwitchLogsMap] = useState({});
+  const [simDistMap, setSimDistMap] = useState({});
+  const [pendingOtpChallenge, setPendingOtpChallenge] = useState(null);
+  const [otpInput, setOtpInput] = useState("482910");
+  const [otpError, setOtpError] = useState("");
 
   return (
     <Box display="flex" flexDirection="column" alignItems="center" w="100%">
@@ -169,105 +174,289 @@ export default function AppPreviewSimulator({
                     .filter((h) => h && (h.event === "ON" || h.event === "OFF" || h.action === "ON" || h.action === "OFF") && !isStaleTestGeolog(h))
                     .sort((a, b) => getLogTimestampMs(b) - getLogTimestampMs(a));
 
+                  const currentDist = simDistMap[w.id] ?? 25;
+                  const isBoundaryCrossed = currentDist > 50;
+                  const isLogsOpen = !!openSwitchLogsMap[w.id];
+
+                  const handleToggleAttempt = (targetChecked) => {
+                    // Turn ON never requires OTP. Turn OFF only requires OTP if boundary is crossed (> 50m).
+                    const requiresOtp = !targetChecked && isBoundaryCrossed;
+                    if (requiresOtp) {
+                      setPendingOtpChallenge({
+                        widgetId: w.id,
+                        targetState: targetChecked,
+                        title: w.title,
+                        dist: currentDist
+                      });
+                      setOtpError("");
+                    } else {
+                      handleUpdateWidget("state", targetChecked, w.id);
+                    }
+                  };
+
                   return (
-                    <VStack align="stretch" spacing={2}>
-                      <HStack justify="space-between">
+                    <VStack align="stretch" spacing={2.5}>
+                      {/* Top Row: Project / Switch Name & Toggle */}
+                      <HStack justify="space-between" align="center">
                         <VStack align="start" spacing={0}>
-                          <Text fontWeight="bold" fontSize="sm">{w.title}</Text>
-                          <Text fontSize="10px" color="gray.400">{w.boundTargetName || w.boundTarget}</Text>
+                          <Text fontWeight="extrabold" fontSize="sm" color="gray.800">{w.title}</Text>
+                          <Text fontSize="10px" color="gray.400">{w.boundTargetName || w.boundTarget || "GPIO Pin"}</Text>
                         </VStack>
                         <Switch
                           colorScheme="green"
                           isChecked={w.state}
-                          onChange={(e) => handleUpdateWidget("state", e.target.checked, w.id)}
+                          onChange={(e) => handleToggleAttempt(e.target.checked)}
                         />
                       </HStack>
-                      <HStack spacing={1} color="blue.500" fontSize="9px">
-                        <FaMapMarkerAlt size={9} />
-                        <Text fontWeight="semibold">Location required for ON/OFF logging</Text>
-                      </HStack>
 
-                      {/* Cumulative Multiple Switch Logs */}
-                      <VStack align="stretch" spacing={1.5} pt={1} borderTop="1px solid" borderColor="gray.100">
-                        <HStack justify="space-between" align="center" px={0.5}>
-                          <Text fontSize="9px" fontWeight="extrabold" color="gray.600" textTransform="uppercase" letterSpacing="0.5px">
-                            Switch Logs ({switchLogs.length})
-                          </Text>
-                          {switchLogs.length > 2 && (
-                            <Text fontSize="8px" color="gray.400" fontWeight="semibold">
-                              Scroll for more ↓
+                      {/* Constant Device Location Block (Exactly as in handwritten wireframe) */}
+                      <Box
+                        p={2.5}
+                        bg="blue.50"
+                        borderRadius="md"
+                        border="1px solid"
+                        borderColor="blue.200"
+                        position="relative"
+                      >
+                        <Badge
+                          position="absolute"
+                          top="6px"
+                          right="6px"
+                          colorScheme="purple"
+                          fontSize="8px"
+                          px={1.5}
+                          py={0.5}
+                          borderRadius="full"
+                          fontWeight="bold"
+                          border="1px solid"
+                          borderColor="purple.300"
+                        >
+                          Constant
+                        </Badge>
+                        <Text fontSize="10px" fontWeight="extrabold" color="blue.900" mb={1}>
+                          Device location
+                        </Text>
+                        <HStack spacing={1.5} align="flex-start" color="blue.800">
+                          <Box mt={0.5} color="blue.600">
+                            <FaMapMarkerAlt size={10} />
+                          </Box>
+                          <VStack align="start" spacing={0}>
+                            <Text fontWeight="bold" fontSize="10px">
+                              {deviceDetectedLocation?.city ? `${deviceDetectedLocation.city}${deviceDetectedLocation.state ? `, ${deviceDetectedLocation.state}` : ""}` : "Little Mount"}
                             </Text>
-                          )}
+                            <Text fontSize="9px" color="gray.500" fontFamily="monospace">
+                              {deviceDetectedLocation?.latitude ? `${deviceDetectedLocation.latitude.toFixed(6)}° N, ${deviceDetectedLocation.longitude.toFixed(6)}° E` : (deviceDetectedLocation?.lat ? `${Number(deviceDetectedLocation.lat).toFixed(6)}° N, ${Number(deviceDetectedLocation.lng).toFixed(6)}° E` : "13.013271° N, 80.222660° E")}
+                            </Text>
+                          </VStack>
                         </HStack>
 
-                        {switchLogs.length === 0 ? (
-                          <Box p={3} bg="gray.50" borderRadius="md" border="1px dashed" borderColor="gray.200" textAlign="center">
-                            <Text fontSize="9px" color="gray.400" fontStyle="italic">
-                              No ON/OFF events recorded yet. Toggle switch to log location & timing.
+                        <HStack justify="space-between" align="center" mt={1.5} pt={1} borderTop="1px dashed" borderColor="blue.200">
+                          <Text fontSize="9px" color="gray.600">
+                            User distance: <strong>{currentDist}m</strong>
+                          </Text>
+                          <Badge colorScheme={isBoundaryCrossed ? "red" : "green"} fontSize="8px" px={1.5} borderRadius="full">
+                            {isBoundaryCrossed ? "Outside 50m" : "Within 50m"}
+                          </Badge>
+                        </HStack>
+                      </Box>
+
+                      {/* Screen 2 Alert Banner: User is crossed 50m OTP required */}
+                      {isBoundaryCrossed && (
+                        <Box p={2} bg="red.50" borderRadius="md" border="1.5px solid" borderColor="red.400">
+                          <HStack spacing={1.5} align="center">
+                            <Text fontSize="12px">⚠️</Text>
+                            <Text fontSize="10px" fontWeight="extrabold" color="red.700">
+                              User is crossed 50m OTP required
                             </Text>
-                          </Box>
-                        ) : (
-                          <VStack align="stretch" spacing={1.5} maxH="280px" overflowY="auto" pr={0.5}>
-                            {switchLogs.map((item, idx) => {
-                              const isON = item.event === "ON" || item.action === "ON";
-                              const lat = item.lat != null ? parseFloat(item.lat) : (item.latitude != null ? parseFloat(item.latitude) : null);
-                              const lng = item.lng != null ? parseFloat(item.lng) : (item.longitude != null ? parseFloat(item.longitude) : null);
-                              return (
-                                <Box
-                                  key={item.id || `log-${idx}-${item.time || item.timestamp}`}
-                                  p={2}
-                                  bg={isON ? "green.50" : "red.50"}
-                                  borderRadius="md"
-                                  border="1px solid"
-                                  borderColor={isON ? "green.300" : "red.300"}
-                                >
-                                  <HStack justify="space-between" align="center" mb={0.5}>
-                                    <HStack spacing={1}>
-                                      <Box w="6px" h="6px" borderRadius="full" bg={isON ? "green.500" : "red.500"} />
-                                      <Text fontSize="9px" fontWeight="extrabold" color={isON ? "green.700" : "red.700"} textTransform="uppercase">
-                                        {isON ? "Switch ON Timing & Location" : "Switch OFF Timing & Location"}
+                          </HStack>
+                          <Text fontSize="9px" color="red.600" mt={0.5}>
+                            Boundary limit exceeded ({currentDist}m &gt; 50m). Switch operation requires OTP verification.
+                          </Text>
+                        </Box>
+                      )}
+
+                      {/* OTP Challenge Modal / Popup */}
+                      {pendingOtpChallenge && pendingOtpChallenge.widgetId === w.id && (
+                        <Box
+                          p={2.5}
+                          bg="orange.50"
+                          border="1.5px solid"
+                          borderColor="orange.400"
+                          borderRadius="md"
+                          shadow="sm"
+                        >
+                          <HStack justify="space-between" align="center" mb={1}>
+                            <HStack spacing={1}>
+                              <Text fontSize="11px">🔐</Text>
+                              <Text fontSize="10px" fontWeight="extrabold" color="orange.800" textTransform="uppercase">
+                                OTP Verification Required
+                              </Text>
+                            </HStack>
+                            <Badge colorScheme="red" fontSize="8px">Outside 50m</Badge>
+                          </HStack>
+                          <Text fontSize="9px" color="orange.900" mb={2}>
+                            User is {pendingOtpChallenge.dist}m away (&gt;50m). Enter OTP to switch {pendingOtpChallenge.targetState ? "ON" : "OFF"}:
+                          </Text>
+                          <HStack spacing={1.5} mb={1.5}>
+                            <Input
+                              size="xs"
+                              value={otpInput}
+                              onChange={(e) => setOtpInput(e.target.value)}
+                              placeholder="Enter OTP (482910)"
+                              bg="white"
+                              fontFamily="monospace"
+                              fontSize="11px"
+                              fontWeight="bold"
+                              letterSpacing="1px"
+                              textAlign="center"
+                            />
+                            <Button
+                              size="xs"
+                              colorScheme="orange"
+                              fontSize="9px"
+                              px={2}
+                              onClick={() => {
+                                if (otpInput.trim() === "482910" || otpInput.trim().length >= 4) {
+                                  handleUpdateWidget("state", pendingOtpChallenge.targetState, pendingOtpChallenge.widgetId);
+                                  setPendingOtpChallenge(null);
+                                  setOtpError("");
+                                } else {
+                                  setOtpError("Invalid OTP. Demo OTP is 482910");
+                                }
+                              }}
+                            >
+                              Verify
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              fontSize="9px"
+                              onClick={() => setPendingOtpChallenge(null)}
+                            >
+                              ✕
+                            </Button>
+                          </HStack>
+                          {otpError && (
+                            <Text fontSize="8px" color="red.600" fontWeight="bold" mb={1}>
+                              ⚠️ {otpError}
+                            </Text>
+                          )}
+                          <Text fontSize="8px" color="gray.500" fontStyle="italic">
+                            Demo Quick-fill: <strong>482910</strong>
+                          </Text>
+                        </Box>
+                      )}
+
+                      {/* Clickable Link for Switch Log (Collapsible drawer matching wireframe) */}
+                      <HStack justify="space-between" align="center" pt={0.5}>
+                        <Button
+                          variant="link"
+                          size="xs"
+                          colorScheme="blue"
+                          fontSize="10px"
+                          fontWeight="bold"
+                          textDecoration="underline"
+                          onClick={() => setOpenSwitchLogsMap((prev) => ({ ...prev, [w.id]: !prev[w.id] }))}
+                        >
+                          {isLogsOpen
+                            ? "▴ hide switch log"
+                            : `click here for switch log (${switchLogs.length})`}
+                        </Button>
+                        <Text fontSize="8px" color="gray.400">
+                          {isLogsOpen ? "Logs expanded" : "Click to view logs"}
+                        </Text>
+                      </HStack>
+
+                      {/* Cumulative Multiple Switch Logs Drawer */}
+                      {isLogsOpen && (
+                        <VStack align="stretch" spacing={1.5} pt={1} borderTop="1px solid" borderColor="gray.100">
+                          <HStack justify="space-between" align="center" px={0.5}>
+                            <Text fontSize="9px" fontWeight="extrabold" color="gray.600" textTransform="uppercase" letterSpacing="0.5px">
+                              Switch Logs ({switchLogs.length})
+                            </Text>
+                            {switchLogs.length > 2 && (
+                              <Text fontSize="8px" color="gray.400" fontWeight="semibold">
+                                Scroll for more ↓
+                              </Text>
+                            )}
+                          </HStack>
+
+                          {switchLogs.length === 0 ? (
+                            <Box p={3} bg="gray.50" borderRadius="md" border="1px dashed" borderColor="gray.200" textAlign="center">
+                              <Text fontSize="9px" color="gray.400" fontStyle="italic">
+                                No ON/OFF events recorded yet. Toggle switch to log location & timing.
+                              </Text>
+                            </Box>
+                          ) : (
+                            <VStack align="stretch" spacing={1.5} maxH="280px" overflowY="auto" pr={0.5}>
+                              {switchLogs.map((item, idx) => {
+                                const isON = item.event === "ON" || item.action === "ON";
+                                const lat = item.lat != null ? parseFloat(item.lat) : (item.latitude != null ? parseFloat(item.latitude) : null);
+                                const lng = item.lng != null ? parseFloat(item.lng) : (item.longitude != null ? parseFloat(item.longitude) : null);
+                                return (
+                                  <Box
+                                    key={item.id || `log-${idx}-${item.time || item.timestamp}`}
+                                    p={2}
+                                    bg={isON ? "green.50" : "red.50"}
+                                    borderRadius="md"
+                                    border="1px solid"
+                                    borderColor={isON ? "green.300" : "red.300"}
+                                  >
+                                    <HStack justify="space-between" align="center" mb={0.5}>
+                                      <HStack spacing={1}>
+                                        <Box w="6px" h="6px" borderRadius="full" bg={isON ? "green.500" : "red.500"} />
+                                        <Text fontSize="9px" fontWeight="extrabold" color={isON ? "green.700" : "red.700"} textTransform="uppercase">
+                                          {isON ? "Switch ON Timing & Location" : "Switch OFF Timing & Location"}
+                                        </Text>
+                                      </HStack>
+                                      <Text fontSize="9px" fontWeight="bold" color={isON ? "green.600" : "red.600"} fontFamily="monospace">
+                                        {formatGeologTime(item)}
                                       </Text>
                                     </HStack>
-                                    <Text fontSize="9px" fontWeight="bold" color={isON ? "green.600" : "red.600"} fontFamily="monospace">
-                                      {formatGeologTime(item)}
-                                    </Text>
-                                  </HStack>
 
-                                  <HStack justify="space-between" align="center">
-                                    <Text fontSize="10px" fontWeight="bold" color={isON ? "green.800" : "red.800"} noOfLines={1}>
-                                      📍 {item.city || (isON ? "Switch ON" : "Switch OFF")}
-                                    </Text>
-                                    <Text fontSize="8px" fontWeight="bold" color={isON ? "green.600" : "red.600"}>
-                                      Acc: {item.accuracy != null ? item.accuracy : (isON ? 12 : 10)}m
-                                    </Text>
-                                  </HStack>
-
-                                  {lat != null && lng != null && (
-                                    <HStack justify="space-between" align="center" mt={0.5}>
-                                      <Text fontSize="8px" color="gray.400" fontFamily="monospace">
-                                        {lat.toFixed(4)}° N, {lng.toFixed(4)}° E
+                                    <HStack justify="space-between" align="center">
+                                      <Text fontSize="10px" fontWeight="bold" color={isON ? "green.800" : "red.800"} noOfLines={1}>
+                                        📍 {item.city || (isON ? "Switch ON" : "Switch OFF")}
                                       </Text>
-                                      <Text
-                                        as="a"
-                                        href={`https://www.google.com/maps?q=${lat},${lng}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        fontSize="8px"
-                                        fontWeight="bold"
-                                        color={isON ? "green.600" : "red.600"}
-                                        _hover={{ textDecoration: "underline" }}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        View Map ↗
-                                      </Text>
+                                      <HStack spacing={1}>
+                                        {item.otpVerified && (
+                                          <Badge colorScheme="purple" fontSize="7px" px={1} borderRadius="sm">
+                                            OTP VERIFIED
+                                          </Badge>
+                                        )}
+                                        <Text fontSize="8px" fontWeight="bold" color={isON ? "green.600" : "red.600"}>
+                                          Acc: {item.accuracy != null ? item.accuracy : (isON ? 12 : 10)}m
+                                        </Text>
+                                      </HStack>
                                     </HStack>
-                                  )}
-                                </Box>
-                              );
-                            })}
-                          </VStack>
-                        )}
-                      </VStack>
+
+                                    {lat != null && lng != null && (
+                                      <HStack justify="space-between" align="center" mt={0.5}>
+                                        <Text fontSize="8px" color="gray.400" fontFamily="monospace">
+                                          {lat.toFixed(4)}° N, {lng.toFixed(4)}° E
+                                        </Text>
+                                        <Text
+                                          as="a"
+                                          href={`https://www.google.com/maps?q=${lat},${lng}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          fontSize="8px"
+                                          fontWeight="bold"
+                                          color={isON ? "green.600" : "red.600"}
+                                          _hover={{ textDecoration: "underline" }}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          View Map ↗
+                                        </Text>
+                                      </HStack>
+                                    )}
+                                  </Box>
+                                );
+                              })}
+                            </VStack>
+                          )}
+                        </VStack>
+                      )}
                     </VStack>
                   );
                 })()}
