@@ -110,14 +110,47 @@ def get_idf_path():
 
 def ensure_idf_environment():
     """Ensure ESP-IDF environment variables (PATH, IDF_PYTHON_ENV_PATH, etc.) are loaded."""
+    idf_path = get_idf_path()
+    if idf_path:
+        os.environ["IDF_PATH"] = idf_path
+
+    # Always ensure tools directories (cmake, ninja, compiler) are on PATH
+    search_dirs = [
+        get_env("IDF_TOOLS_PATH"),
+        r"D:\esp-idf-tools",
+        r"C:\esp-idf-tools",
+        r"C:\Espressif\tools",
+        r"D:\Espressif\tools",
+        os.path.join(os.path.expanduser("~"), ".espressif")
+    ]
+    tools_base = next((d for d in search_dirs if d and os.path.isdir(d)), None)
+    if tools_base:
+        os.environ["IDF_TOOLS_PATH"] = tools_base
+        extra_paths = []
+        py_env_dir = os.path.join(tools_base, "python_env")
+        if os.path.isdir(py_env_dir):
+            for name in sorted(os.listdir(py_env_dir), reverse=True):
+                candidate_dir = os.path.join(py_env_dir, name)
+                scripts = os.path.join(candidate_dir, "Scripts" if os.name == "nt" else "bin")
+                if os.path.isdir(scripts):
+                    os.environ["IDF_PYTHON_ENV_PATH"] = candidate_dir
+                    extra_paths.append(scripts)
+                    break
+        tools_sub = os.path.join(tools_base, "tools")
+        if os.path.isdir(tools_sub):
+            for root, dirs, files in os.walk(tools_sub):
+                if any(f.endswith(".exe") for f in files) if os.name == "nt" else any(os.access(os.path.join(root, f), os.X_OK) for f in files):
+                    extra_paths.append(root)
+        if idf_path:
+            extra_paths.append(os.path.join(idf_path, "tools"))
+        if extra_paths:
+            cur_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = os.pathsep.join(extra_paths) + os.pathsep + cur_path
+
     if shutil.which("cmake") is not None and get_env("IDF_PATH"):
         return
 
-    idf_path = get_idf_path()
-    if not idf_path:
-        return
-
-    if os.name == "nt":
+    if os.name == "nt" and idf_path:
         export_bat = os.path.join(idf_path, "export.bat")
         if os.path.isfile(export_bat):
             try:
@@ -289,13 +322,8 @@ def fetch_firmware_code(url=DEFAULT_URL):
         return None
 
 def ensure_reactive_firmware(code):
-    """Ensure firmware has reactive USB-Serial/JTAG listener for Automation & Hardware Rules."""
-    if not code:
-        return code
-    if "usb_serial_jtag_read_bytes" in code or "apply_command" in code or "process_cmd" in code:
-        return code
-    if "app_main" not in code:
-        return code
+    """Keep user's firmware code 100% intact."""
+    return code
 
     import re
     led_gpio = "GPIO_NUM_48"
@@ -549,23 +577,50 @@ def write_project_files(code, project_dir):
         main_cmake_path = os.path.join(main_dir, "CMakeLists.txt")
         root_cmake_path = os.path.join(project_dir, "CMakeLists.txt")
 
+        # Sanitize Unicode characters (such as \u00a0 / \302 non-breaking spaces) that break GCC C compilers
+        sanitized_code = (code or "")
+        sanitized_code = sanitized_code.replace("\u00a0", " ").replace("\ufeff", "").replace("\u200b", " ").strip()
+        import re
+        if sanitized_code.startswith("```"):
+            sanitized_code = re.sub(r'^```[a-zA-Z0-9_-]*\r?\n', '', sanitized_code)
+        if sanitized_code.endswith("```"):
+            sanitized_code = re.sub(r'\r?\n```$', '', sanitized_code)
+        if "ESP_RETURN_ON_ERROR" in sanitized_code and "esp_check.h" not in sanitized_code:
+            sanitized_code = re.sub(r'#include\s+["<]esp_log\.h[">]', '#include "esp_log.h"\n#include "esp_check.h"', sanitized_code)
+
         # Ensure reactive Automation & Hardware Rules support is preserved
-        processed_code = ensure_reactive_firmware(code)
+        processed_code = ensure_reactive_firmware(sanitized_code)
         normalized_code = processed_code.replace("\r\n", "\n")
         with open(main_c_path, "w", encoding="utf-8") as f:
             f.write(normalized_code)
         send_event("log", stream="system", log=f"Updated {main_c_path}")
 
         # Check if code requires led_strip or other components
-        requires_components = ["esp_driver_rmt", "esp_driver_gpio", "driver", "esp_driver_usb_serial_jtag", "esp_driver_uart", "vfs"]
+        is_led_needed = ("led_strip.h" in normalized_code or "led_strip" in normalized_code)
+        requires_components = ["driver"]
         idf_component_path = os.path.join(main_dir, "idf_component.yml")
-        if "led_strip.h" in normalized_code or "led_strip" in normalized_code:
-            if "led_strip" not in requires_components:
-                requires_components.insert(0, "led_strip")
-            if not os.path.exists(idf_component_path):
-                with open(idf_component_path, "w", encoding="utf-8") as f:
-                    f.write('dependencies:\n  espressif/led_strip: "^3.0.0"\n')
-                send_event("log", stream="system", log=f"Created {idf_component_path}")
+        if is_led_needed:
+            requires_components = ["led_strip", "esp_driver_rmt", "esp_driver_gpio", "driver", "esp_driver_usb_serial_jtag", "esp_driver_uart", "vfs"]
+            with open(idf_component_path, "w", encoding="utf-8") as f:
+                f.write('dependencies:\n  espressif/led_strip: "^3.0.0"\n')
+            send_event("log", stream="system", log=f"Configured {idf_component_path}")
+        else:
+            if os.path.exists(idf_component_path):
+                try:
+                    os.remove(idf_component_path)
+                except Exception:
+                    pass
+
+        # Check if code requires I2S audio components
+        if "driver/i2s" in normalized_code or "i2s_std.h" in normalized_code:
+            for comp in ["esp_driver_i2s", "driver"]:
+                if comp not in requires_components:
+                    requires_components.append(comp)
+
+        # Check if code requires UART components
+        if "driver/uart.h" in normalized_code:
+            if "esp_driver_uart" not in requires_components:
+                requires_components.append("esp_driver_uart")
 
         # Check if code requires Wi-Fi / Networking components
         if "esp_wifi.h" in normalized_code or "esp_wifi" in normalized_code:
@@ -573,7 +628,7 @@ def write_project_files(code, project_dir):
                 if comp not in requires_components:
                     requires_components.append(comp)
 
-        # Write main/CMakeLists.txt
+        # Synchronize main/CMakeLists.txt to ALWAYS match the exact required components
         main_cmake_contents = (
             f'idf_component_register(SRCS "main.c"\n'
             f'                    INCLUDE_DIRS "."\n'
@@ -581,7 +636,7 @@ def write_project_files(code, project_dir):
         )
         with open(main_cmake_path, "w", encoding="utf-8") as f:
             f.write(main_cmake_contents)
-        send_event("log", stream="system", log=f"Updated {main_cmake_path}")
+        send_event("log", stream="system", log=f"Configured {main_cmake_path} with: {' '.join(requires_components)}")
 
         # Preserve existing root CMakeLists.txt if present
         if not os.path.exists(root_cmake_path):

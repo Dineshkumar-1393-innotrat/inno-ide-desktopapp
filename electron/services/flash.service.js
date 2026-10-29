@@ -446,25 +446,48 @@ export class FlashService {
         const mainCmakePath = path.join(mainDir, 'CMakeLists.txt');
         const rootCmakePath = path.join(this.projectDir, 'CMakeLists.txt');
 
-        const processedCode = this.ensureReactiveFirmware(code);
+        // Sanitize Unicode characters (such as \u00a0 / \302 non-breaking spaces) that break GCC C compilers
+        let sanitizedCode = (code || '')
+          .replace(/\u00a0/g, ' ')
+          .replace(/[\u2000-\u200b\u202f\u205f\u3000\ufeff]/g, ' ')
+          .replace(/[\u2018\u2019]/g, "'")
+          .replace(/[\u201c\u201d]/g, '"')
+          .replace(/[\u2013\u2014]/g, '-')
+          .trim();
+
+        // Strip markdown code fences (```c, ```, etc.) if copied from chat
+        if (sanitizedCode.startsWith('```')) {
+          sanitizedCode = sanitizedCode.replace(/^```[a-zA-Z0-9_-]*\r?\n/, '');
+        }
+        if (sanitizedCode.endsWith('```')) {
+          sanitizedCode = sanitizedCode.replace(/\r?\n```$/, '');
+        }
+
+        if (sanitizedCode.includes('ESP_RETURN_ON_ERROR') && !sanitizedCode.includes('esp_check.h')) {
+          sanitizedCode = sanitizedCode.replace(/#include\s+["<]esp_log\.h[">]/, '#include "esp_log.h"\n#include "esp_check.h"');
+        }
+
+        const processedCode = this.ensureReactiveFirmware(sanitizedCode);
         fs.writeFileSync(mainCPath, processedCode.replace(/\r\n/g, '\n'), 'utf-8');
-        logger.info(`Wrote active code-editor canvas source code to ${mainCPath} (ensured reactive Automation Rules support)`);
+        logger.info(`Wrote active code-editor canvas source code to ${mainCPath}`);
 
-        const isLedStripUsed = code.includes('led_strip.h') || code.includes('led_strip');
-        const isWifiUsed = code.includes('esp_wifi.h') || code.includes('esp_wifi');
+        const isLedStripUsed = processedCode.includes('led_strip.h') || processedCode.includes('led_strip');
+        const isWifiUsed = processedCode.includes('esp_wifi.h') || processedCode.includes('esp_wifi');
+        const isI2sUsed = processedCode.includes('driver/i2s') || processedCode.includes('i2s_std.h');
+        const isUartUsed = processedCode.includes('driver/uart.h');
         const idfComponentYml = path.join(mainDir, 'idf_component.yml');
-        if (isLedStripUsed && !fs.existsSync(idfComponentYml)) {
-          fs.writeFileSync(idfComponentYml, 'dependencies:\n  espressif/led_strip: "^3.0.0"\n', 'utf-8');
-        }
-
-        const reqList = ['esp_driver_rmt', 'esp_driver_gpio', 'driver', 'esp_driver_usb_serial_jtag', 'esp_driver_uart', 'vfs'];
         if (isLedStripUsed) {
-          reqList.unshift('led_strip');
-        }
-        if (isWifiUsed) {
-          reqList.push('esp_wifi', 'esp_netif', 'esp_event', 'nvs_flash', 'lwip', 'esp_http_server');
+          fs.writeFileSync(idfComponentYml, 'dependencies:\n  espressif/led_strip: "^3.0.0"\n', 'utf-8');
+        } else if (fs.existsSync(idfComponentYml)) {
+          try { fs.unlinkSync(idfComponentYml); } catch (_) {}
         }
 
+        // Synchronize main/CMakeLists.txt to ALWAYS match the exact required components
+        const reqList = ['driver'];
+        if (isLedStripUsed) reqList.unshift('led_strip', 'esp_driver_rmt', 'esp_driver_gpio');
+        if (isI2sUsed && !reqList.includes('esp_driver_i2s')) reqList.push('esp_driver_i2s');
+        if (isUartUsed && !reqList.includes('esp_driver_uart')) reqList.push('esp_driver_uart');
+        if (isWifiUsed) reqList.push('esp_wifi', 'esp_netif', 'esp_event', 'nvs_flash', 'lwip', 'esp_http_server');
         fs.writeFileSync(mainCmakePath, `idf_component_register(SRCS "main.c"\n                    INCLUDE_DIRS "."\n                    REQUIRES ${reqList.join(' ')})\n`, 'utf-8');
 
         if (!fs.existsSync(rootCmakePath)) {
@@ -734,257 +757,8 @@ export class FlashService {
   }
 
   ensureReactiveFirmware(code) {
-    if (!code || typeof code !== 'string') return code;
-    
-    // If code already contains reactive USB-Serial/JTAG or UART listener / command handler, leave it as-is
-    if (code.includes('usb_serial_jtag_read_bytes') || code.includes('apply_command') || code.includes('process_cmd')) {
-      return code;
-    }
-
-    // If code is not an ESP-IDF C application (e.g. no app_main), leave as-is
-    if (!code.includes('app_main')) {
-      return code;
-    }
-
-    // Seamlessly preserve user's configuration while augmenting with reactive Automation & Hardware Rules support
-    let ledGpio = 'GPIO_NUM_48';
-    const gpioMatch = code.match(/strip_gpio_num\s*=\s*(GPIO_NUM_\d+|\d+)/i) || code.match(/#define\s+LED_GPIO\s+(GPIO_NUM_\d+|\d+)/i);
-    if (gpioMatch) ledGpio = gpioMatch[1];
-
-    let r = 0, g = 0, b = 255;
-    const pixelMatch = code.match(/led_strip_set_pixel\s*\([^,]+,\s*\d+,\s*(\d+),\s*(\d+),\s*(\d+)\)/);
-    if (pixelMatch) {
-      const pr = parseInt(pixelMatch[1], 10), pg = parseInt(pixelMatch[2], 10), pb = parseInt(pixelMatch[3], 10);
-      if (pr > 0 || pg > 0 || pb > 0) { r = pr; g = pg; b = pb; }
-    }
-
-    let delayMs = 1000;
-    const delayMatch = code.match(/vTaskDelay\s*\(\s*pdMS_TO_TICKS\s*\(\s*(\d+)\s*\)\s*\)/);
-    if (delayMatch) {
-      delayMs = parseInt(delayMatch[1], 10) || 1000;
-    }
-
-    logger.info(`[FlashService] Augmenting user firmware with Automation & Hardware Rules reactive serial listener (GPIO: ${ledGpio}, RGB: [${r},${g},${b}], Delay: ${delayMs}ms)`);
-
-    return `#include <ctype.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
-#include <strings.h>
-
-#include "driver/gpio.h"
-#include "driver/uart.h"
-#include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "led_strip.h"
-
-// Hardware Pin Definitions & Target Architecture Compatibility
-#if CONFIG_IDF_TARGET_ESP32S3
-#include "driver/usb_serial_jtag.h"
-#define HAS_USB_SERIAL_JTAG 1
-#define LED_GPIO ${ledGpio}
-#define LED_GPIO_STANDARD GPIO_NUM_2
-#elif CONFIG_IDF_TARGET_ESP32C3
-#include "driver/usb_serial_jtag.h"
-#define HAS_USB_SERIAL_JTAG 1
-#define LED_GPIO GPIO_NUM_8
-#define LED_GPIO_STANDARD GPIO_NUM_2
-#else
-#define HAS_USB_SERIAL_JTAG 0
-#define LED_GPIO GPIO_NUM_2
-#define LED_GPIO_STANDARD GPIO_NUM_2
-#endif
-
-#define LED_COUNT 1
-#define COMMAND_BUFFER_SIZE 64
-
-#define LED_COLOR_R ${r}
-#define LED_COLOR_G ${g}
-#define LED_COLOR_B ${b}
-#define BLINK_DELAY_MS ${delayMs}
-
-static led_strip_handle_t s_strip = NULL;
-static volatile bool s_blink_enabled = true;
-
-static void send_serial_ack(const char *msg)
-{
-    size_t len = strlen(msg);
-#if HAS_USB_SERIAL_JTAG
-    usb_serial_jtag_write_bytes(msg, len, pdMS_TO_TICKS(50));
-#endif
-    uart_write_bytes(UART_NUM_0, msg, len);
-}
-
-static void apply_command(const char *cmd)
-{
-    if (!cmd || strlen(cmd) == 0) return;
-
-    if (strstr(cmd, "LED:0") != NULL ||
-        strstr(cmd, "led:0") != NULL ||
-        strstr(cmd, "LED:OFF") != NULL ||
-        strstr(cmd, "led:off") != NULL ||
-        strstr(cmd, "LED:LOW") != NULL ||
-        strstr(cmd, "led:low") != NULL ||
-        strstr(cmd, "GPIO:LOW") != NULL ||
-        strstr(cmd, "gpio:low") != NULL ||
-        strstr(cmd, "GPIO:0") != NULL ||
-        strstr(cmd, "gpio:0") != NULL ||
-        strstr(cmd, "RELAY:0") != NULL ||
-        strcasecmp(cmd, "0") == 0 ||
-        strcasecmp(cmd, "OFF") == 0 ||
-        strcasecmp(cmd, "LOW") == 0 ||
-        strcasecmp(cmd, "STOP") == 0) {
-
-        s_blink_enabled = false;
-        if (s_strip) {
-            led_strip_clear(s_strip);
-            led_strip_refresh(s_strip);
-        }
-        gpio_set_level(LED_GPIO_STANDARD, 0);
-        send_serial_ack("ACK:LED:0\\r\\n");
-    }
-    else if (strstr(cmd, "LED:1") != NULL ||
-             strstr(cmd, "led:1") != NULL ||
-             strstr(cmd, "LED:ON") != NULL ||
-             strstr(cmd, "led:on") != NULL ||
-             strstr(cmd, "LED:HIGH") != NULL ||
-             strstr(cmd, "led:high") != NULL ||
-             strstr(cmd, "GPIO:HIGH") != NULL ||
-             strstr(cmd, "gpio:high") != NULL ||
-             strstr(cmd, "GPIO:1") != NULL ||
-             strstr(cmd, "gpio:1") != NULL ||
-             strstr(cmd, "RELAY:1") != NULL ||
-             strcasecmp(cmd, "1") == 0 ||
-             strcasecmp(cmd, "ON") == 0 ||
-             strcasecmp(cmd, "HIGH") == 0 ||
-             strcasecmp(cmd, "START") == 0 ||
-             strcasecmp(cmd, "TRIGGER") == 0) {
-
-        s_blink_enabled = true;
-        send_serial_ack("ACK:LED:1\\r\\n");
-    }
-    else if (strcasecmp(cmd, "PING") == 0) {
-        send_serial_ack("PONG\\r\\n");
-    }
-    else if (strcasecmp(cmd, "STATUS") == 0 || strcasecmp(cmd, "GET:STATE") == 0) {
-        send_serial_ack(s_blink_enabled ? "STATE:1\\r\\n" : "STATE:0\\r\\n");
-    }
-}
-
-static void poll_serial(char *buf, size_t *idx, size_t max_len)
-{
-    uint8_t byte = 0;
-    while (true) {
-        int read_count = 0;
-#if HAS_USB_SERIAL_JTAG
-        if (usb_serial_jtag_read_bytes(&byte, 1, 0) > 0) {
-            read_count = 1;
-        } else
-#endif
-        if (uart_read_bytes(UART_NUM_0, &byte, 1, 0) > 0) {
-            read_count = 1;
-        }
-        if (read_count == 0) break;
-
-        char c = (char)byte;
-        if (c == '\\r' || c == '\\n') {
-            if (*idx > 0) {
-                buf[*idx] = '\\0';
-                apply_command(buf);
-                *idx = 0;
-            }
-        } else if (*idx < max_len - 1) {
-            buf[(*idx)++] = c;
-            buf[*idx] = '\\0';
-            if (strcmp(buf, "LED:0") == 0 || strcmp(buf, "LED:1") == 0 ||
-                strcasecmp(buf, "LED:OFF") == 0 || strcasecmp(buf, "LED:ON") == 0) {
-                apply_command(buf);
-                *idx = 0;
-            }
-        } else {
-            *idx = 0;
-        }
-    }
-}
-
-void app_main(void)
-{
-    gpio_reset_pin(LED_GPIO_STANDARD);
-    gpio_set_direction(LED_GPIO_STANDARD, GPIO_MODE_OUTPUT);
-    gpio_set_level(LED_GPIO_STANDARD, 0);
-
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = LED_GPIO,
-        .max_leds = LED_COUNT,
-        .led_model = LED_MODEL_WS2812,
-        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
-    };
-    led_strip_rmt_config_t rmt_config = {
-        .resolution_hz = 10 * 1000 * 1000,
-        .flags.with_dma = false,
-    };
-    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &s_strip));
-    ESP_ERROR_CHECK(led_strip_clear(s_strip));
-    ESP_ERROR_CHECK(led_strip_refresh(s_strip));
-
-#if HAS_USB_SERIAL_JTAG
-    usb_serial_jtag_driver_config_t usb_config = {
-        .tx_buffer_size = 1024,
-        .rx_buffer_size = 1024,
-    };
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
-#endif
-
-    uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-    uart_param_config(UART_NUM_0, &uart_config);
-    uart_driver_install(UART_NUM_0, 512, 512, 0, NULL, 0);
-
-    char cmd_buf[COMMAND_BUFFER_SIZE] = {0};
-    size_t cmd_idx = 0;
-
-    send_serial_ack("BOOT:INNO_IDE_READY\\r\\n");
-
-    while (1)
-    {
-        poll_serial(cmd_buf, &cmd_idx, sizeof(cmd_buf));
-
-        if (!s_blink_enabled) {
-            vTaskDelay(pdMS_TO_TICKS(25));
-            continue;
-        }
-
-        led_strip_set_pixel(s_strip, 0, LED_COLOR_R, LED_COLOR_G, LED_COLOR_B);
-        led_strip_refresh(s_strip);
-        gpio_set_level(LED_GPIO_STANDARD, 1);
-
-        for (int elapsed = 0; elapsed < BLINK_DELAY_MS && s_blink_enabled; elapsed += 25) {
-            vTaskDelay(pdMS_TO_TICKS(25));
-            poll_serial(cmd_buf, &cmd_idx, sizeof(cmd_buf));
-        }
-
-        if (!s_blink_enabled) {
-            continue;
-        }
-
-        led_strip_clear(s_strip);
-        led_strip_refresh(s_strip);
-        gpio_set_level(LED_GPIO_STANDARD, 0);
-
-        for (int elapsed = 0; elapsed < BLINK_DELAY_MS && s_blink_enabled; elapsed += 25) {
-            vTaskDelay(pdMS_TO_TICKS(25));
-            poll_serial(cmd_buf, &cmd_idx, sizeof(cmd_buf));
-        }
-    }
-}
-`;
+    // Keep user's firmware code 100% intact as written in the code editor.
+    return code;
   }
 
   _killProcessTree(pid) {

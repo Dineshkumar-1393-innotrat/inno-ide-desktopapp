@@ -369,6 +369,21 @@ const CodeEditor = ({ currentPanel, onDebugClick, onFlashClick }) => {
         console.warn("[CodeEditor] Local drive save warning:", localErr);
       }
 
+      // Keep main/main.c in project root directly synchronized with the active C file in editor
+      if (fileName.endsWith('.c') || !targetTab.language || targetTab.language === 'c') {
+        try {
+          if (typeof window !== "undefined" && window.electronAPI?.filesystem?.writeFile) {
+            const cleanContent = (content || '')
+              .replace(/\u00a0/g, ' ')
+              .replace(/[\u2000-\u200b\u202f\u205f\u3000\ufeff]/g, ' ')
+              .replace(/[\u2018\u2019]/g, "'")
+              .replace(/[\u201c\u201d]/g, '"')
+              .replace(/[\u2013\u2014]/g, '-');
+            window.electronAPI.filesystem.writeFile('main/main.c', cleanContent, 'utf8').catch(() => {});
+          }
+        } catch (_) {}
+      }
+
       // Notify file system to refresh
       window.dispatchEvent(new CustomEvent("file-system-refresh"));
 
