@@ -1,8 +1,12 @@
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { dialog, app } from 'electron';
 import { logger } from '../utils/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export class FilesystemService {
   constructor() {
@@ -247,7 +251,9 @@ export class FilesystemService {
   syncCodeToWorkspaceMain(cContent) {
     if (!cContent || typeof cContent !== 'string') return;
     try {
-      const workspaceDir = path.resolve(__dirname, '../../');
+      const workspaceDir = app.isPackaged
+        ? path.join(process.resourcesPath)
+        : path.resolve(__dirname, '../../');
       const mainDir = path.join(workspaceDir, 'main');
       if (!fs.existsSync(mainDir)) fs.mkdirSync(mainDir, { recursive: true });
 
@@ -292,6 +298,7 @@ export class FilesystemService {
       const reqList = ['driver'];
       if (isLedStrip) reqList.unshift('led_strip', 'esp_driver_rmt', 'esp_driver_gpio');
       if (isI2s && !reqList.includes('esp_driver_i2s')) reqList.push('esp_driver_i2s');
+      if ((isI2s || sanitized.includes('driver/gpio.h')) && !reqList.includes('esp_driver_gpio')) reqList.push('esp_driver_gpio');
       if (isUart && !reqList.includes('esp_driver_uart')) reqList.push('esp_driver_uart');
       if (isWifi) reqList.push('esp_wifi', 'esp_netif', 'esp_event', 'nvs_flash', 'lwip', 'esp_http_server');
 

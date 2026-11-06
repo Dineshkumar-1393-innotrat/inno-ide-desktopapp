@@ -3,23 +3,24 @@
 #include <stddef.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_check.h"
 
 #define I2S_BCLK GPIO_NUM_6
 #define I2S_LRC  GPIO_NUM_7
 #define I2S_DOUT GPIO_NUM_8
 #define AMP_SD   GPIO_NUM_10
 
-#define SAMPLE_RATE       16000
-#define VOLUME             10000
-#define BEEP_HZ            3000.0f
-#define BEEP_DURATION_MS   1000
-#define BEEP_GAP_MS         300
-#define PAUSE_MS           1000
-#define FRAMES_PER_BUFFER   256
+#define SAMPLE_RATE 16000
+#define VOLUME      10000
+#define BEEP_HZ     3000.0f
+#define PAUSE_MS    400
+
+#define FRAMES_PER_BUFFER 256
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -95,19 +96,17 @@ static esp_err_t play_tone(float freq, int duration_ms)
 
 static esp_err_t alert_sound(void)
 {
-    esp_err_t err;
+    ESP_RETURN_ON_ERROR(
+        play_tone(BEEP_HZ, 150), TAG, "First beep failed");
 
-    err = play_tone(BEEP_HZ, BEEP_DURATION_MS);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        play_tone(0.0f, 80), TAG, "First silence failed");
 
-    err = play_tone(0.0f, BEEP_GAP_MS);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        play_tone(BEEP_HZ, 150), TAG, "Second beep failed");
 
-    err = play_tone(BEEP_HZ, BEEP_DURATION_MS);
-    if (err != ESP_OK) return err;
-
-    err = play_tone(0.0f, BEEP_GAP_MS);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        play_tone(0.0f, 120), TAG, "Final silence failed");
 
     return ESP_OK;
 }
@@ -119,29 +118,32 @@ static esp_err_t speaker_init(void)
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
+        .intr_type = GPIO_INTR_DISABLE,
     };
 
-    esp_err_t err = gpio_config(&io);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        gpio_config(&io), TAG, "Amplifier GPIO setup failed");
 
-    err = gpio_set_level(AMP_SD, 1);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        gpio_set_level(AMP_SD, 1), TAG, "Amplifier enable failed");
 
     i2s_chan_config_t chan_cfg =
         I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
 
     chan_cfg.auto_clear = true;
 
-    err = i2s_new_channel(&chan_cfg, &tx, NULL);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        i2s_new_channel(&chan_cfg, &tx, NULL),
+        TAG, "I2S channel creation failed");
 
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
+
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
             I2S_DATA_BIT_WIDTH_16BIT,
             I2S_SLOT_MODE_STEREO
         ),
+
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = I2S_BCLK,
@@ -151,35 +153,36 @@ static esp_err_t speaker_init(void)
             .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,
-                .ws_inv = false
-            }
-        }
+                .ws_inv = false,
+            },
+        },
     };
 
-    err = i2s_channel_init_std_mode(tx, &std_cfg);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        i2s_channel_init_std_mode(tx, &std_cfg),
+        TAG, "I2S initialization failed");
 
-    err = i2s_channel_enable(tx);
-    if (err != ESP_OK) return err;
+    ESP_RETURN_ON_ERROR(
+        i2s_channel_enable(tx), TAG, "I2S enable failed");
 
-    ESP_LOGI(TAG, "Speaker initialized successfully");
+    ESP_LOGI(TAG,
+             "Speaker ready: BCLK=%d, LRC=%d, DOUT=%d, SD=%d",
+             I2S_BCLK, I2S_LRC, I2S_DOUT, AMP_SD);
+
     return ESP_OK;
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Starting alert speaker");
-
     ESP_ERROR_CHECK(speaker_init());
 
     uint32_t count = 0;
 
     while (1) {
         ESP_ERROR_CHECK(alert_sound());
-
         ESP_ERROR_CHECK(play_tone(0.0f, PAUSE_MS));
 
-        ESP_LOGI(TAG, "Alert sound #%lu",
+        ESP_LOGI(TAG, "Alert sound %lu",
                  (unsigned long)++count);
     }
 }

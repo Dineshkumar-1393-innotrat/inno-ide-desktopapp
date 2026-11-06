@@ -11,12 +11,27 @@ extraMetadata:
 
 directories:
   output: release
-  buildResources: build
+  buildResources: build-resources
 
 files:
   - dist/**/*
   - electron/**/*
   - package.json
+
+extraResources:
+  - from: python/
+    to: python/
+    filter:
+      - "**/*"
+      - "!__pycache__/**"
+  - from: main/
+    to: main/
+    filter:
+      - "**/*"
+  - from: managed_components/
+    to: managed_components/
+    filter:
+      - "**/*"
 
 win:
   target:

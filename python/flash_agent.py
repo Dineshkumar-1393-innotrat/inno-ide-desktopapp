@@ -588,6 +588,30 @@ def write_project_files(code, project_dir):
         if "ESP_RETURN_ON_ERROR" in sanitized_code and "esp_check.h" not in sanitized_code:
             sanitized_code = re.sub(r'#include\s+["<]esp_log\.h[">]', '#include "esp_log.h"\n#include "esp_check.h"', sanitized_code)
 
+        # Auto-repair truncated audio tone snippet if pasted incomplete from chat
+        if "VOLUME * sin" in sanitized_code and "sin(" not in sanitized_code and "sinf(" not in sanitized_code:
+            sanitized_code = re.sub(
+                r'for\s*\(\s*int\s+i\s*=\s*0;\s*i\s*<\s*n;\s*i\+\+\s*\)\s*\{[\s\S]*?total\s*-=\s*n;\s*\}\s*\}',
+                '''for (int i = 0; i < n; i++) {
+            int16_t v = 0;
+            if (freq > 0) {
+                v = (int16_t)(VOLUME * sinf(phase));
+                phase += step;
+                if (phase > 2.0f * (float)M_PI) {
+                    phase -= 2.0f * (float)M_PI;
+                }
+            }
+            buf[2 * i]     = v;
+            buf[2 * i + 1] = v;
+        }
+        size_t written = 0;
+        i2s_channel_write(tx, buf, n * 2 * sizeof(int16_t), &written, portMAX_DELAY);
+        total -= n;
+    }
+}''',
+                sanitized_code
+            )
+
         # Ensure reactive Automation & Hardware Rules support is preserved
         processed_code = ensure_reactive_firmware(sanitized_code)
         normalized_code = processed_code.replace("\r\n", "\n")
@@ -610,6 +634,10 @@ def write_project_files(code, project_dir):
                     os.remove(idf_component_path)
                 except Exception:
                     pass
+
+        # Check if code requires GPIO components
+        if "driver/gpio.h" in normalized_code and "esp_driver_gpio" not in requires_components:
+            requires_components.append("esp_driver_gpio")
 
         # Check if code requires I2S audio components
         if "driver/i2s" in normalized_code or "i2s_std.h" in normalized_code:

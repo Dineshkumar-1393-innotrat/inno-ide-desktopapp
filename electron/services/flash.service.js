@@ -17,8 +17,15 @@ export class FlashService {
   constructor() {
     this.pipelineProcess = null;
     this.monitorProcess = null;
-    this.projectDir = path.resolve(__dirname, '../../');
-    this.pythonScript = path.resolve(__dirname, '../../python/flash_agent.py');
+    // In packaged mode, extraResources live under process.resourcesPath
+    // In dev mode, they live relative to the project root
+    const isPackaged = app.isPackaged;
+    this.projectDir = isPackaged
+      ? path.join(process.resourcesPath)
+      : path.resolve(__dirname, '../../');
+    this.pythonScript = isPackaged
+      ? path.join(process.resourcesPath, 'python', 'flash_agent.py')
+      : path.resolve(__dirname, '../../python/flash_agent.py');
     this.configFilePath = null;
     this.preparedEnv = null;
     this.discoveredIdf = null;
@@ -486,6 +493,7 @@ export class FlashService {
         const reqList = ['driver'];
         if (isLedStripUsed) reqList.unshift('led_strip', 'esp_driver_rmt', 'esp_driver_gpio');
         if (isI2sUsed && !reqList.includes('esp_driver_i2s')) reqList.push('esp_driver_i2s');
+        if ((isI2sUsed || processedCode.includes('driver/gpio.h')) && !reqList.includes('esp_driver_gpio')) reqList.push('esp_driver_gpio');
         if (isUartUsed && !reqList.includes('esp_driver_uart')) reqList.push('esp_driver_uart');
         if (isWifiUsed) reqList.push('esp_wifi', 'esp_netif', 'esp_event', 'nvs_flash', 'lwip', 'esp_http_server');
         fs.writeFileSync(mainCmakePath, `idf_component_register(SRCS "main.c"\n                    INCLUDE_DIRS "."\n                    REQUIRES ${reqList.join(' ')})\n`, 'utf-8');

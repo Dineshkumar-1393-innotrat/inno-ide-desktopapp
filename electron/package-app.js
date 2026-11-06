@@ -60,15 +60,42 @@ if (fs.existsSync(defaultAppAsar)) {
   }
 }
 
-// 4. Create InnoIDE.exe executable in win-unpacked
+// 4. Copy extra resources (python, main, managed_components) into resources/
+console.log('4. Copying extra resources...');
+const extraResources = [
+  { from: 'python', filter: (name) => name !== '__pycache__' },
+  { from: 'main', filter: null },
+  { from: 'managed_components', filter: null },
+];
+
+for (const res of extraResources) {
+  const srcDir = path.join(rootDir, res.from);
+  const destDir = path.join(resourcesDir, res.from);
+  if (fs.existsSync(srcDir)) {
+    fs.cpSync(srcDir, destDir, {
+      recursive: true,
+      filter: res.filter
+        ? (src) => {
+            const basename = path.basename(src);
+            return res.filter(basename);
+          }
+        : undefined,
+    });
+    console.log(`   Copied ${res.from}/ -> resources/${res.from}/`);
+  } else {
+    console.log(`   Skipped ${res.from}/ (not found)`);
+  }
+}
+
+// 5. Create InnoIDE.exe executable in win-unpacked
 const electronExe = path.join(winUnpackedDir, 'electron.exe');
 const innoIdeExe = path.join(winUnpackedDir, 'InnoIDE.exe');
 if (fs.existsSync(electronExe)) {
   fs.copyFileSync(electronExe, innoIdeExe);
-  console.log(`4. Created standalone executable: ${innoIdeExe}`);
+  console.log(`5. Created standalone executable: ${innoIdeExe}`);
 }
 
-// 5. Clean up staging folder
+// 6. Clean up staging folder
 fs.rmSync(stagingDir, { recursive: true, force: true });
 
 console.log('--- Packaging Complete! ---');
