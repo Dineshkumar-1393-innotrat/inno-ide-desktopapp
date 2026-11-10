@@ -27,7 +27,7 @@ import { motion } from 'framer-motion';
 import loginImage from '../images/image.jpg';
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/;
+const NAME_REGEX = /^[a-zA-Z0-9_]+(?:\s[a-zA-Z0-9_]+)*$/;
 
 const CreateAccount = () => {
   const [formData, setFormData] = useState({
@@ -48,20 +48,39 @@ const CreateAccount = () => {
   const validateForm = useCallback(() => {
     const newErrors = {};
 
-    if (!USERNAME_REGEX.test(formData.name)) {
-      newErrors.name = 'Name must be 3-20 characters and can only contain letters, numbers, and underscores';
+    const trimmedName = (formData.name || '').trim();
+    // White spaces should not be considered as characters when counting length
+    const nameCharCount = trimmedName.replace(/\s+/g, '').length;
+
+    if (!trimmedName || nameCharCount === 0) {
+      newErrors.name = 'Full Name is required';
+    } else if (nameCharCount < 3 || nameCharCount > 20) {
+      newErrors.name = 'Name must be 3-20 characters (excluding spaces)';
+    } else if (!NAME_REGEX.test(trimmedName)) {
+      newErrors.name = 'Name can only contain letters, numbers, underscores, and single spaces between words';
     }
 
-    if (!/^\d{10}$/.test(formData.mobileNumber)) {
+    const cleanMobile = (formData.mobileNumber || '').replace(/\s+/g, '');
+    if (!cleanMobile) {
+      newErrors.mobileNumber = 'Mobile number is required';
+    } else if (!/^\d{10}$/.test(cleanMobile)) {
       newErrors.mobileNumber = 'Mobile number must be 10 digits';
     }
 
-    if (!PASSWORD_REGEX.test(formData.password)) {
+    const cleanPassword = (formData.password || '').replace(/\s+/g, '');
+    if (!cleanPassword) {
+      newErrors.password = 'Password is required';
+    } else if (cleanPassword.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters (excluding spaces)';
+    } else if (!PASSWORD_REGEX.test(cleanPassword)) {
       newErrors.password =
         'Password must be at least 8 characters and contain uppercase, lowercase, number, and special character';
     }
 
-    if (formData.password !== formData.confirmPassword) {
+    const cleanConfirm = (formData.confirmPassword || '').replace(/\s+/g, '');
+    if (!cleanConfirm) {
+      newErrors.confirmPassword = 'Confirm Password is required';
+    } else if (cleanPassword !== cleanConfirm) {
       newErrors.confirmPassword = 'Passwords do not match';
     }
 
@@ -71,18 +90,51 @@ const CreateAccount = () => {
 
   const handleChange = useCallback((e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    let cleanValue = value;
+
+    if (name === 'mobileNumber') {
+      // White spaces are not considered as characters: strip spaces and non-digits, max 10
+      cleanValue = value.replace(/\s+/g, '').replace(/\D/g, '').slice(0, 10);
+    } else if (name === 'password' || name === 'confirmPassword') {
+      // White spaces are not considered as characters in password fields
+      cleanValue = value.replace(/\s+/g, '');
+    } else if (name === 'name') {
+      // White spaces are not considered as characters: prevent leading spaces and collapse multiple spaces
+      cleanValue = value.replace(/^\s+/, '').replace(/\s{2,}/g, ' ');
+    }
+
+    setFormData(prev => ({ ...prev, [name]: cleanValue }));
     setErrors(prev => ({ ...prev, [name]: '' }));
   }, []);
 
+  const handleKeyDownNoSpaces = (e) => {
+    if (e.key === ' ') {
+      e.preventDefault();
+    }
+  };
+
+  const handleNameKeyDown = (e) => {
+    if (e.key === ' ' && (!formData.name || formData.name.endsWith(' '))) {
+      e.preventDefault();
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
 
     if (!validateForm()) return;
 
+    setLoading(true);
+
     try {
-      const response = await signup(formData);
+      const payload = {
+        name: (formData.name || '').trim(),
+        countryCode: (formData.countryCode || '').trim() || '+91',
+        mobileNumber: (formData.mobileNumber || '').replace(/\s+/g, ''),
+        password: (formData.password || '').replace(/\s+/g, '')
+      };
+
+      const response = await signup(payload);
 
       if (response.status === 'success') {
         toast({
@@ -146,7 +198,7 @@ const CreateAccount = () => {
               <VStack spacing={4}>
                 <FormControl isInvalid={!!errors.name} isRequired>
                   <FormLabel fontWeight="semibold" color="gray.700" mb={1}>Full Name</FormLabel>
-                  <Input type="text" name="name" placeholder="Enter your full name" value={formData.name} onChange={handleChange} autoComplete="name" size="md" height="42px" borderRadius="lg" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
+                  <Input type="text" name="name" placeholder="Enter your full name" value={formData.name} onChange={handleChange} onKeyDown={handleNameKeyDown} autoComplete="name" size="md" height="42px" borderRadius="lg" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                   <FormErrorMessage>{errors.name}</FormErrorMessage>
                 </FormControl>
 
@@ -158,7 +210,7 @@ const CreateAccount = () => {
 
                   <FormControl isInvalid={!!errors.mobileNumber} isRequired width="70%">
                     <FormLabel fontWeight="semibold" color="gray.700" mb={1}>Mobile Number</FormLabel>
-                    <Input type="tel" name="mobileNumber" placeholder="10-digit number" value={formData.mobileNumber} onChange={handleChange} autoComplete="tel" size="md" height="42px" borderRadius="lg" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
+                    <Input type="tel" name="mobileNumber" placeholder="10-digit number" value={formData.mobileNumber} onChange={handleChange} onKeyDown={handleKeyDownNoSpaces} autoComplete="tel" size="md" height="42px" borderRadius="lg" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <FormErrorMessage>{errors.mobileNumber}</FormErrorMessage>
                   </FormControl>
                 </HStack>
@@ -166,7 +218,7 @@ const CreateAccount = () => {
                 <FormControl isInvalid={!!errors.password} isRequired>
                   <FormLabel fontWeight="semibold" color="gray.700" mb={1}>Password</FormLabel>
                   <InputGroup size="md" width="100%">
-                    <Input type={showPassword ? 'text' : 'password'} name="password" placeholder="Create a strong password" value={formData.password} onChange={handleChange} autoComplete="new-password" size="md" height="42px" borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
+                    <Input type={showPassword ? 'text' : 'password'} name="password" placeholder="Create a strong password" value={formData.password} onChange={handleChange} onKeyDown={handleKeyDownNoSpaces} autoComplete="new-password" size="md" height="42px" borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement h="42px" width="3rem" right="0">
                       <IconButton aria-label={showPassword ? 'Hide password' : 'Show password'} icon={showPassword ? <ViewOffIcon /> : <ViewIcon />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'gray.100', color: 'gray.800' }} size="sm" />
                     </InputRightElement>
@@ -177,7 +229,7 @@ const CreateAccount = () => {
                 <FormControl isInvalid={!!errors.confirmPassword} isRequired>
                   <FormLabel fontWeight="semibold" color="gray.700" mb={1}>Confirm Password</FormLabel>
                   <InputGroup size="md" width="100%">
-                    <Input type={showPassword ? 'text' : 'password'} name="confirmPassword" placeholder="Re-enter your password" value={formData.confirmPassword} onChange={handleChange} autoComplete="new-password" size="md" height="42px" borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
+                    <Input type={showPassword ? 'text' : 'password'} name="confirmPassword" placeholder="Re-enter your password" value={formData.confirmPassword} onChange={handleChange} onKeyDown={handleKeyDownNoSpaces} autoComplete="new-password" size="md" height="42px" borderRadius="lg" w="100%" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: 'gray.400' }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement h="42px" width="3rem" right="0">
                       <IconButton aria-label={showPassword ? 'Hide password' : 'Show password'} icon={showPassword ? <ViewOffIcon /> : <ViewIcon />} onClick={() => setShowPassword(!showPassword)} variant="ghost" color="gray.500" _hover={{ bg: 'gray.100', color: 'gray.800' }} size="sm" />
                     </InputRightElement>

@@ -104,9 +104,21 @@ const Home = () => {
     });
   };
 
+  const handleKeyDownNoSpaces = (e) => {
+    if (e.key === ' ') {
+      e.preventDefault();
+    }
+  };
+
   const handleInputChange = (e) => {
     const { id, value } = e.target;
-    setFormData((prev) => ({ ...prev, [id]: value }));
+    let cleanValue = value;
+    if (id === 'mobileNumber') {
+      cleanValue = value.replace(/\s+/g, '').replace(/\D/g, '').slice(0, 10);
+    } else if (id === 'password') {
+      cleanValue = value.replace(/\s+/g, '');
+    }
+    setFormData((prev) => ({ ...prev, [id]: cleanValue }));
   };
 
   const handleLogin = async (e) => {
@@ -268,7 +280,7 @@ const Home = () => {
                     <Select id="countryCode" value={formData.countryCode} onChange={handleInputChange} width="100px" height="42px" fontSize="md" borderRightRadius="0" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA", zIndex: 1 }} sx={{ '> option': { background: 'white', color: 'black' } }}>
                       <option value="+91">+91</option>
                     </Select>
-                    <Input id="mobileNumber" type="tel" placeholder="Enter mobile number" height="42px" fontSize="md" flex={1} w="full" borderLeftRadius="0" borderLeft="none" pattern="[0-9]{10}" maxLength="10" value={formData.mobileNumber} onChange={handleInputChange} bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: "gray.400" }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA", zIndex: 1 }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
+                    <Input id="mobileNumber" type="tel" placeholder="Enter mobile number" height="42px" fontSize="md" flex={1} w="full" borderLeftRadius="0" borderLeft="none" pattern="[0-9]{10}" maxLength="10" value={formData.mobileNumber} onChange={handleInputChange} onKeyDown={handleKeyDownNoSpaces} bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: "gray.400" }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA", zIndex: 1 }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                   </Flex>
                   {errors.mobileNumber && <FormErrorMessage>{errors.mobileNumber}</FormErrorMessage>}
                 </FormControl>
@@ -281,7 +293,7 @@ const Home = () => {
                     <InputLeftElement pointerEvents="none" height="42px">
                       <FaLock color="gray.400" />
                     </InputLeftElement>
-                    <Input id="password" type={show ? "text" : "password"} placeholder="Enter your password" height="42px" fontSize="md" w="100%" borderRadius="lg" value={formData.password} onChange={handleInputChange} pl="10" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: "gray.400" }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
+                    <Input id="password" type={show ? "text" : "password"} placeholder="Enter your password" height="42px" fontSize="md" w="100%" borderRadius="lg" value={formData.password} onChange={handleInputChange} onKeyDown={handleKeyDownNoSpaces} pl="10" pr="3rem" bg="white" color="gray.800" border="1px solid" borderColor="gray.200" _placeholder={{ color: "gray.400" }} _focus={{ borderColor: "purple.400", boxShadow: "0 0 0 1px #9F7AEA" }} sx={{ '&:-webkit-autofill': { WebkitBoxShadow: '0 0 0 30px white inset !important', WebkitTextFillColor: '#1A202C !important', transition: 'background-color 5000s ease-in-out 0s' } }} />
                     <InputRightElement height="42px" width="3rem" right="0">
                       <IconButton size="sm" onClick={() => setShow(!show)} icon={show ? <ViewOffIcon /> : <ViewIcon />} variant="ghost" color="gray.500" _hover={{ color: "gray.800", bg: "gray.100" }} aria-label={show ? "Hide password" : "Show password"} />
                     </InputRightElement>
