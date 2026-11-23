@@ -4,7 +4,7 @@ copyright: Copyright © 2026 Innotrat Labs
 electronDist: node_modules/electron/dist
 npmRebuild: false
 asar: true
-compression: store
+compression: maximum
 
 extraMetadata:
   dependencies: {}
@@ -16,6 +16,9 @@ directories:
 files:
   - dist/**/*
   - electron/**/*
+  - "!electron/dev-runner.js"
+  - "!electron/build-win.js"
+  - "!electron/package-app.js"
   - package.json
 
 extraResources:
@@ -24,10 +27,13 @@ extraResources:
     filter:
       - "**/*"
       - "!__pycache__/**"
+      - "!*.pyc"
   - from: main/
     to: main/
     filter:
       - "**/*"
+      - "!*.pdf"
+      - "!*.log"
   - from: managed_components/
     to: managed_components/
     filter:

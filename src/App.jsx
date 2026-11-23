@@ -35,22 +35,8 @@ const createSafeHTML5Backend = (manager, context, options) => {
   return backend;
 };
 
-// Eagerly loaded core / lightweight components
+// Eagerly loaded core / initial screen
 import Home from "./components/Home";
-import Feedback from "./components/Feedback";
-import Template from "./components/Template";
-import DefineProduct from "./components/DefineProduct";
-import TextBox from "./components/TextBox";
-import FileUpload from "./components/FileUpload";
-import ForgotPassword from "./components/ForgotPassword";
-import CreateAccount from "./components/CreateAccount";
-import SimulationPopup from "./components/SimulationPopup";
-import DefineProductOne from "./components/DefineProductOne";
-import DefineProductTwo from "./components/DefineProductTwo";
-import FileExplorerOne from "./components/FileExplorerOne";
-import Logout from "./components/Logout";
-import UserButton from "./components/UserButton";
-import Toggle from "./components/Toggle/Toggle";
 
 // Resilient lazy loader with automatic retry on dynamic import failure / HMR refresh
 const lazyWithRetry = (componentImport) =>
@@ -64,7 +50,22 @@ const lazyWithRetry = (componentImport) =>
     }
   });
 
-// Lazy-loaded heavy components for instant app startup & route transition performance
+// Lazy-loaded secondary & heavy components for instant app startup & route transition performance
+const CreateAccount = lazyWithRetry(() => import("./components/CreateAccount"));
+const ForgotPassword = lazyWithRetry(() => import("./components/ForgotPassword"));
+const Feedback = lazyWithRetry(() => import("./components/Feedback"));
+const Template = lazyWithRetry(() => import("./components/Template"));
+const DefineProduct = lazyWithRetry(() => import("./components/DefineProduct"));
+const TextBox = lazyWithRetry(() => import("./components/TextBox"));
+const FileUpload = lazyWithRetry(() => import("./components/FileUpload"));
+const SimulationPopup = lazyWithRetry(() => import("./components/SimulationPopup"));
+const DefineProductOne = lazyWithRetry(() => import("./components/DefineProductOne"));
+const DefineProductTwo = lazyWithRetry(() => import("./components/DefineProductTwo"));
+const FileExplorerOne = lazyWithRetry(() => import("./components/FileExplorerOne"));
+const Logout = lazyWithRetry(() => import("./components/Logout"));
+const UserButton = lazyWithRetry(() => import("./components/UserButton"));
+const Toggle = lazyWithRetry(() => import("./components/Toggle/Toggle"));
+
 const CodeEditor = lazyWithRetry(() => import("./components/CodeEditor"));
 const BlockDiagramTest = lazyWithRetry(() => import("./components/BlockDiagramTest"));
 const FlowchartTest = lazyWithRetry(() => import("./components/FlowchartTest"));

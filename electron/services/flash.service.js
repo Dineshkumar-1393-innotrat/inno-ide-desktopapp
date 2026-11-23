@@ -397,6 +397,26 @@ export class FlashService {
     }, 1500);
   }
 
+  stopPortMonitoring() {
+    if (this.portMonitorInterval) {
+      clearInterval(this.portMonitorInterval);
+      this.portMonitorInterval = null;
+      logger.info('Port monitoring stopped.');
+    }
+  }
+
+  cleanup() {
+    this.stopPortMonitoring();
+    if (this.pipelineProcess) {
+      try { this.pipelineProcess.kill(); } catch (_) {}
+      this.pipelineProcess = null;
+    }
+    if (this.monitorProcess) {
+      try { this.monitorProcess.kill(); } catch (_) {}
+      this.monitorProcess = null;
+    }
+  }
+
   async detectPorts(getMainWindow, verbose = false) {
     const ports = await serialService.listPorts();
 

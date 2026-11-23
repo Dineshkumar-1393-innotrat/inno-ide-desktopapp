@@ -195,5 +195,47 @@ export default defineConfig({
         }
       }
     }
+  },
+  build: {
+    target: "esnext",
+    minify: "esbuild",
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@dytesdk')) {
+              return 'vendor-dyte';
+            }
+            if (id.includes('monaco-editor') || id.includes('@monaco-editor')) {
+              return 'vendor-monaco';
+            }
+            if (id.includes('reactflow') || id.includes('@reactflow')) {
+              return 'vendor-flow';
+            }
+            if (id.includes('recharts') || id.includes('d3')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('@mui') || id.includes('@radix-ui')) {
+              return 'vendor-mui';
+            }
+            if (id.includes('bootstrap')) {
+              return 'vendor-bootstrap';
+            }
+            if (
+              id.includes('react') ||
+              id.includes('@chakra-ui') ||
+              id.includes('@emotion') ||
+              id.includes('framer-motion') ||
+              id.includes('react-dnd') ||
+              id.includes('dnd-core')
+            ) {
+              return 'vendor-ui';
+            }
+          }
+        }
+      }
+    }
   }
 });

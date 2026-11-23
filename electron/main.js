@@ -9,7 +9,25 @@ import { flashService } from './services/flash.service.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Performance switches: optimize V8 memory & caching for desktop execution
+app.commandLine.appendSwitch('disable-http-cache', 'false');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096');
+
+// Ensure single instance lock so COM ports and flash processes are never locked by a duplicate process
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
 let mainWindow = null;
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
 
 function getMainWindow() {
   return mainWindow;
@@ -148,4 +166,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  try {
+    flashService.cleanup();
+  } catch (_) {}
 });

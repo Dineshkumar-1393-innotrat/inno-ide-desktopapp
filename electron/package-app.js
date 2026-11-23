@@ -26,9 +26,15 @@ if (fs.existsSync(stagingDir)) {
 }
 fs.mkdirSync(stagingDir, { recursive: true });
 
-// Copy dist and electron
+// Copy dist and electron (excluding development / packaging scripts)
 fs.cpSync(path.join(rootDir, 'dist'), path.join(stagingDir, 'dist'), { recursive: true });
-fs.cpSync(path.join(rootDir, 'electron'), path.join(stagingDir, 'electron'), { recursive: true });
+fs.cpSync(path.join(rootDir, 'electron'), path.join(stagingDir, 'electron'), {
+  recursive: true,
+  filter: (src) => {
+    const base = path.basename(src);
+    return !['package-app.js', 'build-win.js', 'dev-runner.js'].includes(base);
+  }
+});
 
 // Minimal runtime package.json
 const runtimePkg = {
@@ -63,8 +69,8 @@ if (fs.existsSync(defaultAppAsar)) {
 // 4. Copy extra resources (python, main, managed_components) into resources/
 console.log('4. Copying extra resources...');
 const extraResources = [
-  { from: 'python', filter: (name) => name !== '__pycache__' },
-  { from: 'main', filter: null },
+  { from: 'python', filter: (name) => name !== '__pycache__' && !name.endsWith('.pyc') },
+  { from: 'main', filter: (name) => !name.endsWith('.pdf') && !name.endsWith('.log') },
   { from: 'managed_components', filter: null },
 ];
 
