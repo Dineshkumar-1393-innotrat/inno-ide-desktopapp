@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
+import url, { fileURLToPath } from 'url';
 import { logger } from './utils/logger.js';
 import { registerAllIPCHandlers } from './ipc/index.js';
 import { setupApplicationMenu } from './menu.js';
@@ -151,29 +151,36 @@ function createWindow() {
       logger.error(`Failed to load dev server URL ${devUrl}:`, err.message);
     });
   } else {
-    const appPath = app.getAppPath();
-    const candidatePaths = [
-      path.join(appPath, 'dist/index.html'),
-      path.join(__dirname, '../dist/index.html'),
-      path.join(process.resourcesPath || '', 'app.asar/dist/index.html'),
-      path.join(process.resourcesPath || '', 'app/dist/index.html')
-    ];
+    const loadProductionHTML = (attempt = 1) => {
+      const appPath = app.getAppPath();
+      const candidatePaths = [
+        path.join(appPath, 'dist', 'index.html'),
+        path.join(__dirname, '..', 'dist', 'index.html'),
+        path.join(process.resourcesPath || '', 'app.asar', 'dist', 'index.html'),
+        path.join(process.resourcesPath || '', 'app', 'dist', 'index.html')
+      ];
 
-    let targetPath = candidatePaths[0];
-    for (const p of candidatePaths) {
-      if (fs.existsSync(p)) {
-        targetPath = p;
-        break;
+      let targetPath = candidatePaths[0];
+      for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+          targetPath = p;
+          break;
+        }
       }
-    }
 
-    logger.info(`Loading production HTML: ${targetPath}`);
-    mainWindow.loadFile(targetPath).catch(err => {
-      logger.error(`Failed to load production HTML ${targetPath}:`, err.message);
-      mainWindow.loadFile('dist/index.html').catch(err2 => {
-        logger.error(`Fallback loadFile('dist/index.html') also failed:`, err2.message);
+      const fileUrl = url.pathToFileURL(targetPath).href;
+      logger.info(`Loading production HTML: ${fileUrl} (attempt ${attempt})`);
+
+      mainWindow.loadURL(fileUrl).catch(err => {
+        logger.error(`Failed to load production HTML (attempt ${attempt}): ${err.message}`);
+        if (attempt < 3) {
+          logger.info(`Retrying production HTML load in 600ms...`);
+          setTimeout(() => loadProductionHTML(attempt + 1), 600);
+        }
       });
-    });
+    };
+
+    loadProductionHTML();
   }
 
   mainWindow.on('closed', () => {

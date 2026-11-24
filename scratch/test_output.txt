@@ -1,0 +1,6 @@
+--- START TEST ---
+Testing asarPath: C:\Users\Dell 5530\AppData\Local\Programs\InnoIDE\resources\app.asar\dist\index.html
+fs.existsSync(asarPath): true
+Attempting win.loadFile(asarPath)...
+win.loadFile(asarPath) SUCCEEDED!
+Attempting win.loadURL(fileUrl): file:///C:/Users/Dell%205530/AppData/Local/Programs/InnoIDE/resources/app.asar/dist/index.html
