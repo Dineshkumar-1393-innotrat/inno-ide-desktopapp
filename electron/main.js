@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, shell } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { logger } from './utils/logger.js';
 import { registerAllIPCHandlers } from './ipc/index.js';
@@ -13,21 +14,22 @@ const __dirname = path.dirname(__filename);
 app.commandLine.appendSwitch('disable-http-cache', 'false');
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096');
 
-// Ensure single instance lock so COM ports and flash processes are never locked by a duplicate process
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
-if (!gotSingleInstanceLock) {
-  app.quit();
-  process.exit(0);
-}
-
 let mainWindow = null;
 
-app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+// In packaged mode, ensure single instance lock so COM ports and flash processes are never locked by a duplicate process
+if (app.isPackaged) {
+  const gotSingleInstanceLock = app.requestSingleInstanceLock();
+  if (!gotSingleInstanceLock) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+    });
   }
-});
+}
 
 function getMainWindow() {
   return mainWindow;
@@ -40,6 +42,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 700,
     title: 'InnoIDE Desktop',
+    backgroundColor: '#0f172a',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -48,6 +51,19 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false
     }
+  });
+
+  // Log renderer console messages and lifecycle events to persistent log
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    logger.info(`[Renderer Console L${level}] ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    logger.error(`[Renderer Load Fail] ${errorCode}: ${errorDescription} (${validatedURL})`);
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    logger.error(`[Renderer Process Gone] reason: ${details.reason}, exitCode: ${details.exitCode}`);
   });
 
   const standardChromeUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
@@ -135,9 +151,28 @@ function createWindow() {
       logger.error(`Failed to load dev server URL ${devUrl}:`, err.message);
     });
   } else {
-    const indexPath = path.join(__dirname, '../dist/index.html');
-    mainWindow.loadFile(indexPath).catch(err => {
-      logger.error(`Failed to load production HTML ${indexPath}:`, err.message);
+    const appPath = app.getAppPath();
+    const candidatePaths = [
+      path.join(appPath, 'dist/index.html'),
+      path.join(__dirname, '../dist/index.html'),
+      path.join(process.resourcesPath || '', 'app.asar/dist/index.html'),
+      path.join(process.resourcesPath || '', 'app/dist/index.html')
+    ];
+
+    let targetPath = candidatePaths[0];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        targetPath = p;
+        break;
+      }
+    }
+
+    logger.info(`Loading production HTML: ${targetPath}`);
+    mainWindow.loadFile(targetPath).catch(err => {
+      logger.error(`Failed to load production HTML ${targetPath}:`, err.message);
+      mainWindow.loadFile('dist/index.html').catch(err2 => {
+        logger.error(`Fallback loadFile('dist/index.html') also failed:`, err2.message);
+      });
     });
   }
 

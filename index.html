@@ -6,10 +6,15 @@
   <link rel="icon" type="image/svg+xml" href="/ide.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Innotrat Labs</title>
-  <!-- <script src="https://cdn.dyte.io/v1.31.0/dyte.js"></script> -->
-  <!-- <script src="https://cdn.dyte.io/sdk/v1/dyte.js"></script> -->
   <!-- <script src="https://cdn.dyte.io/web-core/v1.34.0/dyte.js"></script> -->
-  <script src="https://cdn.dyte.io/web-core/v1.34.0/dyte.js"></script>
+  <script>
+    window.addEventListener('error', function(e) {
+      console.error('[Window Error]:', e.message, e.filename, e.lineno, e.colno, e.error);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('[Unhandled Rejection]:', e.reason);
+    });
+  </script>
 </head>
 
 <body>

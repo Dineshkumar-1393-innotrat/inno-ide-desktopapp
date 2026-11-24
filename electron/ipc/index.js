@@ -39,7 +39,7 @@ import {
   formatDistance,
   convertThresholdToMeters,
   validateGpsCoordinates
-} from '../../src/components/esp32/locationOtpService.js';
+} from '../services/locationOtp.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -172,9 +172,18 @@ let remoteTunnelProvider = '';
 let tunnelStartingPromise = null;
 let globalGetMainWindow = null;
 
+function getTunnelStatusFilePath() {
+  const baseDir = app.isPackaged ? app.getPath('userData') : path.resolve(__dirname, '../../');
+  const scratchDir = path.join(baseDir, 'scratch');
+  if (!fs.existsSync(scratchDir)) {
+    try { fs.mkdirSync(scratchDir, { recursive: true }); } catch (_) {}
+  }
+  return path.join(scratchDir, 'active_tunnel.json');
+}
+
 function saveTunnelStatus(active, url, provider) {
   try {
-    const statusFile = path.join(__dirname, '../../scratch/active_tunnel.json');
+    const statusFile = getTunnelStatusFilePath();
     if (!active && fs.existsSync(statusFile)) {
       try {
         const cur = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
@@ -217,7 +226,7 @@ async function startRemoteTunnel(port = currentCompanionPort, forceRestart = fal
   // Check if Cloud Tunnel Daemon already created an active, fresh tunnel in scratch/active_tunnel.json
   if (!forceRestart) {
     try {
-      const statusFile = path.join(__dirname, '../../scratch/active_tunnel.json');
+      const statusFile = getTunnelStatusFilePath();
       if (fs.existsSync(statusFile)) {
         const raw = fs.readFileSync(statusFile, 'utf8');
         const data = JSON.parse(raw);
@@ -1481,7 +1490,7 @@ export function registerAllIPCHandlers(getMainWindow) {
 
   ipcMain.handle('app:get-remote-tunnel', async () => {
     try {
-      const statusFile = path.join(__dirname, '../../scratch/active_tunnel.json');
+      const statusFile = getTunnelStatusFilePath();
       if (fs.existsSync(statusFile)) {
         const raw = fs.readFileSync(statusFile, 'utf8');
         const data = JSON.parse(raw);

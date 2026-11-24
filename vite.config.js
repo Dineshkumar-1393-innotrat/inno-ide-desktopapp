@@ -217,9 +217,6 @@ export default defineConfig({
             if (id.includes('recharts') || id.includes('d3')) {
               return 'vendor-charts';
             }
-            if (id.includes('@mui') || id.includes('@radix-ui')) {
-              return 'vendor-mui';
-            }
             if (id.includes('bootstrap')) {
               return 'vendor-bootstrap';
             }
@@ -227,6 +224,8 @@ export default defineConfig({
               id.includes('react') ||
               id.includes('@chakra-ui') ||
               id.includes('@emotion') ||
+              id.includes('@mui') ||
+              id.includes('@radix-ui') ||
               id.includes('framer-motion') ||
               id.includes('react-dnd') ||
               id.includes('dnd-core')
